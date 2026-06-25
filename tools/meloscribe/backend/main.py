@@ -1162,7 +1162,7 @@ async def update_settings(request: Request):
 # -------------------------------------------------------------------
 @app.get("/api/website/songs")
 def get_website_songs():
-    songs_path = r"c:\Dev\meloscribe website\website\src\data\songs.json"
+    songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
     if not os.path.exists(songs_path):
         return []
     try:
@@ -1177,7 +1177,7 @@ def get_website_songs():
 async def update_website_songs(request: Request):
     try:
         songs_list = await request.json()
-        songs_path = r"c:\Dev\meloscribe website\website\src\data\songs.json"
+        songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
         
         with open(songs_path, "w", encoding="utf-8") as f:
             json.dump(songs_list, f, indent=2, ensure_ascii=False)
