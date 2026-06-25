@@ -1,0 +1,81 @@
+# --- PYTHON & VIRTUAL ENVIRONMENTS ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# --- LARGE MEDIA OUTPUT (generated) ---
+# Keep images/audio/video that are part of the app (icons/assets) in Git.
+# Only ignore rendered/exported output folders.
+/Covers/
+/TikToks/
+/Keysight export/
+
+# --- CURSOR & IDE SETTINGS ---
+.cursor/
+.vscode/
+.history/
+*.log
+
+# --- OS CLUTTER (Windows & OneDrive) ---
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+*.tmp
+*.lock
+
+# --- ARCHIVES / BUILDS ---
+*.zip
+
+# --- PROJECT ARTIFACTS ---
+Packages/
+packages/
+
+# --- TOOLING ARTIFACTS (generated) ---
+*.lnk
+tools/ngrok/ngrok.exe
+tools/trash/
+
+# Node / frontend build artifacts
+**/node_modules/
+**/dist/
+.npm-cache/
+
+# Browser profile / automation state (large + noisy)
+tools/meloscribe/backend/kofi_bot_profile/
+
+# Local DBs / secrets (never commit)
+tools/meloscribe/backend/*.db
+tools/meloscribe/backend/*.sqlite
+tools/meloscribe/backend/*.sqlite3
+tools/meloscribe/backend/*tokens*.json
+tools/meloscribe/backend/*token*.json
+tools/meloscribe/backend/*secrets*.json
+tools/meloscribe/backend/*client_secret*.json
+tools/meloscribe/backend/*cookie*.txt
+tools/meloscribe/backend/settings.json
+
+# Debug / temp exports
+tools/meloscribe/backend/*.csv
+tools/meloscribe/backend/*.html
+tools/meloscribe/backend/*temp*
+
+# --- AUSNAHMEN ---
+# Wir behalten deine Regeln und Baupläne
+!.cursorrules
+!README.md
+!tools/meloscribe/backend/yt_client_secret.json
+!tools/meloscribe/backend/yt_tokens.json
+!tools/meloscribe/backend/ig_tokens.json
+!tools/meloscribe/backend/tiktok_tokens.json
+!tools/meloscribe/backend/threads_tokens.json
+!tools/meloscribe/backend/kofi_cookie.txt
+!tools/meloscribe/backend/settings.json
+
+# Keys and credentials
+*.key
+.gemini/

@@ -1,0 +1,33 @@
+# --- Binaries & Build-Artefakte ---
+*.jar
+*.exe
+*.dll
+*.bin
+*.out
+*.log
+*.png
+*.jpg
+*.gif
+
+# --- Minecraft Spezifisch ---
+/build
+/run
+/bin
+/logs
+.gradle
+.idea
+.vscode
+
+# --- Web & Electron/React Spezifisch ---
+node_modules
+dist
+build
+.next
+.output
+.parcel-cache
+.cache
+
+# --- OS & Tooling ---
+.DS_Store
+Thumbs.db
+.git
