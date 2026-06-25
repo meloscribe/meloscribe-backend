@@ -94,10 +94,10 @@ The domain `meloscribe.dev` is registered on **Spaceship**. The domain nameserve
 - **OCI Uploader**: `oci-uploader.service`
 
 **Manual Deployment Flow**:
-Deployments are pulled manually on the server from the `https://github.com/Ventoba/meloscribe.git` repository:
+Deployments are pulled manually on the server from the public `https://github.com/meloscribe/meloscribe-backend.git` repository:
 ```bash
 cd /home/ubuntu/meloscribe
 git pull origin main
-sudo systemctl restart meloscribe-backend
+sudo systemctl restart meloscribe-backend oci-uploader
 ```
 
