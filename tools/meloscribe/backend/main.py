@@ -2449,20 +2449,18 @@ def verify_download(checkout_id: str):
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
     r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
     r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download Verify] R2 credentials missing, using demo redirect fallback.")
         return {
-            "download_url": f"https://example.com/demo-packages/{song_name}_Full_Package.zip",
+            "files": [],
             "message": "Demo mode: R2 credentials are not configured in settings.json"
         }
         
     try:
         import boto3
         from botocore.config import Config
-        
-        package_key = f"{song_name} Full Package.zip"
         
         s3 = boto3.client(
             's3',
@@ -2471,17 +2469,224 @@ def verify_download(checkout_id: str):
             aws_secret_access_key=r2_secret_key,
             config=Config(signature_version='s3v4')
         )
+
+        # Individual files in the song folder on R2:
+        #   {song_name}/{song_name}.pdf
+        #   {song_name}/{song_name}.mid
+        #   {song_name}/{song_name} slow.mid
+        #   {song_name}/{song_name}.mp4
+        #   {song_name}/{song_name} slow.mp4
+        file_specs = [
+            {"key": f"{song_name}/{song_name}.pdf",       "label": "Sheet Music (PDF)",          "type": "pdf"},
+            {"key": f"{song_name}/{song_name}.mid",       "label": "MIDI – Normal Speed",         "type": "midi"},
+            {"key": f"{song_name}/{song_name} slow.mid",  "label": "MIDI – Slow Practice",        "type": "midi"},
+            {"key": f"{song_name}/{song_name}.mp4",       "label": "Practice Video – Normal Speed", "type": "video"},
+            {"key": f"{song_name}/{song_name} slow.mp4",  "label": "Practice Video – Slow",       "type": "video"},
+        ]
+
+        files = []
+        for spec in file_specs:
+            try:
+                # Verify the object exists before generating a URL
+                s3.head_object(Bucket=r2_bucket, Key=spec["key"])
+                url = s3.generate_presigned_url(
+                    ClientMethod='get_object',
+                    Params={'Bucket': r2_bucket, 'Key': spec["key"]},
+                    ExpiresIn=900  # 15 minutes
+                )
+                files.append({"label": spec["label"], "url": url, "type": spec["type"]})
+            except Exception:
+                # File doesn't exist in R2 yet — skip gracefully
+                pass
         
-        presigned_url = s3.generate_presigned_url(
-            ClientMethod='get_object',
-            Params={'Bucket': r2_bucket, 'Key': package_key},
-            ExpiresIn=7200
-        )
+        if not files:
+            return JSONResponse(content={"error": "No download files found for this purchase. Please contact support."}, status_code=404)
         
-        return {"download_url": presigned_url}
+        return {"files": files, "song_name": song_name}
     except Exception as e:
-        print(f"Failed to generate presigned R2 URL: {e}")
-        return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)
+        print(f"Failed to generate presigned R2 URLs: {e}")
+        return JSONResponse(content={"error": f"Failed to generate download URLs: {str(e)}"}, status_code=500)
+
+
+# -------------------------------------------------------------------
+# Notify-Me System — E-Mail Opt-In for new sheet music alerts
+# -------------------------------------------------------------------
+
+class NotifySubscribeRequest(BaseModel):
+    email: str
+
+def _send_confirmation_email(email: str, token: str):
+    """Send double opt-in confirmation email via Resend."""
+    api_key = settings.get("resend_api_key", "")
+    if not api_key:
+        print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping email.")
+        return False
+    
+    confirm_url = f"https://api.meloscribe.dev/api/notify/confirm?token={token}"
+    unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
+    
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
+    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  </div>
+  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
+      Thanks for your interest! Please confirm that you want to receive email notifications
+      whenever new sheet music or practice assets are dropped on meloscribe.dev.
+    </p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the link below to confirm your email:</p>
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="{confirm_url}" style="display: inline-block; background: linear-gradient(135deg, #00f5d4, #ff4d8d); color: #0a0a0f; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none;">Confirm Subscription</a>
+    </div>
+    <p style="color: #888; font-size: 13px; text-align: center;">
+      If you didn&apos;t request this, you can safely ignore this email. You won&apos;t be subscribed unless you click the link above.
+    </p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Best,<br>The meloscribe team</p>
+  </div>
+  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
+    Unsubscribe anytime: <a href="{unsubscribe_url}" style="color: #555;">click here</a>
+  </p>
+</body>
+</html>
+"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "meloscribe <info@meloscribe.dev>",
+                "to": [email],
+                "subject": "Confirm your sheet music notifications — meloscribe",
+                "html": html_body,
+            },
+            timeout=10
+        )
+        if resp.status_code in (200, 201):
+            print(f"[Notify] Confirmation email sent to {email}")
+            return True
+        else:
+            print(f"[Notify] Resend API error {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[Notify] Email send failed: {e}")
+        return False
+
+
+@app.post("/api/notify/subscribe")
+async def notify_subscribe(req: NotifySubscribeRequest):
+    """Register email for sheet music notifications. Sends a double opt-in confirmation."""
+    import uuid as _uuid
+    
+    email = req.email.strip().lower()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return JSONResponse(content={"error": "Invalid email address."}, status_code=400)
+    
+    token = _uuid.uuid4().hex
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL")
+        c = conn.cursor()
+        
+        # Check if already active
+        c.execute("SELECT status FROM notify_subscribers WHERE email = ?", (email,))
+        row = c.fetchone()
+        if row:
+            if row[0] == "active":
+                return {"status": "already_active", "message": "This email is already subscribed."}
+            else:
+                # Re-send confirmation (update token)
+                c.execute("UPDATE notify_subscribers SET token = ?, status = 'pending' WHERE email = ?", (token, email))
+        else:
+            c.execute(
+                "INSERT INTO notify_subscribers (email, token, status) VALUES (?, ?, 'pending')",
+                (email, token)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
+    
+    # Send confirmation email in background
+    def _send():
+        _send_confirmation_email(email, token)
+    threading.Thread(target=_send, daemon=True).start()
+    
+    return {"status": "pending", "message": "Confirmation email sent. Please check your inbox."}
+
+
+@app.get("/api/notify/confirm")
+def notify_confirm(token: str):
+    """Activate a subscriber after clicking the confirmation link."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute(
+            "UPDATE notify_subscribers SET status = 'active', confirmed_at = CURRENT_TIMESTAMP WHERE token = ?",
+            (token,)
+        )
+        if c.rowcount == 0:
+            conn.close()
+            return HTMLResponse(content="""
+<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
+<h2 style="color:#ff4d8d">Invalid or expired confirmation link.</h2>
+<p><a href="https://meloscribe.dev" style="color:#00f5d4">Back to meloscribe.dev</a></p>
+</body></html>""", status_code=404)
+        conn.commit()
+        conn.close()
+        return HTMLResponse(content="""
+<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
+<h2 style="color:#00f5d4">You're in!</h2>
+<p>You'll be notified when new sheet music drops.</p>
+<p><a href="https://meloscribe.dev" style="color:#00f5d4">Go to meloscribe.dev</a></p>
+</body></html>""")
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/api/notify/unsubscribe")
+def notify_unsubscribe(token: str):
+    """Remove a subscriber immediately by token. No login required."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM notify_subscribers WHERE token = ?", (token,))
+        found = c.rowcount > 0
+        conn.commit()
+        conn.close()
+        return HTMLResponse(content=f"""
+<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
+<h2 style="color:{'#00f5d4' if found else '#ff4d8d'}">{'Unsubscribed.' if found else 'Link not found.'}</h2>
+<p>{'You will no longer receive notifications.' if found else 'This link may have already been used.'}</p>
+<p><a href="https://meloscribe.dev" style="color:#00f5d4">Back to meloscribe.dev</a></p>
+</body></html>""")
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.get("/api/notify/subscribers")
+def notify_list_subscribers():
+    """Admin endpoint: list all active subscribers."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT email, status, created_at, confirmed_at FROM notify_subscribers ORDER BY created_at DESC")
+        rows = [{"email": r[0], "status": r[1], "created_at": r[2], "confirmed_at": r[3]} for r in c.fetchall()]
+        conn.close()
+        return {"subscribers": rows, "total": len(rows), "active": sum(1 for r in rows if r["status"] == "active")}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/public/stats")
 def get_public_stats():

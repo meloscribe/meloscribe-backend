@@ -231,6 +231,18 @@ def init_db():
         except Exception:
             pass
 
+    # ── NOTIFY SUBSCRIBERS (email opt-in for new sheet music alerts) ──────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS notify_subscribers (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        email      TEXT UNIQUE NOT NULL,
+        token      TEXT UNIQUE NOT NULL,
+        status     TEXT NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        confirmed_at TIMESTAMP
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")
