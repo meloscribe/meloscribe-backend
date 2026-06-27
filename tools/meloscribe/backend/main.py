@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -42,6 +42,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+from fastapi.staticfiles import StaticFiles
+public_dir = r"c:\Dev\meloscribe-frontend\website\public"
+if os.path.exists(public_dir):
+    app.mount("/public", StaticFiles(directory=public_dir), name="public")
+    print(f"[FastAPI] Mounted {public_dir} under /public")
 
 import collections
 from datetime import datetime
@@ -1165,14 +1171,29 @@ def get_website_songs():
         log_error("Website Songs", f"Failed to load songs: {e}")
         return []
 
+def run_git_push():
+    try:
+        import subprocess
+        frontend_dir = r"C:\Dev\meloscribe-frontend"
+        if os.path.exists(frontend_dir):
+            subprocess.run(["git", "add", "website/src/data/songs.json"], cwd=frontend_dir, check=True)
+            subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True)
+            subprocess.run(["git", "push"], cwd=frontend_dir, check=True)
+            print("[Git Sync] Automatically pushed songs.json update to GitHub.")
+    except Exception as git_err:
+        print(f"[Git Sync] Failed to auto-push: {git_err}")
+
 @app.post("/api/website/songs")
-async def update_website_songs(request: Request):
+async def update_website_songs(request: Request, background_tasks: BackgroundTasks):
     try:
         songs_list = await request.json()
         songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
         
         with open(songs_path, "w", encoding="utf-8") as f:
             json.dump(songs_list, f, indent=2, ensure_ascii=False)
+            
+        # Push to GitHub in the background to prevent blocking the Desktop App UI
+        background_tasks.add_task(run_git_push)
             
         return {"status": "success"}
     except Exception as e:
@@ -2900,6 +2921,16 @@ def notify_unsubscribe(token: str):
 @app.get("/api/notify/subscribers")
 def notify_list_subscribers():
     """Admin endpoint: list all active subscribers."""
+    import platform
+    if platform.system() == "Windows":
+        try:
+            import requests
+            response = requests.get("https://api.meloscribe.dev/api/notify/subscribers", timeout=3.5)
+            if response.status_code == 200:
+                return response.json()
+        except Exception as proxy_err:
+            print(f"[Subscribers Proxy] Proxy failed, falling back to local DB: {proxy_err}")
+
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -2979,6 +3010,12 @@ def get_preview_video(song_name: str):
             config=Config(signature_version='s3v4')
         )
 
+        try:
+            s3.head_object(Bucket=r2_bucket, Key=file_key)
+        except Exception as head_err:
+            print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}': {head_err}")
+            return JSONResponse(content={"error": "Preview video not found in storage"}, status_code=404)
+
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',
             Params={'Bucket': r2_bucket, 'Key': file_key},
@@ -3020,7 +3057,7 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
+    <h1 style="font-size: 28px; font-weight: 800; background: linear-gradient(to right, #00f5d4, #ff007f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
