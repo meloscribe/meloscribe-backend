@@ -2542,7 +2542,7 @@ def _send_confirmation_email(email: str, token: str):
     </p>
     <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the link below to confirm your email:</p>
     <div style="text-align: center; margin: 28px 0;">
-      <a href="{confirm_url}" style="display: inline-block; background: linear-gradient(135deg, #00f5d4, #ff4d8d); color: #0a0a0f; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none;">Confirm Subscription</a>
+      <a href="{confirm_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Confirm Subscription</a>
     </div>
     <p style="color: #888; font-size: 13px; text-align: center;">
       If you didn&apos;t request this, you can safely ignore this email. You won&apos;t be subscribed unless you click the link above.
@@ -2637,18 +2637,141 @@ def notify_confirm(token: str):
         if c.rowcount == 0:
             conn.close()
             return HTMLResponse(content="""
-<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
-<h2 style="color:#ff4d8d">Invalid or expired confirmation link.</h2>
-<p><a href="https://meloscribe.dev" style="color:#00f5d4">Back to meloscribe.dev</a></p>
-</body></html>""", status_code=404)
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>meloscribe</title>
+  <style>
+    body {
+      background: linear-gradient(135deg, #0a0a14 0%, #050508 100%);
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 0;
+      display: flex; justify-content: center; align-items: center;
+      min-height: 100vh; overflow: hidden;
+    }
+    .glow-orb {
+      position: absolute; width: 400px; height: 400px; border-radius: 50%;
+      filter: blur(150px); z-index: 1; opacity: 0.15;
+    }
+    .orb-1 { background: #ff4d8d; top: -150px; left: -150px; }
+    .orb-2 { background: #00f5d4; bottom: -150px; right: -150px; }
+    .container {
+      background: rgba(18, 18, 28, 0.45);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px;
+      padding: 48px; text-align: center; max-width: 420px; width: 90%; z-index: 10;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      animation: fadeIn 0.6s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .title {
+      font-size: 28px; font-weight: 700; letter-spacing: 1px; margin-bottom: 24px;
+      background: linear-gradient(135deg, #ffffff 40%, #a0a0b0 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .badge {
+      display: inline-block; padding: 6px 16px; border-radius: 9999px;
+      font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(255, 77, 141, 0.1); border: 1px solid rgba(255, 77, 141, 0.25);
+      color: #ff4d8d; text-shadow: 0 0 10px rgba(255, 77, 141, 0.3); margin-bottom: 20px;
+    }
+    .desc { color: #b0b0c0; font-size: 15px; line-height: 1.6; margin-bottom: 36px; }
+    .btn {
+      display: inline-block; width: 100%; padding: 14px 0; border-radius: 12px;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #ffffff; font-weight: 700; font-size: 15px; text-decoration: none;
+      transition: all 0.3s ease;
+    }
+    .btn:hover { background: rgba(255, 255, 255, 0.15); transform: translateY(-2px); }
+  </style>
+</head>
+<body>
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="container">
+    <div class="badge">Error</div>
+    <div class="title">Expired Link</div>
+    <div class="desc">Invalid or expired confirmation link. Please request a new subscription.</div>
+    <a href="https://meloscribe.dev" class="btn">Go to meloscribe.dev</a>
+  </div>
+</body>
+</html>""", status_code=404)
         conn.commit()
         conn.close()
         return HTMLResponse(content="""
-<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
-<h2 style="color:#00f5d4">You're in!</h2>
-<p>You'll be notified when new sheet music drops.</p>
-<p><a href="https://meloscribe.dev" style="color:#00f5d4">Go to meloscribe.dev</a></p>
-</body></html>""")
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>meloscribe</title>
+  <style>
+    body {
+      background: linear-gradient(135deg, #0a0a14 0%, #050508 100%);
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 0;
+      display: flex; justify-content: center; align-items: center;
+      min-height: 100vh; overflow: hidden;
+    }
+    .glow-orb {
+      position: absolute; width: 400px; height: 400px; border-radius: 50%;
+      filter: blur(150px); z-index: 1; opacity: 0.15;
+    }
+    .orb-1 { background: #00f5d4; top: -150px; left: -150px; }
+    .orb-2 { background: #ff4d8d; bottom: -150px; right: -150px; }
+    .container {
+      background: rgba(18, 18, 28, 0.45);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px;
+      padding: 48px; text-align: center; max-width: 420px; width: 90%; z-index: 10;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      animation: fadeIn 0.6s ease-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .title {
+      font-size: 28px; font-weight: 700; letter-spacing: 1px; margin-bottom: 24px;
+      background: linear-gradient(135deg, #ffffff 40%, #a0a0b0 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .badge {
+      display: inline-block; padding: 6px 16px; border-radius: 9999px;
+      font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(0, 245, 212, 0.1); border: 1px solid rgba(0, 245, 212, 0.25);
+      color: #00f5d4; text-shadow: 0 0 10px rgba(0, 245, 212, 0.3); margin-bottom: 20px;
+    }
+    .desc { color: #b0b0c0; font-size: 15px; line-height: 1.6; margin-bottom: 36px; }
+    .btn {
+      display: inline-block; width: 100%; padding: 14px 0; border-radius: 12px;
+      background: linear-gradient(135deg, #00f5d4, #ff4d8d); color: #0a0a0f;
+      font-weight: 700; font-size: 15px; text-decoration: none;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 20px rgba(0, 245, 212, 0.2);
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(0, 245, 212, 0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="container">
+    <div class="badge">Success</div>
+    <div class="title">You're in!</div>
+    <div class="desc">You'll be notified when new sheet music and practice assets drop on meloscribe.dev.</div>
+    <a href="https://meloscribe.dev" class="btn">Go to meloscribe.dev</a>
+  </div>
+</body>
+</html>""")
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -2664,12 +2787,79 @@ def notify_unsubscribe(token: str):
         found = c.rowcount > 0
         conn.commit()
         conn.close()
+        
+        badge_text = "Unsubscribed" if found else "Not Found"
+        title_text = "Unsubscribed" if found else "Link Expired"
+        desc_text = "You will no longer receive sheet music drops or email alerts." if found else "This unsubscribe link is invalid or has already been used."
+        badge_color = "#ff4d8d" if found else "#b0b0c0"
+        badge_bg = "rgba(255, 77, 141, 0.1)" if found else "rgba(255, 255, 255, 0.05)"
+        badge_border = "rgba(255, 77, 141, 0.25)" if found else "rgba(255, 255, 255, 0.15)"
+        
         return HTMLResponse(content=f"""
-<html><body style="font-family:sans-serif;background:#0a0a0f;color:#e0e0e0;text-align:center;padding:60px">
-<h2 style="color:{'#00f5d4' if found else '#ff4d8d'}">{'Unsubscribed.' if found else 'Link not found.'}</h2>
-<p>{'You will no longer receive notifications.' if found else 'This link may have already been used.'}</p>
-<p><a href="https://meloscribe.dev" style="color:#00f5d4">Back to meloscribe.dev</a></p>
-</body></html>""")
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>meloscribe</title>
+  <style>
+    body {{
+      background: linear-gradient(135deg, #0a0a14 0%, #050508 100%);
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 0;
+      display: flex; justify-content: center; align-items: center;
+      min-height: 100vh; overflow: hidden;
+    }}
+    .glow-orb {{
+      position: absolute; width: 400px; height: 400px; border-radius: 50%;
+      filter: blur(150px); z-index: 1; opacity: 0.15;
+    }}
+    .orb-1 {{ background: #ff4d8d; top: -150px; left: -150px; }}
+    .orb-2 {{ background: #00f5d4; bottom: -150px; right: -150px; }}
+    .container {{
+      background: rgba(18, 18, 28, 0.45);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 24px;
+      padding: 48px; text-align: center; max-width: 420px; width: 90%; z-index: 10;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      animation: fadeIn 0.6s ease-out;
+    }}
+    @keyframes fadeIn {{
+      from {{ opacity: 0; transform: scale(0.95); }}
+      to {{ opacity: 1; transform: scale(1); }}
+    }}
+    .title {{
+      font-size: 28px; font-weight: 700; letter-spacing: 1px; margin-bottom: 24px;
+      background: linear-gradient(135deg, #ffffff 40%, #a0a0b0 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }}
+    .badge {{
+      display: inline-block; padding: 6px 16px; border-radius: 9999px;
+      font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+      background: {badge_bg}; border: 1px solid {badge_border};
+      color: {badge_color}; text-shadow: 0 0 10px rgba(255, 77, 141, 0.2); margin-bottom: 20px;
+    }}
+    .desc {{ color: #b0b0c0; font-size: 15px; line-height: 1.6; margin-bottom: 36px; }}
+    .btn {{
+      display: inline-block; width: 100%; padding: 14px 0; border-radius: 12px;
+      background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #ffffff; font-weight: 700; font-size: 15px; text-decoration: none;
+      transition: all 0.3s ease;
+    }}
+    .btn:hover {{ background: rgba(255, 255, 255, 0.15); transform: translateY(-2px); }}
+  </style>
+</head>
+<body>
+  <div class="glow-orb orb-1"></div>
+  <div class="glow-orb orb-2"></div>
+  <div class="container">
+    <div class="badge">{badge_text}</div>
+    <div class="title">{title_text}</div>
+    <div class="desc">{desc_text}</div>
+    <a href="https://meloscribe.dev" class="btn">Go to meloscribe.dev</a>
+  </div>
+</body>
+</html>""")
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -2695,12 +2885,12 @@ def get_public_stats():
     try:
         conn = sqlite3.connect(str(db_path))
         c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM revenue")
-        downloads = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM purchases")
+        customers = c.fetchone()[0]
         conn.close()
-        return {"downloads": downloads + 8345} # Sync offset
+        return {"customers": max(14, customers)}
     except Exception:
-        return {"downloads": 8345}
+        return {"customers": 14}
 
 # -------------------------------------------------------------------
 # Main
