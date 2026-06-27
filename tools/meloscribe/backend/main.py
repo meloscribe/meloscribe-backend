@@ -2950,6 +2950,113 @@ def get_public_stats():
     except Exception:
         return {"customers": 14, "followers": 75}
 
+
+# -------------------------------------------------------------------
+# Broadcast Newsletter for new product Drops
+# -------------------------------------------------------------------
+
+class BroadcastRequest(BaseModel):
+    title: str
+    artist: str
+    difficulty: str
+    is_condensed: bool
+    price: str
+
+def _send_new_song_notification(email: str, token: str, song_title: str, artist: str, difficulty: str, is_condensed: bool, price: str):
+    """Send a newsletter email about a new sheet music drop via Resend."""
+    api_key = settings.get("resend_api_key", "")
+    if not api_key:
+        print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping email.")
+        return False
+    
+    unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
+    sheets_url = "https://meloscribe.dev/sheets"
+    
+    format_text = "Viral Part" if is_condensed else "Full Arrangement"
+    
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
+    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  </div>
+  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
+    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; text-align: center; font-weight: 700;">🎵 New Sheet Music Released!</h2>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
+      Hey! A new piano arrangement has just been dropped on meloscribe.dev:
+    </p>
+    <div style="background: #0a0a0f; border-left: 4px solid #ff007f; padding: 16px; border-radius: 4px; margin: 24px 0;">
+      <h3 style="color: #ffffff; margin: 0 0 8px 0; font-size: 18px;">{song_title}</h3>
+      <p style="color: #888; margin: 0 0 12px 0; font-size: 14px;">by {artist}</p>
+      <div style="margin-top: 12px;">
+        <span style="display: inline-block; background: rgba(0, 245, 212, 0.1); border: 1px solid rgba(0, 245, 212, 0.4); color: #00f5d4; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin-right: 8px;">{difficulty}</span>
+        <span style="display: inline-block; background: rgba(255, 0, 127, 0.1); border: 1px solid rgba(255, 0, 127, 0.4); color: #ff007f; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin-right: 8px;">{format_text}</span>
+        <span style="display: inline-block; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #ffffff; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px;">{price}</span>
+      </div>
+    </div>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; text-align: center;">Get your PDF sheet music, MIDI, and offline practice videos now:</p>
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="{sheets_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Get Sheet Music</a>
+    </div>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>The meloscribe team</p>
+  </div>
+  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
+    Want to stop receiving these alerts? <a href="{unsubscribe_url}" style="color: #555;">Unsubscribe here</a>
+  </p>
+</body>
+</html>
+"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "meloscribe <info@meloscribe.dev>",
+                "to": [email],
+                "subject": f"New sheet music: {song_title} — meloscribe",
+                "html": html_body,
+            },
+            timeout=10
+        )
+        if resp.status_code in (200, 201):
+            print(f"[Notify] Newsletter email sent to {email}")
+            return True
+        else:
+            print(f"[Notify] Resend API error {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[Notify] Email send failed: {e}")
+        return False
+
+@app.post("/api/notify/broadcast")
+async def notify_broadcast(req: BroadcastRequest):
+    """Send new song notification to all active subscribers."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT email, token FROM notify_subscribers WHERE status = 'active'")
+        subscribers = c.fetchall()
+        conn.close()
+    except Exception as e:
+        return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
+    
+    if not subscribers:
+        return {"status": "success", "sent_count": 0, "message": "No active subscribers found."}
+        
+    sent_count = 0
+    for email, token in subscribers:
+        success = _send_new_song_notification(email, token, req.title, req.artist, req.difficulty, req.is_condensed, req.price)
+        if success:
+            sent_count += 1
+            
+    return {"status": "success", "sent_count": sent_count, "total_subscribers": len(subscribers)}
+
+
 # -------------------------------------------------------------------
 # Main
 # -------------------------------------------------------------------
