@@ -14,6 +14,16 @@ env/
 /Covers/
 /TikToks/
 /Keysight export/
+Keysight export/
+**/Keysight export/
+ShopVideos/
+**/ShopVideos/
+*.mp4
+*.wav
+*.mp3
+*.mid
+*.midi
+*.pdf
 
 # --- CURSOR & IDE SETTINGS ---
 .cursor/
