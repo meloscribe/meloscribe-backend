@@ -2355,7 +2355,7 @@ def get_order_details(hash: str):
 
 @app.get("/api/download/request")
 def request_download(hash: str, type: str):
-    if type not in ("pdf", "zip"):
+    if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
         return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
         
     db_path = Path(__file__).resolve().parent / "analytics.db"
@@ -2396,7 +2396,18 @@ def request_download(hash: str, type: str):
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download Request] R2 credentials missing, using demo redirect fallback.")
-        suffix = " Full Package.zip" if type == "zip" else ".pdf"
+        if type == "pdf":
+            suffix = f"/{song_name}.pdf"
+        elif type == "midi":
+            suffix = f"/{song_name}.mid"
+        elif type == "midi_slow":
+            suffix = f"/{song_name} slow.mid"
+        elif type == "video":
+            suffix = f"/{song_name}.mp4"
+        elif type == "video_slow":
+            suffix = f"/{song_name} slow.mp4"
+        else:
+            suffix = " Full Package.zip"
         return {
             "download_url": f"https://example.com/demo-packages/{song_name}{suffix}",
             "message": "Demo mode: R2 credentials are not configured in settings.json"
@@ -2406,7 +2417,18 @@ def request_download(hash: str, type: str):
         import boto3
         from botocore.config import Config
         
-        file_key = f"{song_name} Full Package.zip" if type == "zip" else f"{song_name}.pdf"
+        if type == "pdf":
+            file_key = f"{song_name}/{song_name}.pdf"
+        elif type == "midi":
+            file_key = f"{song_name}/{song_name}.mid"
+        elif type == "midi_slow":
+            file_key = f"{song_name}/{song_name} slow.mid"
+        elif type == "video":
+            file_key = f"{song_name}/{song_name}.mp4"
+        elif type == "video_slow":
+            file_key = f"{song_name}/{song_name} slow.mp4"
+        else:
+            file_key = f"{song_name} Full Package.zip"
         
         s3 = boto3.client(
             's3',
@@ -2736,6 +2758,18 @@ def notify_confirm(token: str):
       from { opacity: 0; transform: scale(0.95); }
       to { opacity: 1; transform: scale(1); }
     }
+    .icon-wrap {
+      margin-bottom: 24px; display: flex; justify-content: center;
+    }
+    .check-icon {
+      width: 64px; height: 64px; color: #00f5d4;
+      filter: drop-shadow(0 0 12px rgba(0, 245, 212, 0.5));
+      animation: scaleUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes scaleUp {
+      0% { transform: scale(0); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
     .title {
       font-size: 28px; font-weight: 700; letter-spacing: 1px; margin-bottom: 24px;
       background: linear-gradient(135deg, #ffffff 40%, #a0a0b0 100%);
@@ -2750,14 +2784,16 @@ def notify_confirm(token: str):
     .desc { color: #b0b0c0; font-size: 15px; line-height: 1.6; margin-bottom: 36px; }
     .btn {
       display: inline-block; width: 100%; padding: 14px 0; border-radius: 12px;
-      background: linear-gradient(135deg, #00f5d4, #ff4d8d); color: #0a0a0f;
-      font-weight: 700; font-size: 15px; text-decoration: none;
+      background: rgba(18, 18, 28, 0.45); border: 1px solid rgba(0, 245, 212, 0.45);
+      color: #00f5d4; font-weight: 700; font-size: 15px; text-decoration: none;
       transition: all 0.3s ease;
-      box-shadow: 0 4px 20px rgba(0, 245, 212, 0.2);
+      box-shadow: 0 4px 20px rgba(0, 245, 212, 0.05);
     }
     .btn:hover {
+      background: rgba(0, 245, 212, 0.1);
+      border-color: #00f5d4;
+      box-shadow: 0 0 15px rgba(0, 245, 212, 0.25);
       transform: translateY(-2px);
-      box-shadow: 0 8px 25px rgba(0, 245, 212, 0.4);
     }
   </style>
 </head>
@@ -2765,6 +2801,11 @@ def notify_confirm(token: str):
   <div class="glow-orb orb-1"></div>
   <div class="glow-orb orb-2"></div>
   <div class="container">
+    <div class="icon-wrap">
+      <svg class="check-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </div>
     <div class="badge">Success</div>
     <div class="title">You're in!</div>
     <div class="desc">You'll be notified when new sheet music and practice assets drop on meloscribe.dev.</div>
@@ -2887,10 +2928,27 @@ def get_public_stats():
         c = conn.cursor()
         c.execute("SELECT COUNT(*) FROM purchases")
         customers = c.fetchone()[0]
+        
+        # Get latest followers count sum across all platforms
+        c.execute("""
+            SELECT SUM(followers) 
+            FROM (
+                SELECT followers FROM channel_insights 
+                WHERE (platform, date) IN (
+                    SELECT platform, MAX(date) FROM channel_insights GROUP BY platform
+                )
+            )
+        """)
+        row = c.fetchone()
+        db_followers = row[0] if (row and row[0] is not None) else 0
         conn.close()
-        return {"customers": max(14, customers)}
+        
+        return {
+            "customers": max(14, customers),
+            "followers": max(75, db_followers)
+        }
     except Exception:
-        return {"customers": 14}
+        return {"customers": 14, "followers": 75}
 
 # -------------------------------------------------------------------
 # Main
