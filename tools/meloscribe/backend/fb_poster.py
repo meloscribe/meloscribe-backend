@@ -26,13 +26,13 @@ def _get_creds():
 
 
 def post_video(video_path: str, title: str, description: str,
-               condensed: bool = True, thumbnail_path: str = None,
+               format: str = "viral_part", thumbnail_path: str = None,
                publish_at_dt: datetime = None) -> bool:
     """
     Upload a video to a Facebook Page.
-    condensed=True  → Reel (no thumbnail required, uses vertical video)
-    condensed=False → Long-form video with optional thumbnail
-    publish_at_dt   → Schedule the post (must be in the future)
+    format="viral_part"       → Reel (no thumbnail required, uses vertical video)
+    format="full_arrangement"  → Long-form video with optional thumbnail
+    publish_at_dt              → Schedule the post (must be in the future)
     """
     if not os.path.exists(video_path):
         print(f"[Facebook API] ERROR: Video not found at {video_path}")
@@ -43,9 +43,10 @@ def post_video(video_path: str, title: str, description: str,
         print("[Facebook API] ERROR: No valid FB token. Run ig_setup.py first.")
         return False
 
-    print(f"\n[Facebook API] Uploading '{os.path.basename(video_path)}' as {'Reel' if condensed else 'Video'}...")
+    is_reel = (format == "viral_part")
+    print(f"\n[Facebook API] Uploading '{os.path.basename(video_path)}' as {'Reel' if is_reel else 'Video'}...")
 
-    if condensed:
+    if is_reel:
         # Upload as Reel via the /reels endpoint
         upload_url = f"{GRAPH_URL}/{page_id}/video_reels"
         params = {

@@ -359,7 +359,7 @@ class WorkflowRequest(BaseModel):
     author: str = ""
     theme: str = "warm"
     price: str = "3.00"
-    condensed: bool = True
+    format: str = "viral_part"
     shutdown: bool = False
     doKofi: bool = True
     doYoutube: bool = True
@@ -492,7 +492,7 @@ async def _run_workflow(req: WorkflowRequest):
                 steps.append((f"Portrait Video ({v_song} {vtype})", cmd_portrait))
 
                 # Generate Widescreen version if not condensed (widescreen publishing target active)
-                if not req.condensed:
+                if req.format == "full_arrangement":
                     cmd_widescreen = [
                         python, "-u", str(TOOLS_DIR / "video_generator.py"),
                         "--video", vid_in, "--title", v_song, "--author", author,
@@ -541,7 +541,7 @@ async def _run_workflow(req: WorkflowRequest):
                 except Exception:
                     pass
 
-                if req.condensed:
+                if req.format == "viral_part":
                     teaser_exists = False
 
                 import datetime
@@ -675,10 +675,7 @@ async def _run_workflow(req: WorkflowRequest):
                             "--song", song, "--author", author, "--price", req.price,
                             "--mode", "kofi", "--datetime", dates["original_kofi"]
                         ]
-                        if req.condensed:
-                            cmd_kofi_orig.append("--condensed")
-                        else:
-                            cmd_kofi_orig.append("--full")
+                        cmd_kofi_orig.extend(["--format", req.format])
                         steps.append((f"Ko-Fi Upload ({song})", cmd_kofi_orig))
 
                     # 2. Easy Ko-Fi
@@ -688,10 +685,7 @@ async def _run_workflow(req: WorkflowRequest):
                             "--song", f"{song} Easy", "--author", author, "--price", req.price,
                             "--mode", "kofi", "--datetime", dates["easy_kofi"]
                         ]
-                        if req.condensed:
-                            cmd_kofi_easy.append("--condensed")
-                        else:
-                            cmd_kofi_easy.append("--full")
+                        cmd_kofi_easy.extend(["--format", req.format])
                         steps.append((f"Ko-Fi Upload ({song} Easy)", cmd_kofi_easy))
             else:
                 # Stage to Oracle Server (classic behavior)
@@ -704,8 +698,7 @@ async def _run_workflow(req: WorkflowRequest):
                     "--schedule_time", req.scheduleTime,
                     "--platforms", ",".join(enabled_platforms)
                 ]
-                if req.condensed:
-                    stage_cmd.append("--condensed")
+                stage_cmd.extend(["--format", req.format])
                 if has_easy:
                     stage_cmd.append("--has_easy")
                 steps.append(("Stage to Oracle Server", stage_cmd))
@@ -764,7 +757,7 @@ class ModuleRequest(BaseModel):
     author: str = ""
     theme: str = "warm"
     price: str = "3.00"
-    condensed: bool = True
+    format: str = "viral_part"
     zoom: float = 1.5
     shift: int = 0
     enableVisualizer: bool = True
@@ -780,15 +773,14 @@ async def run_module(module: str, req: ModuleRequest):
     python = sys.executable
     cmd_map = {
         "keysight": [python, "-u", str(TOOLS_DIR / "keysight_bot.py"), "--song", req.song, "--theme", req.theme],
-        "handbrake": [python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input",
-                      str(TOOLS_DIR.parent / "TikToks" / f"{req.song}.mp4")],
+        "handbrake": [python, "-u", str(TOOLS_DIR.parent / "TikToks" / f"{req.song}.mp4")],
         "cover": [python, "-u", str(TOOLS_DIR / "cover_generator.py"), "--song", req.song, "--author", req.author, "--theme", req.theme],
         "video": [python, "-u", str(TOOLS_DIR / "video_generator.py"),
                   "--video", str(TOOLS_DIR.parent / "Keysight export" / f"{req.song}.mp4"),
                   "--title", req.song, "--author", req.author, "--type", "normal",
                   "--zoom", f"{req.zoom:.2f}", "--shift", str(int(req.shift)), "--theme", req.theme],
         "kofi_zip": [python, "-u", str(TOOLS_DIR / "kofi_zipper.py"), "--song", req.song, "--author", req.author],
-        "kofi_upload": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--price", req.price, "--mode", "kofi"] + (["--condensed"] if req.condensed else ["--full"]),
+        "kofi_upload": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--price", req.price, "--mode", "kofi", "--format", req.format],
         "youtube": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--author", req.author,
                     "--mode", "youtube", "--datetime", f"{req.scheduleDate} {req.scheduleTime}"],
         "instagram": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--author", req.author,
@@ -2950,6 +2942,54 @@ def get_public_stats():
     except Exception:
         return {"customers": 14, "followers": 75}
 
+@app.get("/api/public/preview-video")
+def get_preview_video(song_name: str):
+    """
+    Generate a temporary presigned URL for a song's preview video.
+    Always points to the 'Original' version video, stripping 'Easy' suffixes.
+    """
+    clean_name = song_name
+    for suffix in (" (Easy Version)", " (Easy)", "(Easy Version)", "(Easy)"):
+        if clean_name.endswith(suffix):
+            clean_name = clean_name[:-len(suffix)].strip()
+            
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        print("[Preview Request] R2 credentials missing, using demo redirect fallback.")
+        return {
+            "download_url": f"https://example.com/demo-packages/{clean_name}/{clean_name}.mp4",
+            "message": "Demo mode: R2 credentials are not configured"
+        }
+
+    try:
+        import boto3
+        from botocore.config import Config
+
+        file_key = f"{clean_name}/{clean_name}.mp4"
+
+        s3 = boto3.client(
+            's3',
+            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+            aws_access_key_id=r2_access_key,
+            aws_secret_access_key=r2_secret_key,
+            config=Config(signature_version='s3v4')
+        )
+
+        presigned_url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={'Bucket': r2_bucket, 'Key': file_key},
+            ExpiresIn=900
+        )
+
+        return {"download_url": presigned_url}
+    except Exception as e:
+        print(f"Failed to generate presigned R2 preview URL: {e}")
+        return JSONResponse(content={"error": f"Failed to generate preview URL: {str(e)}"}, status_code=500)
+
 
 # -------------------------------------------------------------------
 # Broadcast Newsletter for new product Drops
@@ -2959,10 +2999,10 @@ class BroadcastRequest(BaseModel):
     title: str
     artist: str
     difficulty: str
-    is_condensed: bool
+    format: str
     price: str
 
-def _send_new_song_notification(email: str, token: str, song_title: str, artist: str, difficulty: str, is_condensed: bool, price: str):
+def _send_new_song_notification(email: str, token: str, song_title: str, artist: str, difficulty: str, format: str, price: str):
     """Send a newsletter email about a new sheet music drop via Resend."""
     api_key = settings.get("resend_api_key", "")
     if not api_key:
@@ -2972,7 +3012,7 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
     unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
     sheets_url = "https://meloscribe.dev/sheets"
     
-    format_text = "Viral Part" if is_condensed else "Full Arrangement"
+    format_text = "Viral Part" if format == "viral_part" else "Full Arrangement"
     
     html_body = f"""
 <!DOCTYPE html>
@@ -3050,7 +3090,7 @@ async def notify_broadcast(req: BroadcastRequest):
         
     sent_count = 0
     for email, token in subscribers:
-        success = _send_new_song_notification(email, token, req.title, req.artist, req.difficulty, req.is_condensed, req.price)
+        success = _send_new_song_notification(email, token, req.title, req.artist, req.difficulty, req.format, req.price)
         if success:
             sent_count += 1
             

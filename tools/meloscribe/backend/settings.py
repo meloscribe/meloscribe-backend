@@ -48,7 +48,7 @@ DEFAULT_SETTINGS = {
         "This sheet music/MIDI contains all unique musical sections (Intro, Verse, Chorus, Bridge) as shown in the video. "
         "Repetitions may be omitted for brevity, but all distinct parts are included."
     ),
-    "desc_template_kofi_original_full": (
+    "desc_template_kofi_original_full_arrangement": (
         "Get the learning package for my '{song}' tutorial! This download includes:\n\n"
         "PDF sheet music, a high-quality MIDI file in original speed, a bonus slow-speed MIDI file for easy practice, "
         "and both 2K-quality tutorial videos (Original Version, Slow Version) for offline learning "
@@ -56,14 +56,14 @@ DEFAULT_SETTINGS = {
         "This sheet music/MIDI contains all unique musical sections (Intro, Verse, Chorus, Bridge) as shown in the video. "
         "Repetitions may be omitted for brevity, but all distinct parts are included."
     ),
-    "desc_template_kofi_original_condensed": (
+    "desc_template_kofi_original_viral_part": (
         "Get the condensed learning package for my '{song}' tutorial! This download contains the viral/short part of the song and includes:\n\n"
         "PDF sheet music, a high-quality MIDI file in original speed, a bonus slow-speed MIDI file for easy practice, "
         "and both 2K-quality tutorial videos (Original Version, Slow Version) for offline learning "
         "all packed into a ZIP, because sometimes files get missing after uploading.\n\n"
         "This sheet music/MIDI contains all unique musical sections as shown in the video."
     ),
-    "desc_template_kofi_easy_full": (
+    "desc_template_kofi_easy_full_arrangement": (
         "Get the easy learning package for my '{song}' tutorial! This download includes:\n\n"
         "PDF easy sheet music, a high-quality simplified MIDI file, a bonus slow-speed simplified MIDI file for easy practice, "
         "and both 2K-quality easy tutorial videos (Easy Version, Slow Easy Version) for offline learning "
@@ -71,7 +71,7 @@ DEFAULT_SETTINGS = {
         "This simplified sheet music/MIDI contains all unique musical sections (Intro, Verse, Chorus, Bridge) as shown in the video. "
         "Repetitions may be omitted for brevity, but all distinct parts are included."
     ),
-    "desc_template_kofi_easy_condensed": (
+    "desc_template_kofi_easy_viral_part": (
         "Get the condensed easy learning package for my '{song}' tutorial! This download contains the viral/short part of the song in an easy/simplified arrangement and includes:\n\n"
         "PDF easy sheet music, a high-quality simplified MIDI file, a bonus slow-speed simplified MIDI file for easy practice, "
         "and both 2K-quality easy tutorial videos (Easy Version, Slow Easy Version) for offline learning "

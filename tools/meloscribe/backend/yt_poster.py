@@ -44,13 +44,13 @@ def check_duplicate(youtube, song_name: str) -> bool:
 
 def post_video(video_path: str, title: str, description: str, tags: list = None,
                publish_at_dt: datetime.datetime = None, privacy: str = "private",
-               condensed: bool = False, thumbnail_path: str = None,
+               format: str = "full_arrangement", thumbnail_path: str = None,
                skip_duplicate_check: bool = False) -> str | None:
     """
     Uploads a video to YouTube.
-    condensed=True  → Shorts format (no scheduling, posted public immediately or at publish_at)
-    condensed=False → Long-form video with optional thumbnail
-    publish_at_dt   → Schedule the video (sets status to private + publishAt)
+    format="viral_part"       → Shorts format (no scheduling, posted public immediately or at publish_at)
+    format="full_arrangement"  → Long-form video with optional thumbnail
+    publish_at_dt              → Schedule the video (sets status to private + publishAt)
     Returns the YouTube URL or None on failure.
     """
     if not os.path.exists(video_path):
@@ -72,8 +72,9 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
     if not tags:
         tags = ["piano", "music", "synthesia", "keysight", "tutorial"]
 
+    is_short = (format == "viral_part")
     # Shorts: title must contain #Shorts for discoverability
-    if condensed and "#Shorts" not in title:
+    if is_short and "#Shorts" not in title:
         title = title + " #Shorts"
 
     body = {
@@ -84,7 +85,7 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
             "categoryId": "10"  # Music
         },
         "status": {
-            "privacyStatus": "private" if publish_at_dt else ("public" if condensed else privacy),
+            "privacyStatus": "private" if publish_at_dt else ("public" if is_short else privacy),
             "selfDeclaredMadeForKids": False
         }
     }
@@ -94,7 +95,7 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
         body["status"]["publishAt"] = iso_date
         print(f"[YouTube API] Scheduling video for {iso_date} (UTC)")
 
-    print(f"\n[YouTube API] Uploading '{os.path.basename(video_path)}' ({'Short' if condensed else 'Long-form'})...")
+    print(f"\n[YouTube API] Uploading '{os.path.basename(video_path)}' ({'Short' if is_short else 'Long-form'})...")
 
     try:
         media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
@@ -115,7 +116,7 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
         print(f"[YouTube API] SUCCESS! Video uploaded at {yt_url}")
 
         # Upload thumbnail for long-form videos
-        if not condensed and thumbnail_path and os.path.exists(thumbnail_path):
+        if not is_short and thumbnail_path and os.path.exists(thumbnail_path):
             try:
                 print(f"[YouTube API] Uploading thumbnail...")
                 with open(thumbnail_path, "rb") as tf:

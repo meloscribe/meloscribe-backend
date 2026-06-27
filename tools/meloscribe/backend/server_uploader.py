@@ -26,13 +26,19 @@ def init_db():
             error TEXT,
             attempts INTEGER DEFAULT 0,
             youtube_url TEXT,
-            condensed INTEGER DEFAULT 0
+            condensed INTEGER DEFAULT 0,
+            format TEXT DEFAULT 'full_arrangement'
         )
     """)
     conn.commit()
     # Migration helper for existing DBs
     try:
         cursor.execute("ALTER TABLE upload_queue ADD COLUMN condensed INTEGER DEFAULT 0")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE upload_queue ADD COLUMN format TEXT DEFAULT 'full_arrangement'")
         conn.commit()
     except sqlite3.OperationalError:
         pass
@@ -86,7 +92,7 @@ def run_uploads():
     # Query pending tasks that are due
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     cursor.execute("""
-        SELECT id, song, author, price, mode, profile, schedule_time, youtube_url, condensed 
+        SELECT id, song, author, price, mode, profile, schedule_time, youtube_url, condensed, format 
         FROM upload_queue 
         WHERE status = 'pending' AND datetime(schedule_time) <= datetime(?)
     """, (now_str,))
@@ -94,7 +100,7 @@ def run_uploads():
     pending_tasks = cursor.fetchall()
     
     for task in pending_tasks:
-        task_id, song, author, price, mode, profile, schedule_time, youtube_url, condensed = task
+        task_id, song, author, price, mode, profile, schedule_time, youtube_url, condensed, format = task
         print(f"[Uploader] Starting task {task_id}: {mode} ({profile}) for '{song}'...")
         
         # Update status to processing
@@ -130,10 +136,12 @@ def run_uploads():
             cmd.extend(["--price", price])
             if youtube_url:
                 cmd.extend(["--youtube_url", youtube_url])
-            if condensed:
-                cmd.append("--condensed")
+            if format:
+                cmd.extend(["--format", format])
+            elif condensed:
+                cmd.extend(["--format", "viral_part"])
             else:
-                cmd.append("--full")
+                cmd.extend(["--format", "full_arrangement"])
         
         print(f"[Uploader] Command: {' '.join(cmd)}")
         
