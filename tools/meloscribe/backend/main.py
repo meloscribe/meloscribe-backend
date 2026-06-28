@@ -1617,6 +1617,34 @@ def get_analytics(range: str = "30d"):
         except Exception:
             pass
 
+        # Calculate sum of followers to push to Oracle VM
+        try:
+            cursor.execute("""
+                SELECT SUM(followers) 
+                FROM (
+                    SELECT followers FROM channel_insights 
+                    WHERE (platform, date) IN (
+                        SELECT platform, MAX(date) FROM channel_insights GROUP BY platform
+                    )
+                )
+            """)
+            total_f_row = cursor.fetchone()
+            total_f = total_f_row[0] if (total_f_row and total_f_row[0] is not None) else 0
+            if total_f and total_f > 0:
+                import platform as pf
+                if pf.system() == "Windows":
+                    import threading
+                    def push_stats_to_oracle(f_count):
+                        try:
+                            import requests
+                            requests.post("https://api.meloscribe.dev/api/public/stats", json={"followers": f_count}, timeout=5.0)
+                            print(f"[Stats Sync] Successfully pushed {f_count} followers to Oracle VM.")
+                        except Exception as e:
+                            print(f"[Stats Sync] Failed to push to Oracle: {e}")
+                    threading.Thread(target=push_stats_to_oracle, args=(total_f,)).start()
+        except Exception as stats_err:
+            print(f"[Stats Sync] Error calculating total followers for sync: {stats_err}")
+
         conn.close()
         
         return {
@@ -2292,6 +2320,20 @@ async def paddle_webhook(request: Request):
             custom_data = data.get("custom_data", {})
             song_title = custom_data.get("song_title") or "Unknown Song"
             
+            # Verify if the song is currently disabled or hidden on the website
+            try:
+                songs_json_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+                if os.path.exists(songs_json_path):
+                    with open(songs_json_path, "r", encoding="utf-8") as f:
+                        songs_db = json.load(f)
+                    matched_song = next((s for s in songs_db if s.get("title") == song_title), None)
+                    if matched_song:
+                        if matched_song.get("paymentsDisabled") or matched_song.get("hidden"):
+                            print(f"[Paddle Webhook] REJECTED purchase for '{song_title}' (paymentsDisabled or hidden).")
+                            return JSONResponse(content={"error": "Product is no longer available"}, status_code=403)
+            except Exception as check_err:
+                print(f"[Paddle Webhook] Error checking song availability: {check_err}")
+            
             import uuid
             download_hash = custom_data.get("download_hash")
             if not download_hash:
@@ -2942,6 +2984,73 @@ def notify_list_subscribers():
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+# ── SUGGESTIONS ENDPOINTS ───────────────────────────────────────────────────
+
+class NewSuggestion(BaseModel):
+    title: str
+    artist: str
+
+@app.get("/api/public/suggestions")
+def get_suggestions():
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT id, title, artist, votes, created_at FROM suggestions ORDER BY votes DESC, created_at DESC")
+        rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4]} for r in c.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/api/public/suggestions")
+def create_suggestion(sug: NewSuggestion):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    import uuid
+    from datetime import datetime
+    sug_id = str(uuid.uuid4())
+    created_at = datetime.now().isoformat()
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        # Check if a duplicate exists using direct matching (for backend safety)
+        c.execute("SELECT id, title, artist, votes FROM suggestions WHERE LOWER(title) = ? AND LOWER(artist) = ?", (sug.title.strip().lower(), sug.artist.strip().lower()))
+        existing = c.fetchone()
+        if existing:
+            # Increment votes of existing
+            new_votes = existing[3] + 1
+            c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, existing[0]))
+            conn.commit()
+            conn.close()
+            return {"id": existing[0], "title": existing[1], "artist": existing[2], "votes": new_votes, "created_at": created_at}
+            
+        c.execute("INSERT INTO suggestions (id, title, artist, votes, created_at) VALUES (?, ?, ?, ?, ?)",
+                  (sug_id, sug.title.strip(), sug.artist.strip(), 1, created_at))
+        conn.commit()
+        conn.close()
+        return {"id": sug_id, "title": sug.title.strip(), "artist": sug.artist.strip(), "votes": 1, "created_at": created_at}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.post("/api/public/suggestions/{sug_id}/vote")
+def upvote_suggestion(sug_id: str):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT votes FROM suggestions WHERE id = ?", (sug_id,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return JSONResponse(content={"error": "Suggestion not found"}, status_code=404)
+        new_votes = row[0] + 1
+        c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, sug_id))
+        conn.commit()
+        conn.close()
+        return {"id": sug_id, "votes": new_votes}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.get("/api/public/stats")
 def get_public_stats():
     # Helper to return dynamic stats count
@@ -2972,6 +3081,29 @@ def get_public_stats():
         }
     except Exception:
         return {"customers": 14, "followers": 75}
+
+class StatsUpload(BaseModel):
+    followers: int
+
+@app.post("/api/public/stats")
+def update_public_stats(stats: StatsUpload):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        from datetime import date
+        today_str = date.today().isoformat()
+        # Clean existing entries for 'all' platform for today
+        c.execute("DELETE FROM channel_insights WHERE platform = ? AND date = ?", ("all", today_str))
+        # Insert new sum
+        c.execute("INSERT INTO channel_insights (platform, date, followers) VALUES (?, ?, ?)",
+                  ("all", today_str, stats.followers))
+        conn.commit()
+        conn.close()
+        print(f"[Stats Upload] Saved live followers count: {stats.followers}")
+        return {"status": "success"}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/public/preview-video")
 def get_preview_video(song_name: str):
@@ -3013,8 +3145,8 @@ def get_preview_video(song_name: str):
         try:
             s3.head_object(Bucket=r2_bucket, Key=file_key)
         except Exception as head_err:
-            print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}': {head_err}")
-            return JSONResponse(content={"error": "Preview video not found in storage"}, status_code=404)
+            print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}'. Falling back to default 'Mary On A Cross/Mary On A Cross.mp4'.")
+            file_key = "Mary On A Cross/Mary On A Cross.mp4"
 
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',

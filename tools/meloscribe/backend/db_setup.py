@@ -243,6 +243,17 @@ def init_db():
     )
     ''')
 
+    # ── SUGGESTIONS (community sheet music requests) ──────────────────────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS suggestions (
+        id         TEXT PRIMARY KEY,
+        title      TEXT NOT NULL,
+        artist     TEXT NOT NULL,
+        votes      INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")
