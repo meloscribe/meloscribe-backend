@@ -35,7 +35,7 @@ def sync_youtube():
     # 1. Fetch channel's uploaded videos playlist
     try:
         channel_response = youtube.channels().list(
-            part="contentDetails",
+            part="contentDetails,statistics",
             mine=True
         ).execute()
 
@@ -44,6 +44,23 @@ def sync_youtube():
             return
 
         uploads_playlist_id = channel_response["items"][0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        
+        # Save followers/subscribers
+        try:
+            subscribers = 0
+            if "statistics" in channel_response["items"][0]:
+                subscribers = int(channel_response["items"][0]["statistics"].get("subscriberCount", 0))
+            
+            today_str = datetime.date.today().isoformat()
+            cursor.execute('''
+                INSERT INTO channel_insights (platform, date, followers)
+                VALUES ('youtube', ?, ?)
+                ON CONFLICT(platform, date) DO UPDATE SET
+                    followers = excluded.followers
+            ''', (today_str, subscribers))
+            print(f"[YouTube Sync] Saved channel followers: {subscribers}")
+        except Exception as fold_err:
+            print(f"[YouTube Sync] Note: Could not save channel subscribers: {fold_err}")
 
         # 2. Fetch all video IDs
         video_ids = []

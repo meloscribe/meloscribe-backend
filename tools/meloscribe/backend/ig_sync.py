@@ -123,6 +123,21 @@ def _get_profile_insights(access_token: str, ig_business_id: str) -> dict:
         print(f"  [Instagram] Error fetching profile insights: {e}")
         return {"profile_views": 0, "website_clicks": 0}
 
+def _get_followers_count(access_token: str, ig_business_id: str) -> int:
+    """Get followers count for the Instagram business account."""
+    url = f"https://graph.facebook.com/v19.0/{ig_business_id}"
+    params = {
+        "fields": "followers_count",
+        "access_token": access_token
+    }
+    try:
+        resp = requests.get(url, params=params).json()
+        return resp.get("followers_count", 0)
+    except Exception as e:
+        print(f"  [Instagram] Error fetching followers count: {e}")
+        return 0
+
+
 
 def sync_instagram():
     print("[Instagram Sync] Starting...")
@@ -142,14 +157,16 @@ def sync_instagram():
 
     # 1. Profile Insights
     prof_insights = _get_profile_insights(token, ig_id)
+    followers = _get_followers_count(token, ig_id)
     today = datetime.datetime.utcnow().strftime('%Y-%m-%d')
     cursor.execute('''
-        INSERT INTO channel_insights (platform, date, profile_views, website_clicks)
-        VALUES ('instagram', ?, ?, ?)
+        INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks)
+        VALUES ('instagram', ?, ?, ?, ?)
         ON CONFLICT(platform, date) DO UPDATE SET
+            followers = excluded.followers,
             profile_views = excluded.profile_views,
             website_clicks = excluded.website_clicks
-    ''', (today, prof_insights['profile_views'], prof_insights['website_clicks']))
+    ''', (today, followers, prof_insights['profile_views'], prof_insights['website_clicks']))
 
     # 2. Get all Reels
     print("[Instagram Sync] Fetching Reels data...")

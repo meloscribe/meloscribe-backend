@@ -6,7 +6,22 @@ import datetime
 from trend_engine import get_all_trends
 
 # Set up Gemini
-GEMINI_API_KEY = "AIzaSyDheMAcQqcpbUZjKVPitl6fqXVDMUpwzX8"
+def get_gemini_key():
+    import os
+    try:
+        # Check settings.json in the same folder or parent folder
+        for p in (Path(__file__).parent / "settings.json", Path(__file__).parent.parent / "settings.json"):
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+                key = settings.get("gemini_api_key")
+                if key:
+                    return key
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "AIzaSyDheMAcQqcpbUZjKVPitl6fqXVDMUpwzX8"
+
+GEMINI_API_KEY = get_gemini_key()
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Fallback to gemini-2.5-flash as gemini-3.1-pro-preview has a quota limit of 0 on the free tier

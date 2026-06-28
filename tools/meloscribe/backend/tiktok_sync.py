@@ -23,6 +23,21 @@ VIDEO_QUERY_URL = "https://open.tiktokapis.com/v2/video/query/"
 
 VIDEO_FIELDS = "id,title,create_time,share_url,view_count,like_count,comment_count,share_count,duration"
 
+def _get_tiktok_followers(access_token: str) -> int:
+    """Fetch user follower_count from TikTok open API."""
+    url = "https://open.tiktokapis.com/v2/user/info/"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    params = {"fields": "follower_count"}
+    try:
+        resp = requests.get(url, headers=headers, params=params).json()
+        data = resp.get("data", {})
+        user = data.get("user", {})
+        return user.get("follower_count", 0)
+    except Exception as e:
+        print(f"  [TikTok] Error fetching user info: {e}")
+        return 0
+
+
 
 def _get_all_video_ids(access_token: str) -> list[dict]:
     """Page through the video list and return id + title for all videos."""
@@ -108,6 +123,21 @@ def sync_tiktok():
     cursor = conn.cursor()
     known_songs = sync_utils.get_known_songs(cursor)
     print(f"[TikTok Sync] {len(known_songs)} known songs in DB.")
+
+    # Fetch and save followers
+    try:
+        followers = _get_tiktok_followers(token)
+        import datetime
+        today_str = datetime.date.today().isoformat()
+        cursor.execute('''
+            INSERT INTO channel_insights (platform, date, followers)
+            VALUES ('tiktok', ?, ?)
+            ON CONFLICT(platform, date) DO UPDATE SET
+                followers = excluded.followers
+        ''', (today_str, followers))
+        print(f"[TikTok Sync] Saved channel followers: {followers}")
+    except Exception as fold_err:
+        print(f"[TikTok Sync] Note: Could not save channel followers: {fold_err}")
 
     # 1. Get all video IDs
     videos_meta = _get_all_video_ids(token)

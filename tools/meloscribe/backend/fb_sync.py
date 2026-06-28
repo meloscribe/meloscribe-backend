@@ -37,6 +37,20 @@ def _get_fb_page_id() -> str:
         data = json.load(f)
     return data.get("fb_page_id")
 
+def _get_fb_followers_count(access_token: str, page_id: str) -> int:
+    """Fetch user followers_count from Facebook Page Graph API."""
+    url = f"https://graph.facebook.com/v19.0/{page_id}"
+    params = {
+        "fields": "followers_count",
+        "access_token": access_token
+    }
+    try:
+        resp = requests.get(url, params=params).json()
+        return resp.get("followers_count", 0)
+    except Exception as e:
+        print(f"  [Facebook] Error fetching followers count: {e}")
+        return 0
+
 def _get_all_fb_videos(access_token: str, page_id: str) -> list[dict]:
     """Page through the video list and return basic stats."""
     videos = []
@@ -80,6 +94,21 @@ def sync_facebook():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     known_songs = sync_utils.get_known_songs(cursor)
+
+    # Fetch and save followers
+    try:
+        followers = _get_fb_followers_count(token, page_id)
+        import datetime
+        today_str = datetime.date.today().isoformat()
+        cursor.execute('''
+            INSERT INTO channel_insights (platform, date, followers)
+            VALUES ('facebook', ?, ?)
+            ON CONFLICT(platform, date) DO UPDATE SET
+                followers = excluded.followers
+        ''', (today_str, followers))
+        print(f"[Facebook Sync] Saved channel followers: {followers}")
+    except Exception as fold_err:
+        print(f"[Facebook Sync] Note: Could not save channel followers: {fold_err}")
 
     print("[Facebook Sync] Fetching Page videos...")
     videos_list = _get_all_fb_videos(token, page_id)

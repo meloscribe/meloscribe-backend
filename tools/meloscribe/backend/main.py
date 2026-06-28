@@ -43,6 +43,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# -------------------------------------------------------------------
+# Local Windows Proxy logic (redirects to the VM server database)
+# -------------------------------------------------------------------
+import platform
+if platform.system() == "Windows":
+    import requests
+    VM_API_BASE = "https://api.meloscribe.dev"
+
+    @app.get("/api/analytics")
+    def get_local_analytics(range: str = "30d"):
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/analytics?range={range}", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.get("/api/logs")
+    def get_local_logs():
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/logs", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.get("/api/notify/subscribers")
+    def get_local_subscribers():
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/notify/subscribers", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.get("/api/public/suggestions")
+    def get_local_suggestions():
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/public/suggestions", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.post("/api/public/suggestions")
+    def create_local_suggestion(sug: dict):
+        try:
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions", json=sug, timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.post("/api/public/suggestions/{sug_id}/vote")
+    def vote_local_suggestion(sug_id: str):
+        try:
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/vote", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.delete("/api/public/suggestions/{sug_id}")
+    def delete_local_suggestion(sug_id: str):
+        try:
+            r = requests.delete(f"{VM_API_BASE}/api/public/suggestions/{sug_id}", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.get("/api/paddle/sales")
+    def get_local_paddle_sales():
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/paddle/sales", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
 from fastapi.staticfiles import StaticFiles
 public_dir = r"c:\Dev\meloscribe-frontend\website\public"
 if os.path.exists(public_dir):
@@ -223,33 +295,7 @@ async def get_error_logs():
     return JSONResponse(content=list(_error_log))
 
 
-# -------------------------------------------------------------------
-# Public Stats Endpoint (used by the website to display live numbers)
-# -------------------------------------------------------------------
-@app.get("/api/public/stats")
-def public_stats():
-    """
-    Returns live stats for the website's stats section.
-    - downloads: total Ko-Fi purchase count from analytics.db
-    - followers: sum of manually-maintained platform follower counts
-    """
-    downloads = 0
-    try:
-        db_path = Path(__file__).parent / "analytics.db"
-        if db_path.exists():
-            conn = sqlite3.connect(str(db_path))
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM revenue WHERE source = 'Ko-Fi'")
-            row = c.fetchone()
-            if row:
-                downloads = row[0]
-            conn.close()
-    except Exception as e:
-        print(f"[Stats] DB read error: {e}")
 
-    return JSONResponse(content={
-        "downloads": downloads,
-    })
 
 
 # WebSocket Manager
@@ -3073,14 +3119,50 @@ def get_public_stats():
         """)
         row = c.fetchone()
         db_followers = row[0] if (row and row[0] is not None) else 0
+        
+        # Count total downloads (Ko-Fi legacy + Paddle purchases)
+        downloads = 0
+        try:
+            c.execute("SELECT COUNT(*) FROM revenue")
+            downloads = c.fetchone()[0]
+        except Exception:
+            pass
+            
         conn.close()
         
         return {
             "customers": max(14, customers),
-            "followers": max(75, db_followers)
+            "followers": max(75, db_followers),
+            "downloads": max(14, downloads)
         }
     except Exception:
-        return {"customers": 14, "followers": 75}
+        return {"customers": 14, "followers": 75, "downloads": 14}
+
+@app.delete("/api/public/suggestions/{sug_id}")
+def delete_suggestion(sug_id: str):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM suggestions WHERE id = ?", (sug_id,))
+        conn.commit()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/api/paddle/sales")
+def get_paddle_sales():
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT id, song_name, amount, currency, email, created_at FROM purchases ORDER BY created_at DESC LIMIT 50")
+        rows = [{"id": r[0], "song_name": r[1], "amount": r[2], "currency": r[3], "email": r[4], "created_at": r[5]} for r in c.fetchall()]
+        conn.close()
+        return rows
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 class StatsUpload(BaseModel):
     followers: int
