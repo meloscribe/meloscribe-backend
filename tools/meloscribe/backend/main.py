@@ -99,6 +99,39 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
+    @app.post("/api/public/suggestions/{sug_id}/unvote")
+    def unvote_local_suggestion(sug_id: str):
+        try:
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/unvote", timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.get("/api/public/video-stream")
+    def local_video_stream(song_name: str, request: Request):
+        try:
+            import requests
+            from fastapi.responses import StreamingResponse
+            req_headers = {}
+            range_header = request.headers.get("range")
+            if range_header:
+                req_headers["range"] = range_header
+            r = requests.get(f"{VM_API_BASE}/api/public/video-stream?song_name={song_name}", headers=req_headers, stream=True, timeout=15)
+            def chunk_generator():
+                try:
+                    for chunk in r.iter_content(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                finally:
+                    r.close()
+            resp_headers = {}
+            for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
+                if h in r.headers:
+                    resp_headers[h] = r.headers[h]
+            return StreamingResponse(chunk_generator(), status_code=r.status_code, headers=resp_headers)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
     @app.delete("/api/public/suggestions/{sug_id}")
     def delete_local_suggestion(sug_id: str):
         try:
@@ -1480,6 +1513,20 @@ def get_analytics(range: str = "30d"):
         cursor.execute("SELECT platform, SUM(views) as views, SUM(likes) as likes, SUM(comments) as comments, SUM(shares) as shares, SUM(saves) as saves FROM videos GROUP BY platform")
         platforms = [dict(r) for r in cursor.fetchall()]
         
+        has_threads = any(p["platform"].lower() == "threads" for p in platforms)
+        if not has_threads:
+            cursor.execute("SELECT views FROM snapshots WHERE platform = 'threads' ORDER BY snapshot_date DESC LIMIT 1")
+            threads_views_row = cursor.fetchone()
+            threads_views = threads_views_row[0] if (threads_views_row and threads_views_row[0] is not None) else 0
+            platforms.append({
+                "platform": "threads",
+                "views": threads_views,
+                "likes": 0,
+                "comments": 0,
+                "shares": 0,
+                "saves": 0
+            })
+        
         # 3. Song Performance (grouped by song + format)
         cursor.execute('''
             SELECT v.song_name as song, v.author, v.language, v.format,
@@ -1537,13 +1584,26 @@ def get_analytics(range: str = "30d"):
         cursor.execute("SELECT snapshot_date as date, platform, SUM(views) as views FROM snapshots GROUP BY snapshot_date, platform ORDER BY snapshot_date ASC")
         snapshot_rows = cursor.fetchall()
         
+        platforms_to_track = ["youtube", "instagram", "tiktok", "facebook", "threads"]
         growth_dict = {}
+        last_known = {p: 0 for p in platforms_to_track}
+        
+        dates_sorted = sorted(list(set(r["date"] for r in snapshot_rows)))
+        
+        rows_by_date = {}
         for r in snapshot_rows:
-            d = r["date"]
-            if d not in growth_dict:
-                growth_dict[d] = {"date": d}
-            growth_dict[d][r["platform"]] = r["views"]
+            dt = r["date"]
+            if dt not in rows_by_date:
+                rows_by_date[dt] = {}
+            rows_by_date[dt][r["platform"].lower()] = r["views"]
             
+        for dt in dates_sorted:
+            growth_dict[dt] = {"date": dt}
+            for p in platforms_to_track:
+                if p in rows_by_date[dt]:
+                    last_known[p] = rows_by_date[dt][p]
+                growth_dict[dt][p] = last_known[p]
+                
         growthData = list(growth_dict.values())
         
         # Trending Momentum: Compare recent snapshots
@@ -3097,6 +3157,25 @@ def upvote_suggestion(sug_id: str):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+@app.post("/api/public/suggestions/{sug_id}/unvote")
+def downvote_suggestion(sug_id: str):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT votes FROM suggestions WHERE id = ?", (sug_id,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return JSONResponse(content={"error": "Suggestion not found"}, status_code=404)
+        new_votes = max(0, row[0] - 1)
+        c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, sug_id))
+        conn.commit()
+        conn.close()
+        return {"id": sug_id, "votes": new_votes}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.get("/api/public/stats")
 def get_public_stats():
     # Helper to return dynamic stats count
@@ -3240,6 +3319,46 @@ def get_preview_video(song_name: str):
     except Exception as e:
         print(f"Failed to generate presigned R2 preview URL: {e}")
         return JSONResponse(content={"error": f"Failed to generate preview URL: {str(e)}"}, status_code=500)
+
+@app.get("/api/public/video-stream")
+def stream_preview_video(song_name: str, request: Request):
+    from fastapi.responses import StreamingResponse
+    import requests
+
+    res = get_preview_video(song_name)
+    if isinstance(res, JSONResponse):
+        return res
+    if not isinstance(res, dict):
+        return JSONResponse(content={"error": "Invalid preview video response"}, status_code=500)
+    download_url = res.get("download_url")
+    if not download_url:
+        return JSONResponse(content={"error": "Video URL not found"}, status_code=404)
+
+    req_headers = {}
+    range_header = request.headers.get("range")
+    if range_header:
+        req_headers["range"] = range_header
+
+    r2_resp = requests.get(download_url, headers=req_headers, stream=True, timeout=15)
+
+    def chunk_generator():
+        try:
+            for chunk in r2_resp.iter_content(chunk_size=65536):
+                if chunk:
+                    yield chunk
+        finally:
+            r2_resp.close()
+
+    resp_headers = {}
+    for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
+        if h in r2_resp.headers:
+            resp_headers[h] = r2_resp.headers[h]
+
+    return StreamingResponse(
+        chunk_generator(),
+        status_code=r2_resp.status_code,
+        headers=resp_headers
+    )
 
 
 # -------------------------------------------------------------------

@@ -10,6 +10,7 @@ from yt_sync import sync_youtube
 from ig_sync import sync_instagram
 from tiktok_sync import sync_tiktok
 from fb_sync import sync_facebook
+from threads_sync import sync_threads
 
 def run_all_syncs():
     print("=== Starting Global Social Media Analytics Sync ===")
@@ -37,6 +38,12 @@ def run_all_syncs():
         sync_facebook()
     except Exception as e:
         print(f"[ERROR] Facebook sync failed: {e}")
+        
+    # 5. Threads
+    try:
+        sync_threads()
+    except Exception as e:
+        print(f"[ERROR] Threads sync failed: {e}")
         
     print("=== Sync Complete ===")
 
