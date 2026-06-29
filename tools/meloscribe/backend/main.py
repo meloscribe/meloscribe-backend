@@ -270,19 +270,6 @@ def startup_event():
             _sync_errors.append(("Demographics", str(e)))
     threading.Thread(target=run_demographics_sync, daemon=True).start()
 
-    # --- Ko-Fi CSV Sync (background) ---
-    def run_kofi_sync():
-        try:
-            import importlib.util
-            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "kofi_csv_sync.py")
-            spec = importlib.util.spec_from_file_location("kofi_csv_sync", sync_path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            mod.sync_kofi_csv()
-        except Exception as e:
-            print(f"[Ko-Fi Sync] Failed on startup: {e}")
-            _sync_errors.append(("Ko-Fi Sync", str(e)))
-    threading.Thread(target=run_kofi_sync, daemon=True).start()
 
     # --- Threads Token Refresh (background, proactively renews 60-day long-lived token) ---
     def run_threads_refresh():
