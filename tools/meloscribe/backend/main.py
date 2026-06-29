@@ -1262,14 +1262,178 @@ def run_git_push():
     except Exception as git_err:
         print(f"[Git Sync] Failed to auto-push: {git_err}")
 
+def parse_price_to_cents(price_str):
+    if not price_str:
+        return None
+    cleaned = price_str.replace("€", "").replace("EUR", "").strip()
+    cleaned = cleaned.replace(",", ".")
+    try:
+        val = float(cleaned)
+        return int(round(val * 100))
+    except ValueError:
+        return None
+
+def sync_song_price_to_paddle(song, new_price_str, api_key):
+    import math
+    import requests
+
+    eur_cents = parse_price_to_cents(new_price_str)
+    if eur_cents is None:
+        print(f"[Paddle Pricing] Price '{new_price_str}' could not be parsed for '{song.get('title')}'")
+        return None
+        
+    price_id = song.get("kofiId")
+    if not price_id or not price_id.startswith("pri_"):
+        print(f"[Paddle Pricing] Song '{song.get('title')}' has no valid Price ID (kofiId: '{price_id}')")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Paddle-Version": "1"
+    }
+
+    # Fetch existing price to retrieve product_id
+    try:
+        res = requests.get(f"https://api.paddle.com/prices/{price_id}", headers=headers, timeout=10)
+        if res.status_code != 200:
+            print(f"[Paddle Pricing] Failed to fetch price {price_id}: {res.text}")
+            return None
+        price_data = res.json().get("data", {})
+        product_id = price_data.get("product_id")
+        if not product_id:
+            print(f"[Paddle Pricing] No product_id in price {price_id}")
+            return None
+    except Exception as e:
+        print(f"[Paddle Pricing] Error fetching price from Paddle: {e}")
+        return None
+
+    eur_val = eur_cents / 100.0
+    usd_cents = eur_cents  # 1:1 parity
+    gbp_val = max(0.99, float(math.floor(eur_val) - 1) + 0.99) if eur_val >= 1.0 else 0.99
+    gbp_cents = int(round(gbp_val * 100))
+
+    # Format check helper
+    def get_song_format(s):
+        if s.get("format") == "viral_part":
+            return "viral_part"
+        if s.get("format") == "full_arrangement":
+            return "full_arrangement"
+        p = s.get("price") or ""
+        if "3" in p:
+            return "viral_part"
+        return "full_arrangement"
+
+    song_title = song.get("title", "")
+    difficulty = song.get("difficulty", "Original")
+    song_format = get_song_format(song)
+    price_name = f"{song_title} ({difficulty}) - {song_format.replace('_', ' ').title()}"
+    description = f"Price for {song_title} ({difficulty}) {song_format}"
+
+    payload = {
+        "product_id": product_id,
+        "name": price_name,
+        "description": description,
+        "tax_mode": "internal",
+        "unit_price": {
+            "amount": str(eur_cents),
+            "currency_code": "EUR"
+        },
+        "unit_price_overrides": [
+            {
+                "country_codes": ["US"],
+                "unit_price": {
+                    "amount": str(usd_cents),
+                    "currency_code": "USD"
+                }
+            },
+            {
+                "country_codes": ["GB"],
+                "unit_price": {
+                    "amount": str(gbp_cents),
+                    "currency_code": "GBP"
+                }
+            }
+        ]
+    }
+
+    try:
+        create_res = requests.post("https://api.paddle.com/prices", json=payload, headers=headers, timeout=10)
+        if create_res.status_code not in (200, 201):
+            print(f"[Paddle Pricing] Failed to create price in Paddle: {create_res.text}")
+            return None
+        new_price_data = create_res.json().get("data", {})
+        new_price_id = new_price_data.get("id")
+        if not new_price_id:
+            print(f"[Paddle Pricing] No price ID returned.")
+            return None
+            
+        print(f"[Paddle Pricing] Created price {new_price_id} for '{song_title}' (EUR {eur_val}, USD {usd_cents/100.0}, GBP {gbp_val})")
+
+        # Archive old price
+        try:
+            archive_res = requests.patch(f"https://api.paddle.com/prices/{price_id}", json={"status": "archived"}, headers=headers, timeout=10)
+            if archive_res.status_code == 200:
+                print(f"[Paddle Pricing] Archived old price {price_id}")
+        except Exception as archive_err:
+            print(f"[Paddle Pricing] Failed to archive price {price_id}: {archive_err}")
+
+        return new_price_id
+    except Exception as e:
+        print(f"[Paddle Pricing] Error creating price: {e}")
+        return None
+
 @app.post("/api/website/songs")
 async def update_website_songs(request: Request, background_tasks: BackgroundTasks):
     try:
         songs_list = await request.json()
         songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
         
+        # Load API key from C:\Dev\meloscribe_credentials_backup.json
+        api_key = None
+        try:
+            with open(r"C:\Dev\meloscribe_credentials_backup.json", "r", encoding="utf-8") as cred_f:
+                creds = json.load(cred_f)
+                api_key = creds.get("paddle", {}).get("api_key")
+        except Exception as cred_err:
+            print(f"[Paddle Pricing] Warning: Failed to load api_key from backup: {cred_err}")
+            
+        # Parse old list for comparison
+        old_songs_map = {}
+        if os.path.exists(songs_path):
+            try:
+                with open(songs_path, "r", encoding="utf-8") as f:
+                    old_list = json.load(f)
+                    for s in old_list:
+                        if isinstance(s, dict) and "id" in s:
+                            old_songs_map[s["id"]] = s
+            except Exception as read_err:
+                print(f"[Paddle Pricing] Failed to parse old songs list: {read_err}")
+                
+        # Compare prices and sync if changed
+        updated_songs = []
+        for song in songs_list:
+            if not isinstance(song, dict):
+                updated_songs.append(song)
+                continue
+            song_id = song.get("id")
+            if song_id == "global_settings":
+                updated_songs.append(song)
+                continue
+                
+            old_song = old_songs_map.get(song_id)
+            if old_song:
+                old_price = old_song.get("price", "")
+                new_price = song.get("price", "")
+                # Clean compare
+                if old_price != new_price and api_key:
+                    new_price_id = sync_song_price_to_paddle(song, new_price, api_key)
+                    if new_price_id:
+                        song["kofiId"] = new_price_id
+            updated_songs.append(song)
+
         with open(songs_path, "w", encoding="utf-8") as f:
-            json.dump(songs_list, f, indent=2, ensure_ascii=False)
+            json.dump(updated_songs, f, indent=2, ensure_ascii=False)
             
         # Push to GitHub in the background to prevent blocking the Desktop App UI
         background_tasks.add_task(run_git_push)
