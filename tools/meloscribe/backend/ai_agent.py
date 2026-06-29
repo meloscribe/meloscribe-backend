@@ -19,7 +19,7 @@ def get_gemini_key():
                     return key
     except Exception:
         pass
-    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "AIzaSyDheMAcQqcpbUZjKVPitl6fqXVDMUpwzX8"
+    return os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
 
 GEMINI_API_KEY = get_gemini_key()
 genai.configure(api_key=GEMINI_API_KEY)
