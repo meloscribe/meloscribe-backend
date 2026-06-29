@@ -10,8 +10,11 @@ import asyncio
 import subprocess
 import threading
 import sqlite3
+import datetime
 from pathlib import Path
 from typing import Optional
+
+CREATION_FLAGS = 0x08000000 if os.name == 'nt' else 0
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
@@ -184,7 +187,8 @@ def startup_event():
             subprocess.Popen(
                 ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                creationflags=CREATION_FLAGS
             )
             print("[Startup] Verified/Updated Meloscribe Desktop Shortcut.")
     except Exception as e:
@@ -206,6 +210,7 @@ def startup_event():
                 [ngrok_bin, "http", f"--domain={ngrok_domain}", "127.0.0.1:8787"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=CREATION_FLAGS
             )
             print(f"[ngrok] Started tunnel -> https://{ngrok_domain}")
         except Exception as e:
@@ -286,6 +291,17 @@ def startup_event():
             print(f"[Threads] Token refresh failed on startup: {e}")
             _sync_errors.append(("Threads Refresh", str(e)))
     threading.Thread(target=run_threads_refresh, daemon=True).start()
+
+    # --- Auto Credentials Sync to VM (background) ---
+    def run_creds_sync():
+        import time
+        time.sleep(5)  # Wait for uvicorn server startup to settle
+        print("[Startup] Auto-syncing credentials to VM...")
+        try:
+            sync_credentials_route()
+        except Exception as err:
+            print(f"[Startup] Auto-sync credentials failed: {err}")
+    threading.Thread(target=run_creds_sync, daemon=True).start()
 
 # -------------------------------------------------------------------
 # Error Log System (in-memory ring buffer for UI display)
@@ -375,6 +391,7 @@ async def run_tool(cmd: list[str], label: str = ""):
                 encoding="utf-8",
                 errors="replace",
                 cwd=str(TOOLS_DIR),
+                creationflags=CREATION_FLAGS
             )
 
         # Extract song name from cmd arguments if present
@@ -814,7 +831,8 @@ def stop_workflow():
     if current_process:
         try:
             subprocess.Popen(f"taskkill /F /T /PID {current_process.pid}", shell=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=CREATION_FLAGS)
         except Exception:
             pass
     return {"status": "stopped"}
@@ -876,12 +894,87 @@ async def _run_module_task(module: str, cmd: list[str]):
     else:
         await manager.broadcast({"type": "done", "message": f"❌ {module} failed (exit {rc})"})
 @app.get("/callback")
-def tiktok_callback(code: str, state: str = None):
+def oauth_callback(code: str, state: str = None):
     """
-    TikTok OAuth callback redirect proxy.
-    Forwards the code and state parameters from ngrok (Port 8787)
-    to the local auth server running on Port 8080.
+    Unified OAuth callback proxy and direct processor.
+    - If state == 'threads', directly handles Threads token exchange and saves it.
+    - Otherwise, forwards to localhost:8080 (e.g. for TikTok/other local auth).
     """
+    if state == "threads":
+        try:
+            import json
+            settings_path = TOOLS_DIR / "meloscribe" / "backend" / "settings.json"
+            tokens_path = TOOLS_DIR / "meloscribe" / "backend" / "threads_tokens.json"
+            
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = json.load(f)
+            
+            app_id = settings.get("threads_app_id", "2376057852870646")
+            app_secret = settings.get("threads_app_secret", "61e4182251b85e2efdb4c610b0ed119d")
+            redirect_uri = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
+
+            # Exchange code for short-lived token
+            resp = requests.post("https://graph.threads.net/oauth/access_token", data={
+                "client_id": app_id,
+                "client_secret": app_secret,
+                "grant_type": "authorization_code",
+                "redirect_uri": redirect_uri,
+                "code": code
+            })
+            
+            if resp.status_code != 200:
+                return HTMLResponse(
+                    content=f"<h1>Threads short-lived token exchange failed:</h1><pre>{resp.status_code} - {resp.text}</pre>",
+                    status_code=400
+                )
+            
+            short_data = resp.json()
+            short_token = short_data.get("access_token")
+            user_id = short_data.get("user_id")
+
+            # Exchange short-lived token for long-lived token
+            long_resp = requests.get("https://graph.threads.net/access_token", params={
+                "grant_type": "th_exchange_token",
+                "client_secret": app_secret,
+                "access_token": short_token
+            })
+            
+            if long_resp.status_code != 200:
+                return HTMLResponse(
+                    content=f"<h1>Threads long-lived token exchange failed:</h1><pre>{long_resp.status_code} - {long_resp.text}</pre>",
+                    status_code=400
+                )
+            
+            long_data = long_resp.json()
+            long_token = long_data.get("access_token")
+
+            # Fetch profile to get username
+            me_resp = requests.get("https://graph.threads.net/v1.0/me", params={
+                "fields": "id,username",
+                "access_token": long_token
+            })
+            username = "unknown"
+            if me_resp.status_code == 200:
+                username = me_resp.json().get("username", "unknown")
+
+            # Save credentials
+            save_data = {
+                "access_token": long_token,
+                "threads_user_id": str(user_id),
+                "username": username
+            }
+            with open(tokens_path, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, indent=4)
+
+            print(f"[Threads Auth] Successfully authorized as {username}. Token saved.")
+            return HTMLResponse(
+                content=f"<h1>Threads Autorisierung erfolgreich!</h1><p>Du bist nun als <b>@{username}</b> angemeldet. Du kannst diesen Tab schliessen.</p>",
+                status_code=200
+            )
+
+        except Exception as e:
+            return HTMLResponse(content=f"<h1>Internal Error during Threads exchange: {e}</h1>", status_code=500)
+
     try:
         url = f"http://localhost:8080/?code={code}"
         if state:
@@ -1170,7 +1263,7 @@ def threads_authorize(req: Optional[ThreadsAuthRequest] = None):
 @app.get("/api/workflow/suggest-date")
 def suggest_workflow_date():
     from datetime import datetime, timedelta
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     
     interval_days = int(load_settings().get("schedule_interval_days", 3))
@@ -1189,7 +1282,7 @@ def suggest_workflow_date():
         "sqlite3 /home/ubuntu/meloscribe/queue.db \"SELECT max(schedule_time) FROM upload_queue WHERE status = 'pending';\""
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0 and res.stdout.strip() and res.stdout.strip() != "NULL" and res.stdout.strip() != "":
             max_pending = res.stdout.strip()
             max_dt = datetime.strptime(max_pending, "%Y-%m-%d %H:%M")
@@ -1217,6 +1310,8 @@ def get_settings():
 async def update_settings(request: Request):
     data = await request.json()
     save_settings(data)
+    # Automatically sync local credentials to VM in the background
+    threading.Thread(target=sync_credentials_route, daemon=True).start()
     return {"status": "success"}
 
 # -------------------------------------------------------------------
@@ -1240,9 +1335,9 @@ def run_git_push():
         import subprocess
         frontend_dir = r"C:\Dev\meloscribe-frontend"
         if os.path.exists(frontend_dir):
-            subprocess.run(["git", "add", "website/src/data/songs.json"], cwd=frontend_dir, check=True)
-            subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True)
-            subprocess.run(["git", "push"], cwd=frontend_dir, check=True)
+            subprocess.run(["git", "add", "website/src/data/songs.json"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
+            subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
+            subprocess.run(["git", "push"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
             print("[Git Sync] Automatically pushed songs.json update to GitHub.")
     except Exception as git_err:
         print(f"[Git Sync] Failed to auto-push: {git_err}")
@@ -1250,7 +1345,7 @@ def run_git_push():
 def parse_price_to_cents(price_str):
     if not price_str:
         return None
-    cleaned = price_str.replace("€", "").replace("EUR", "").strip()
+    cleaned = "".join(c for c in str(price_str) if c.isdigit() or c in (".", ","))
     cleaned = cleaned.replace(",", ".")
     try:
         val = float(cleaned)
@@ -1258,18 +1353,13 @@ def parse_price_to_cents(price_str):
     except ValueError:
         return None
 
-def sync_song_price_to_paddle(song, new_price_str, api_key):
+def sync_song_price_to_paddle(song, new_price_str, api_key, is_sandbox=True):
     import math
     import requests
 
     eur_cents = parse_price_to_cents(new_price_str)
     if eur_cents is None:
         print(f"[Paddle Pricing] Price '{new_price_str}' could not be parsed for '{song.get('title')}'")
-        return None
-        
-    price_id = song.get("kofiId")
-    if not price_id or not price_id.startswith("pri_"):
-        print(f"[Paddle Pricing] Song '{song.get('title')}' has no valid Price ID (kofiId: '{price_id}')")
         return None
 
     headers = {
@@ -1278,25 +1368,54 @@ def sync_song_price_to_paddle(song, new_price_str, api_key):
         "Paddle-Version": "1"
     }
 
-    # Fetch existing price to retrieve product_id
-    try:
-        res = requests.get(f"https://api.paddle.com/prices/{price_id}", headers=headers, timeout=10)
-        if res.status_code != 200:
-            print(f"[Paddle Pricing] Failed to fetch price {price_id}: {res.text}")
-            return None
-        price_data = res.json().get("data", {})
-        product_id = price_data.get("product_id")
-        if not product_id:
-            print(f"[Paddle Pricing] No product_id in price {price_id}")
-            return None
-    except Exception as e:
-        print(f"[Paddle Pricing] Error fetching price from Paddle: {e}")
-        return None
+    api_url = "https://sandbox-api.paddle.com" if is_sandbox else "https://api.paddle.com"
 
-    eur_val = eur_cents / 100.0
+    price_id = song.get("kofiId")
+    product_id = None
+    is_new_product = False
+
+    if not price_id or not price_id.startswith("pri_"):
+        # Create a new product first!
+        song_title = song.get("title", "Untitled Song")
+        print(f"[Paddle Pricing] Song '{song_title}' has no valid Price ID. Creating new product in Paddle...")
+        is_new_product = True
+        try:
+            prod_payload = {
+                "name": song_title,
+                "tax_category": "standard",
+                "description": f"Learning package for {song_title}"
+            }
+            prod_res = requests.post(f"{api_url}/products", json=prod_payload, headers=headers, timeout=10)
+            if prod_res.status_code not in (200, 201):
+                print(f"[Paddle Pricing] Failed to create product in Paddle: {prod_res.text}")
+                return None
+            product_data = prod_res.json().get("data", {})
+            product_id = product_data.get("id")
+            if not product_id:
+                print(f"[Paddle Pricing] No product ID returned after creation.")
+                return None
+            print(f"[Paddle Pricing] Created new product: {product_id} for '{song_title}'")
+        except Exception as e:
+            print(f"[Paddle Pricing] Error creating product: {e}")
+            return None
+    else:
+        # Fetch existing price to retrieve product_id
+        try:
+            res = requests.get(f"{api_url}/prices/{price_id}", headers=headers, timeout=10)
+            if res.status_code != 200:
+                print(f"[Paddle Pricing] Failed to fetch price {price_id} from {api_url}: {res.text}")
+                return None
+            price_data = res.json().get("data", {})
+            product_id = price_data.get("product_id")
+            if not product_id:
+                print(f"[Paddle Pricing] No product_id in price {price_id}")
+                return None
+        except Exception as e:
+            print(f"[Paddle Pricing] Error fetching price from Paddle: {e}")
+            return None
+
     usd_cents = eur_cents  # 1:1 parity
-    gbp_val = max(0.99, float(math.floor(eur_val) - 1) + 0.99) if eur_val >= 1.0 else 0.99
-    gbp_cents = int(round(gbp_val * 100))
+    gbp_cents = eur_cents  # 1:1 parity
 
     # Format check helper
     def get_song_format(s):
@@ -1343,7 +1462,7 @@ def sync_song_price_to_paddle(song, new_price_str, api_key):
     }
 
     try:
-        create_res = requests.post("https://api.paddle.com/prices", json=payload, headers=headers, timeout=10)
+        create_res = requests.post(f"{api_url}/prices", json=payload, headers=headers, timeout=10)
         if create_res.status_code not in (200, 201):
             print(f"[Paddle Pricing] Failed to create price in Paddle: {create_res.text}")
             return None
@@ -1355,13 +1474,14 @@ def sync_song_price_to_paddle(song, new_price_str, api_key):
             
         print(f"[Paddle Pricing] Created price {new_price_id} for '{song_title}' (EUR {eur_val}, USD {usd_cents/100.0}, GBP {gbp_val})")
 
-        # Archive old price
-        try:
-            archive_res = requests.patch(f"https://api.paddle.com/prices/{price_id}", json={"status": "archived"}, headers=headers, timeout=10)
-            if archive_res.status_code == 200:
-                print(f"[Paddle Pricing] Archived old price {price_id}")
-        except Exception as archive_err:
-            print(f"[Paddle Pricing] Failed to archive price {price_id}: {archive_err}")
+        # Archive old price only if it existed in Paddle (i.e. not a new product setup)
+        if not is_new_product and price_id:
+            try:
+                archive_res = requests.patch(f"{api_url}/prices/{price_id}", json={"status": "archived"}, headers=headers, timeout=10)
+                if archive_res.status_code == 200:
+                    print(f"[Paddle Pricing] Archived old price {price_id}")
+            except Exception as archive_err:
+                print(f"[Paddle Pricing] Failed to archive price {price_id}: {archive_err}")
 
         return new_price_id
     except Exception as e:
@@ -1374,14 +1494,25 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
         songs_list = await request.json()
         songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
         
-        # Load API key from C:\Dev\meloscribe_credentials_backup.json
+        # Load environment and API key from settings.json
+        settings = load_settings()
+        env = settings.get("environment", "sandbox")
+        is_sandbox = (env != "live")
+        
         api_key = None
-        try:
-            with open(r"C:\Dev\meloscribe_credentials_backup.json", "r", encoding="utf-8") as cred_f:
-                creds = json.load(cred_f)
-                api_key = creds.get("paddle", {}).get("api_key")
-        except Exception as cred_err:
-            print(f"[Paddle Pricing] Warning: Failed to load api_key from backup: {cred_err}")
+        if not is_sandbox:
+            api_key = settings.get("paddle_live_api_key")
+        else:
+            api_key = settings.get("paddle_sandbox_api_key")
+
+        # Fallback to credentials backup file if not in settings
+        if not api_key:
+            try:
+                with open(r"C:\Dev\meloscribe_credentials_backup.json", "r", encoding="utf-8") as cred_f:
+                    creds = json.load(cred_f)
+                    api_key = creds.get("paddle", {}).get("api_key")
+            except Exception as cred_err:
+                print(f"[Paddle Pricing] Warning: Failed to load api_key from backup: {cred_err}")
             
         # Parse old list for comparison
         old_songs_map = {}
@@ -1407,21 +1538,26 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
                 continue
                 
             old_song = old_songs_map.get(song_id)
-            if old_song:
-                old_price = old_song.get("price", "")
-                new_price = song.get("price", "")
-                # Clean compare
-                if old_price != new_price and api_key:
-                    new_price_id = sync_song_price_to_paddle(song, new_price, api_key)
-                    if new_price_id:
-                        song["kofiId"] = new_price_id
+            old_price = old_song.get("price", "") if old_song else ""
+            new_price = song.get("price", "")
+            
+            # Sync to Paddle if price changed, or if it doesn't have a valid Paddle Price ID yet
+            has_valid_paddle_id = song.get("kofiId", "").startswith("pri_")
+            if (old_price != new_price or not has_valid_paddle_id) and api_key:
+                new_price_id = sync_song_price_to_paddle(song, new_price, api_key, is_sandbox=is_sandbox)
+                if new_price_id:
+                    song["kofiId"] = new_price_id
             updated_songs.append(song)
 
         with open(songs_path, "w", encoding="utf-8") as f:
             json.dump(updated_songs, f, indent=2, ensure_ascii=False)
             
-        # Push to GitHub in the background to prevent blocking the Desktop App UI
-        background_tasks.add_task(run_git_push)
+        # Push to GitHub in the background only if NOT in sandbox mode OR if sandbox git push is explicitly unblocked
+        block_push = settings.get("block_sandbox_git_push", True)
+        if not is_sandbox or not block_push:
+            background_tasks.add_task(run_git_push)
+        else:
+            print("[Paddle Pricing] Sandbox mode active & block_sandbox_git_push is True. Automatic songs.json sync to GitHub/Vercel blocked.")
             
         return {"status": "success"}
     except Exception as e:
@@ -2210,7 +2346,7 @@ async def run_action_engine():
 
 @app.get("/api/server/sniper-status")
 def get_sniper_status():
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2224,7 +2360,7 @@ def get_sniper_status():
         "systemctl is-active oci-sniper && echo --- LOGS --- && tail -n 100 /home/ubuntu/oci-sniper/sniper.log 2>/dev/null"
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0 or "inactive" in res.stdout or "active" in res.stdout:
             stdout_str = res.stdout.strip()
             status_line = "inactive"
@@ -2257,7 +2393,7 @@ class ServerActionRequest(BaseModel):
 
 @app.post("/api/server/sniper-action")
 def run_sniper_action(req: ServerActionRequest):
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2276,7 +2412,7 @@ def run_sniper_action(req: ServerActionRequest):
         ssh_cmd
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0:
             return {"status": "success", "message": f"Service successfully {req.action}ed."}
         else:
@@ -2288,7 +2424,7 @@ def run_sniper_action(req: ServerActionRequest):
 
 @app.get("/api/server/uploader-status")
 def get_uploader_status():
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2302,7 +2438,7 @@ def get_uploader_status():
         "systemctl is-active oci-uploader && echo --- LOGS --- && tail -n 100 /home/ubuntu/meloscribe/uploader.log 2>/dev/null"
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0 or "inactive" in res.stdout or "active" in res.stdout:
             stdout_str = res.stdout.strip()
             status_line = "inactive"
@@ -2332,7 +2468,7 @@ def get_uploader_status():
 
 @app.post("/api/server/uploader-action")
 def run_uploader_action(req: ServerActionRequest):
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2351,7 +2487,7 @@ def run_uploader_action(req: ServerActionRequest):
         ssh_cmd
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0:
             return {"status": "success", "message": f"Service successfully {req.action}ed."}
         else:
@@ -2363,7 +2499,7 @@ def run_uploader_action(req: ServerActionRequest):
 
 @app.get("/api/server/queue")
 def get_server_queue():
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2383,7 +2519,7 @@ def get_server_queue():
         cmd_str
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0:
             stdout_str = res.stdout.strip()
             
@@ -2449,7 +2585,7 @@ class RescheduleRequest(BaseModel):
 
 @app.post("/api/server/queue/{task_id}/reschedule")
 def reschedule_server_task(task_id: int, req: RescheduleRequest):
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2469,7 +2605,7 @@ def reschedule_server_task(task_id: int, req: RescheduleRequest):
         ssh_cmd
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0:
             return {"status": "success", "message": f"Task {task_id} successfully rescheduled to {req.schedule_time}."}
         else:
@@ -2481,7 +2617,7 @@ def reschedule_server_task(task_id: int, req: RescheduleRequest):
 
 @app.delete("/api/server/queue/{task_id}")
 def delete_server_task(task_id: int):
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2496,7 +2632,7 @@ def delete_server_task(task_id: int):
         ssh_cmd
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         if res.returncode == 0:
             return {"status": "success", "message": f"Task {task_id} successfully deleted."}
         else:
@@ -2509,7 +2645,7 @@ def delete_server_task(task_id: int):
 
 @app.get("/api/server/disk")
 def get_server_disk():
-    key_path = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
     server_ip = "152.70.23.171"
     if not os.path.exists(key_path):
         return {"status": "error", "message": f"SSH Key not found at {key_path}"}
@@ -2523,10 +2659,86 @@ def get_server_disk():
         "df -h /home/ubuntu"
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
         return {"status": "success", "output": res.stdout}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+@app.post("/api/server/sync-credentials")
+def sync_credentials_route():
+    key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+    server_ip = "152.70.23.171"
+    if not os.path.exists(key_path):
+        return {"status": "error", "message": f"SSH Key not found at {key_path}"}
+        
+    backend_dir = Path(__file__).resolve().parent
+    files_to_sync = ["settings.json", "ig_tokens.json", "threads_tokens.json", "tiktok_tokens.json", "yt_tokens.json"]
+    
+    synced_files = []
+    errors = []
+    
+    for fname in files_to_sync:
+        local_path = backend_dir / fname
+        if local_path.exists():
+            cmd = [
+                "scp", "-i", key_path,
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", "ConnectTimeout=5",
+                "-o", "IdentitiesOnly=yes",
+                str(local_path),
+                f"ubuntu@{server_ip}:/home/ubuntu/meloscribe/tools/meloscribe/backend/{fname}"
+            ]
+            try:
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=10, creationflags=CREATION_FLAGS)
+                if res.returncode == 0:
+                    synced_files.append(fname)
+                else:
+                    errors.append(f"Failed {fname}: {res.stderr.strip()}")
+            except Exception as e:
+                errors.append(f"Error {fname}: {str(e)}")
+                
+    if errors:
+        return {"status": "error", "message": f"Sync partially failed. Synced: {synced_files}. Errors: {errors}"}
+    return {"status": "success", "message": f"Successfully synchronized credentials files to OCI: {synced_files}"}
+
+def run_credentials_watcher():
+    """Background thread that monitors credentials files and syncs them to the VM on change."""
+    import time
+    files_to_sync = ["settings.json", "ig_tokens.json", "threads_tokens.json", "tiktok_tokens.json", "yt_tokens.json"]
+    backend_dir = Path(__file__).resolve().parent
+    last_mtimes = {}
+
+    # Initialize mtimes
+    for fname in files_to_sync:
+        fpath = backend_dir / fname
+        if fpath.exists():
+            last_mtimes[fname] = os.path.getmtime(fpath)
+        else:
+            last_mtimes[fname] = 0.0
+
+    print("[Watcher] Started credentials auto-sync file watcher.")
+    while True:
+        time.sleep(3)
+        changed = False
+        for fname in files_to_sync:
+            fpath = backend_dir / fname
+            if fpath.exists():
+                mtime = os.path.getmtime(fpath)
+                if mtime != last_mtimes.get(fname, 0.0):
+                    last_mtimes[fname] = mtime
+                    changed = True
+            elif fname in last_mtimes and last_mtimes[fname] != 0.0:
+                last_mtimes[fname] = 0.0
+                changed = True
+        
+        if changed:
+            print("[Watcher] Credentials changed. Auto-syncing to VM...")
+            try:
+                sync_credentials_route()
+            except Exception as e:
+                print(f"[Watcher] Auto-sync failed: {e}")
+
+threading.Thread(target=run_credentials_watcher, daemon=True).start()
 
 # -------------------------------------------------------------------
 # Paddle Webhook & R2 Secure Download System
@@ -2621,6 +2833,71 @@ async def paddle_webhook(request: Request):
         
     return {"status": "ok"}
 
+def send_purchase_delivery_email(email: str, song_name: str, download_hash: str):
+    """Send purchase delivery email via Resend containing the download link."""
+    api_key = load_settings().get("resend_api_key", "")
+    if not api_key:
+        print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping purchase email.")
+        return False
+        
+    download_url = f"https://meloscribe.dev/order/{download_hash}"
+    
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0; font-weight: 800;">meloscribe</h1>
+    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  </div>
+  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
+    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">🎹 Your Sheets Are Ready!</h2>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
+      Thank you so much for your purchase and supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready.
+    </p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the button below to download your sheet music (PDF), MIDI files, and practice video tutorials:</p>
+    
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="{download_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Download Learning Package</a>
+    </div>
+    
+    <p style="color: #888; font-size: 13px; text-align: center;">
+      This download link is permanent. You can access it anytime to download updates or get your files.
+    </p>
+    
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>The meloscribe team</p>
+  </div>
+  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
+    Need help? Reply directly to this email or visit <a href="https://meloscribe.dev" style="color: #00f5d4;">meloscribe.dev</a>
+  </p>
+</body>
+</html>
+"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "meloscribe <info@meloscribe.dev>",
+                "to": [email],
+                "subject": f"🎹 Your learning package for {song_name} is ready!",
+                "html": html_body
+            },
+            timeout=10.0
+        )
+        if resp.status_code in (200, 201):
+            print(f"[Notify] Purchase email sent successfully to {email}")
+            return True
+        else:
+            print(f"[Notify] Failed to send purchase email: {resp.status_code} - {resp.text}")
+            return False
+    except Exception as err:
+        print(f"[Notify] Resend exception: {err}")
+        return False
+
 @app.get("/api/order/hash-by-checkout")
 def get_hash_by_checkout(checkout_id: str):
     db_path = Path(__file__).resolve().parent / "analytics.db"
@@ -2632,6 +2909,61 @@ def get_hash_by_checkout(checkout_id: str):
     
     if not row and checkout_id.startswith("demo_"):
         return {"download_hash": f"demo_hash_{checkout_id}"}
+        
+    if not row and checkout_id.startswith("txn_"):
+        # FALLBACK: Webhook failed or was delayed. Query Paddle API directly!
+        try:
+            s_settings = load_settings()
+            is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
+            api_key = s_settings.get("paddle_sandbox_api_key" if is_sandbox else "paddle_live_api_key")
+            url_prefix = "https://sandbox-api.paddle.com" if is_sandbox else "https://api.paddle.com"
+            
+            if api_key:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                tx_resp = requests.get(f"{url_prefix}/transactions/{checkout_id}", headers=headers, timeout=10.0)
+                if tx_resp.status_code == 200:
+                    tx_data = tx_resp.json().get("data", {})
+                    status = tx_data.get("status")
+                    if status == "completed":
+                        customer_id = tx_data.get("customer_id")
+                        email = "customer@example.com"
+                        if customer_id:
+                            cust_resp = requests.get(f"{url_prefix}/customers/{customer_id}", headers=headers, timeout=10.0)
+                            if cust_resp.status_code == 200:
+                                email = cust_resp.json().get("data", {}).get("email", email)
+                        
+                        custom_data = tx_data.get("custom_data", {})
+                        song_title = custom_data.get("song_title") or "Unknown Song"
+                        download_hash = custom_data.get("download_hash")
+                        if not download_hash:
+                            import uuid
+                            download_hash = uuid.uuid4().hex
+                        
+                        totals = tx_data.get("details", {}).get("totals", {})
+                        grand_total = float(totals.get("grand_total", 0)) / 100.0
+                        currency = totals.get("currency_code", "EUR")
+                        
+                        # Save purchase in local database
+                        conn = sqlite3.connect(str(db_path), timeout=30.0)
+                        c = conn.cursor()
+                        c.execute(
+                            "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (checkout_id, email, song_title, grand_total, currency, status, download_hash)
+                        )
+                        c.execute(
+                            "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (grand_total, currency, "paddle", "transaction.completed", email, f"Paddle txn {checkout_id} (API Fallback)", song_title)
+                        )
+                        conn.commit()
+                        conn.close()
+                        print(f"[Paddle API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash}")
+                        
+                        # Send purchase delivery email using Resend!
+                        send_purchase_delivery_email(email, song_title, download_hash)
+                        
+                        return {"download_hash": download_hash}
+        except Exception as api_err:
+            print(f"[Paddle API Fallback] Error verifying transaction: {api_err}")
         
     if not row:
         return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
