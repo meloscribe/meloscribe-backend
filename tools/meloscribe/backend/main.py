@@ -3486,16 +3486,36 @@ def get_preview_video(song_name: str):
 
 @app.get("/api/public/video-stream")
 def stream_preview_video(song_name: str, request: Request):
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import StreamingResponse, FileResponse
     import requests
+
+    def get_local_fallback():
+        # Determine local path depending on environment
+        if os.name == 'nt':
+            local_path = r"C:\Dev\meloscribe-app\ShopVideos\Mary On A Cross.mp4"
+        else:
+            local_path = "/home/ubuntu/meloscribe/Scores/fallback.mp4"
+        if os.path.exists(local_path):
+            print(f"[Preview Video] Serving local fallback: {local_path}")
+            return FileResponse(local_path, media_type="video/mp4")
+        return None
 
     res = get_preview_video(song_name)
     if isinstance(res, JSONResponse):
+        fb = get_local_fallback()
+        if fb:
+            return fb
         return res
     if not isinstance(res, dict):
+        fb = get_local_fallback()
+        if fb:
+            return fb
         return JSONResponse(content={"error": "Invalid preview video response"}, status_code=500)
     download_url = res.get("download_url")
-    if not download_url:
+    if not download_url or "example.com" in download_url:
+        fb = get_local_fallback()
+        if fb:
+            return fb
         return JSONResponse(content={"error": "Video URL not found"}, status_code=404)
 
     req_headers = {}
@@ -3503,26 +3523,42 @@ def stream_preview_video(song_name: str, request: Request):
     if range_header:
         req_headers["range"] = range_header
 
-    r2_resp = requests.get(download_url, headers=req_headers, stream=True, timeout=15)
+    try:
+        r2_resp = requests.get(download_url, headers=req_headers, stream=True, timeout=15)
+        if r2_resp.status_code >= 400:
+            print(f"[Preview Video] R2 returned {r2_resp.status_code} for {download_url}. Trying local fallback.")
+            fb = get_local_fallback()
+            if fb:
+                return fb
+            return JSONResponse(content={"error": "Video not found in R2 and no local fallback available"}, status_code=404)
 
-    def chunk_generator():
-        try:
-            for chunk in r2_resp.iter_content(chunk_size=65536):
-                if chunk:
-                    yield chunk
-        finally:
-            r2_resp.close()
+        def chunk_generator():
+            try:
+                for chunk in r2_resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                r2_resp.close()
 
-    resp_headers = {}
-    for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
-        if h in r2_resp.headers:
-            resp_headers[h] = r2_resp.headers[h]
+        resp_headers = {}
+        for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
+            if h in r2_resp.headers:
+                resp_headers[h] = r2_resp.headers[h]
 
-    return StreamingResponse(
-        chunk_generator(),
-        status_code=r2_resp.status_code,
-        headers=resp_headers
-    )
+        if "content-type" not in resp_headers:
+            resp_headers["content-type"] = "video/mp4"
+
+        return StreamingResponse(
+            chunk_generator(),
+            status_code=r2_resp.status_code,
+            headers=resp_headers
+        )
+    except Exception as e:
+        print(f"[Preview Video] Failed streaming from R2: {e}. Trying local fallback.")
+        fb = get_local_fallback()
+        if fb:
+            return fb
+        return JSONResponse(content={"error": f"Failed to stream video: {str(e)}"}, status_code=500)
 
 
 # -------------------------------------------------------------------
