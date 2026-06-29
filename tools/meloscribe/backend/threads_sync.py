@@ -57,7 +57,7 @@ def sync_threads():
 
     # Connect to database
     db_path = Path(__file__).parent / "analytics.db"
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     c = conn.cursor()
     
     today_str = datetime.date.today().isoformat()

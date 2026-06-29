@@ -28,7 +28,7 @@ def sync_youtube():
     import sync_utils
     import datetime
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     known_songs = sync_utils.get_known_songs(cursor)
 

@@ -179,18 +179,16 @@ def startup_event():
 
     # --- Desktop Shortcut Auto-Creation ---
     try:
-        shortcut_path = Path("C:/Users/Ventoba/Desktop/Meloscribe.lnk")
-        if not shortcut_path.exists():
-            ps_script = TOOLS_DIR / "meloscribe" / "create_shortcut.ps1"
-            if ps_script.exists():
-                subprocess.Popen(
-                    ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print("[Startup] Created Meloscribe Desktop Shortcut.")
+        ps_script = TOOLS_DIR / "meloscribe" / "create_shortcut.ps1"
+        if ps_script.exists():
+            subprocess.Popen(
+                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print("[Startup] Verified/Updated Meloscribe Desktop Shortcut.")
     except Exception as e:
-        print(f"[Startup] Failed to create shortcut: {e}")
+        print(f"[Startup] Failed to verify shortcut: {e}")
 
     # --- ngrok Auto-Start (background) ---
     def run_ngrok():

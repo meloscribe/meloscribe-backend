@@ -43,7 +43,7 @@ def sync_youtube_demographics():
         today = datetime.date.today().isoformat()
         start_date = (datetime.date.today() - datetime.timedelta(days=90)).isoformat()
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         c = conn.cursor()
         _ensure_table(c)
         
@@ -126,7 +126,7 @@ def sync_instagram_demographics():
         GRAPH_URL = "https://graph.facebook.com/v19.0"
         today = datetime.date.today().isoformat()
         
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=30.0)
         c = conn.cursor()
         _ensure_table(c)
         

@@ -119,7 +119,7 @@ def sync_tiktok():
 
     import sync_utils
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     cursor = conn.cursor()
     known_songs = sync_utils.get_known_songs(cursor)
     print(f"[TikTok Sync] {len(known_songs)} known songs in DB.")
