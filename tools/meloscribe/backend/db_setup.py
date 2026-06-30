@@ -217,15 +217,24 @@ def init_db():
         amount         REAL,
         currency       TEXT,
         status         TEXT,
-        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        download_hash  TEXT,
+        download_count INTEGER DEFAULT 0,
+        downloaded_types TEXT DEFAULT '',
+        locale         TEXT DEFAULT 'en',
+        ip_addresses   TEXT DEFAULT '',
+        buyer_name     TEXT DEFAULT ''
     )
     ''')
 
-    # Migrate: add download_hash, download_count, and downloaded_types to purchases
+    # Migrate: add download_hash, download_count, downloaded_types, locale, ip_addresses, and buyer_name to purchases
     for col, coltype in [
         ('download_hash', 'TEXT'),
         ('download_count', 'INTEGER DEFAULT 0'),
-        ('downloaded_types', "TEXT DEFAULT ''")
+        ('downloaded_types', "TEXT DEFAULT ''"),
+        ('locale', "TEXT DEFAULT 'en'"),
+        ('ip_addresses', "TEXT DEFAULT ''"),
+        ('buyer_name', "TEXT DEFAULT ''")
     ]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
