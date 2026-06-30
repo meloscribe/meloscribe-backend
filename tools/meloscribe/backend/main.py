@@ -2806,17 +2806,17 @@ async def paddle_webhook(request: Request):
             if not download_hash:
                 download_hash = uuid.uuid4().hex
             
-            totals = data.get("details", {}).get("totals", {})
+            totals = (data.get("details") or {}).get("totals") or {}
             grand_total = float(totals.get("grand_total", 0)) / 100.0
             currency = totals.get("currency_code", "EUR")
             
             # Extract locale and buyer name
-            locale = data.get("locale") or data.get("checkout", {}).get("locale") or "en"
-            buyer_name = (data.get("customer", {}).get("name") or 
-                          data.get("billing_details", {}).get("name") or 
+            locale = data.get("locale") or (data.get("checkout") or {}).get("locale") or "en"
+            buyer_name = ((data.get("customer") or {}).get("name") or 
+                          (data.get("billing_details") or {}).get("name") or 
                           "")
             
-            email = data.get("billing_details", {}).get("email_address") or data.get("customer", {}).get("email") or "customer@example.com"
+            email = (data.get("billing_details") or {}).get("email_address") or (data.get("customer") or {}).get("email") or "customer@example.com"
             
             db_path = Path(__file__).resolve().parent / "analytics.db"
             conn = sqlite3.connect(str(db_path))
@@ -3013,18 +3013,18 @@ def get_hash_by_checkout(checkout_id: str):
                                 buyer_name = cust_info.get("name", "")
                         
                         if not buyer_name:
-                            buyer_name = tx_data.get("billing_details", {}).get("name") or ""
+                            buyer_name = (tx_data.get("billing_details") or {}).get("name") or ""
                             
                         locale = tx_data.get("locale") or "en"
                         
-                        custom_data = tx_data.get("custom_data", {})
+                        custom_data = tx_data.get("custom_data") or {}
                         song_title = custom_data.get("song_title") or "Unknown Song"
                         download_hash = custom_data.get("download_hash")
                         if not download_hash:
                             import uuid
                             download_hash = uuid.uuid4().hex
                         
-                        totals = tx_data.get("details", {}).get("totals", {})
+                        totals = (tx_data.get("details") or {}).get("totals") or {}
                         grand_total = float(totals.get("grand_total", 0)) / 100.0
                         currency = totals.get("currency_code", "EUR")
                         
