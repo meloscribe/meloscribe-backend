@@ -264,6 +264,16 @@ def init_db():
     )
     ''')
 
+    # ── DOWNLOAD IP LOG (rolling IP tracking to prevent sharing) ──────────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS download_ip_log (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_hash  TEXT,
+        ip_address     TEXT,
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")

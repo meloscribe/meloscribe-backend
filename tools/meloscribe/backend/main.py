@@ -3096,19 +3096,17 @@ def request_download(hash: str, type: str, request: Request):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count, downloaded_types, ip_addresses FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count, downloaded_types FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
     downloaded_types = ""
-    ip_addresses = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
         downloaded_types = row[2] or ""
-        ip_addresses = row[3] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
@@ -3118,18 +3116,23 @@ def request_download(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    # Check IP limits (Max 3 unique IPs)
+    # Check IP limits (Max 3 unique IPs in 24 hours)
     client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
     if row and not hash.startswith("demo_hash_"):
-        ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
-        if client_ip not in ip_list:
-            if len(ip_list) >= 3:
-                conn.close()
-                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
-            ip_list.append(client_ip)
-            new_ip_str = ",".join(ip_list)
-            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
-            conn.commit()
+        c.execute(
+            "INSERT INTO download_ip_log (purchase_hash, ip_address) VALUES (?, ?)",
+            (hash, client_ip)
+        )
+        conn.commit()
+        
+        c.execute(
+            "SELECT COUNT(DISTINCT ip_address) FROM download_ip_log WHERE purchase_hash = ? AND created_at > datetime('now', '-24 hours')",
+            (hash,)
+        )
+        unique_ip_count = c.fetchone()[0]
+        if unique_ip_count > 3:
+            conn.close()
+            return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations in the last 24 hours. Please contact support."}, status_code=403)
             
     if download_count >= 100:
         conn.close()
@@ -3157,21 +3160,19 @@ def download_file(hash: str, type: str, request: Request):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, transaction_id, ip_addresses, buyer_name FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, transaction_id, buyer_name FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     email = None
     txn_id = None
-    ip_addresses = ""
     buyer_name = ""
     
     if row:
         song_name = row[0]
         email = row[1]
         txn_id = row[2]
-        ip_addresses = row[3] or ""
-        buyer_name = row[4] or ""
+        buyer_name = row[3] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         email = "demo_customer@example.com"
@@ -3182,18 +3183,23 @@ def download_file(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    # Check IP limits again
+    # Check IP limits again (Max 3 unique IPs in 24 hours)
     client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
     if row and not hash.startswith("demo_hash_"):
-        ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
-        if client_ip not in ip_list:
-            if len(ip_list) >= 3:
-                conn.close()
-                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
-            ip_list.append(client_ip)
-            new_ip_str = ",".join(ip_list)
-            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
-            conn.commit()
+        c.execute(
+            "INSERT INTO download_ip_log (purchase_hash, ip_address) VALUES (?, ?)",
+            (hash, client_ip)
+        )
+        conn.commit()
+        
+        c.execute(
+            "SELECT COUNT(DISTINCT ip_address) FROM download_ip_log WHERE purchase_hash = ? AND created_at > datetime('now', '-24 hours')",
+            (hash,)
+        )
+        unique_ip_count = c.fetchone()[0]
+        if unique_ip_count > 3:
+            conn.close()
+            return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations in the last 24 hours. Please contact support."}, status_code=403)
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
