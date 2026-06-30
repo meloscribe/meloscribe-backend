@@ -2844,17 +2844,25 @@ async def paddle_webhook(request: Request):
             if is_new:
                 send_purchase_delivery_email(email, song_title, download_hash, locale)
         
-        elif event_type in ("transaction.refunded", "transaction.updated"):
-            txn_id = data.get("id") or data.get("transaction_id")
+        elif event_type in ("transaction.refunded", "transaction.updated", "adjustment.created", "adjustment.updated"):
+            txn_id = data.get("transaction_id") or data.get("id")
             status = data.get("status")
-            if event_type == "transaction.refunded" or status in ("refunded", "cancelled"):
+            action = data.get("action")
+            
+            is_refund = (
+                event_type == "transaction.refunded" or
+                status in ("refunded", "cancelled") or
+                action == "refund"
+            )
+            
+            if is_refund and txn_id:
                 db_path = Path(__file__).resolve().parent / "analytics.db"
                 conn = sqlite3.connect(str(db_path))
                 c = conn.cursor()
                 c.execute("UPDATE purchases SET status = 'inactive' WHERE transaction_id = ?", (txn_id,))
                 conn.commit()
                 conn.close()
-                print(f"[Paddle Webhook] Transaction {txn_id} is refunded/cancelled. Set status to inactive.")
+                print(f"[Paddle Webhook] Event {event_type} (Txn: {txn_id}, Action: {action}, Status: {status}) matches refund. Set status to inactive.")
             
     except Exception as e:
         print(f"Paddle Webhook processing error: {e}")
