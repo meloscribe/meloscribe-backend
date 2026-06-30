@@ -3095,7 +3095,7 @@ def get_order_details(hash: str):
 # -------------------------------------------------------------------
 def verify_admin(request: Request):
     passcode = request.headers.get("x-admin-passcode")
-    expected = load_settings().get("admin_passcode", "meloscribe_admin_2026")
+    expected = load_settings().get("admin_passcode", "579110")
     if passcode != expected:
         raise HTTPException(status_code=401, detail="Unauthorized admin access")
 
