@@ -3008,7 +3008,7 @@ def get_hash_by_checkout(checkout_id: str):
                         if customer_id:
                             cust_resp = requests.get(f"{url_prefix}/customers/{customer_id}", headers=headers, timeout=10.0)
                             if cust_resp.status_code == 200:
-                                cust_info = cust_resp.json().get("data", {})
+                                cust_info = cust_resp.json().get("data") or {}
                                 email = cust_info.get("email", email)
                                 buyer_name = cust_info.get("name", "")
                         
@@ -3116,24 +3116,7 @@ def request_download(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    # Check IP limits (Max 3 unique IPs in 24 hours)
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
-    if row and not hash.startswith("demo_hash_"):
-        c.execute(
-            "INSERT INTO download_ip_log (purchase_hash, ip_address) VALUES (?, ?)",
-            (hash, client_ip)
-        )
-        conn.commit()
-        
-        c.execute(
-            "SELECT COUNT(DISTINCT ip_address) FROM download_ip_log WHERE purchase_hash = ? AND created_at > datetime('now', '-24 hours')",
-            (hash,)
-        )
-        unique_ip_count = c.fetchone()[0]
-        if unique_ip_count > 3:
-            conn.close()
-            return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations in the last 24 hours. Please contact support."}, status_code=403)
-            
+    # IP limits removed as requested
     if download_count >= 100:
         conn.close()
         return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
@@ -3183,23 +3166,7 @@ def download_file(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    # Check IP limits again (Max 3 unique IPs in 24 hours)
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
-    if row and not hash.startswith("demo_hash_"):
-        c.execute(
-            "INSERT INTO download_ip_log (purchase_hash, ip_address) VALUES (?, ?)",
-            (hash, client_ip)
-        )
-        conn.commit()
-        
-        c.execute(
-            "SELECT COUNT(DISTINCT ip_address) FROM download_ip_log WHERE purchase_hash = ? AND created_at > datetime('now', '-24 hours')",
-            (hash,)
-        )
-        unique_ip_count = c.fetchone()[0]
-        if unique_ip_count > 3:
-            conn.close()
-            return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations in the last 24 hours. Please contact support."}, status_code=403)
+    # IP limits removed as requested
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
