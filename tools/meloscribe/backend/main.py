@@ -2939,7 +2939,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 26px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center; color: #00f5ff; background-image: linear-gradient(to right, #ff2d92, #00f5ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">meloscribe</h1>
+    <h1 style="font-size: 26px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">Arranged by ear. Played by you.</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
@@ -3677,7 +3677,7 @@ def _send_confirmation_email(email: str, token: str):
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
+    <h1 style="font-size: 24px; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
@@ -4389,7 +4389,7 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 28px; font-weight: 800; background: linear-gradient(to right, #00f5d4, #ff007f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
+    <h1 style="font-size: 28px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
