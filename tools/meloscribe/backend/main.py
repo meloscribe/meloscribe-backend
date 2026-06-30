@@ -2843,6 +2843,18 @@ async def paddle_webhook(request: Request):
             
             if is_new:
                 send_purchase_delivery_email(email, song_title, download_hash, locale)
+        
+        elif event_type in ("transaction.refunded", "transaction.updated"):
+            txn_id = data.get("id") or data.get("transaction_id")
+            status = data.get("status")
+            if event_type == "transaction.refunded" or status in ("refunded", "cancelled"):
+                db_path = Path(__file__).resolve().parent / "analytics.db"
+                conn = sqlite3.connect(str(db_path))
+                c = conn.cursor()
+                c.execute("UPDATE purchases SET status = 'inactive' WHERE transaction_id = ?", (txn_id,))
+                conn.commit()
+                conn.close()
+                print(f"[Paddle Webhook] Transaction {txn_id} is refunded/cancelled. Set status to inactive.")
             
     except Exception as e:
         print(f"Paddle Webhook processing error: {e}")
@@ -3070,7 +3082,7 @@ def get_order_details(hash: str):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, download_count FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, download_count, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     conn.close()
     
@@ -3078,11 +3090,16 @@ def get_order_details(hash: str):
         return {
             "song_name": "Sweetest Rain",
             "email": "demo_customer@example.com",
-            "download_count": 0
+            "download_count": 0,
+            "status": "completed"
         }
         
     if not row:
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    status = row[3] or ""
+    if status in ("inactive", "refunded", "deactivated"):
+        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     return {
         "song_name": row[0],
@@ -3371,6 +3388,22 @@ def admin_reset_order_downloads(request: Request, payload: dict):
     conn.close()
     return {"success": True}
 
+@app.post("/api/admin/orders/toggle-status")
+def admin_toggle_order_status(request: Request, payload: dict):
+    verify_admin(request)
+    transaction_id = payload.get("transaction_id")
+    new_status = payload.get("status")
+    if not transaction_id or not new_status:
+        raise HTTPException(status_code=400, detail="Transaction ID and status required")
+        
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path))
+    c = conn.cursor()
+    c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "status": new_status}
+
 @app.get("/api/download/request")
 def request_download(hash: str, type: str, request: Request):
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
@@ -3379,25 +3412,32 @@ def request_download(hash: str, type: str, request: Request):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count, downloaded_types FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count, downloaded_types, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
     downloaded_types = ""
+    status = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
         downloaded_types = row[2] or ""
+        status = row[3] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
+        status = "completed"
         print(f"[Download Request] Sandbox hash '{hash}' resolved to '{song_name}'")
         
     if not song_name:
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    if status in ("inactive", "refunded", "deactivated"):
+        conn.close()
+        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     # IP limits removed as requested
     if download_count >= 50:
@@ -3426,28 +3466,35 @@ def download_file(hash: str, type: str, request: Request):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, transaction_id, buyer_name FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, transaction_id, buyer_name, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     email = None
     txn_id = None
     buyer_name = ""
+    status = ""
     
     if row:
         song_name = row[0]
         email = row[1]
         txn_id = row[2]
         buyer_name = row[3] or ""
+        status = row[4] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         email = "demo_customer@example.com"
         txn_id = "demo_12345"
         buyer_name = "Jane Doe"
+        status = "completed"
         
     if not song_name:
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    if status in ("inactive", "refunded", "deactivated"):
+        conn.close()
+        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     # IP limits removed as requested
     conn.close()
