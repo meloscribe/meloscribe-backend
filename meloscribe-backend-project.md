@@ -146,19 +146,19 @@ git add . && git commit -m "..." && git push
 - [x] OCI Security List + iptables firewall rules
 - [x] Deploy FastAPI backend via public GitHub repo
 - [x] Paddle webhook endpoint + purchase recording
-- [x] Cloudflare R2 presigned download URL generation (15 min, max 20 hits)
+- [x] Cloudflare R2 presigned download URL generation (15 min, max 100 hits)
 - [x] SQLite WAL mode + connection timeout to prevent locking under concurrent load
-- [x] `download_hash` + `download_count` columns migrated into `purchases` table
+- [x] `download_hash` + `download_count` + `downloaded_types` columns migrated into `purchases` table
 - [x] Inject R2 credentials + Paddle API key into server `settings.json`
 - [x] Separated backend into public repo (clean history — no credentials ever committed)
 - [x] Added `notify_subscribers` table migration to `db_setup.py`
 - [x] Implemented Double Opt-In subscription email system (`/api/notify/*` endpoints) using Resend API
 - [x] Deployed and verified backend updates live on Oracle Cloud VM
+- [x] Implemented unique file downloaded types tracking to prevent double count decrements on duplicate downloads
+- [x] Applied brand gradient header styling to delivery emails with a solid cyan fallback
 
 ## Active Blockers / Next Steps
 
 - **BLOCKED — Paddle Domain Verification abgelehnt**: Paddle Dashboard zeigt "Action required" für meloscribe.dev. Kein Live-Webhook-Test möglich bis Support-Ticket (sellers@paddle.com) gelöst ist. Klärung: Anforderungen für Domain-Freischaltung + undokumentierter 10%-Flat-Fee-Tarif.
-- Paddle-Webhook-Signaturprüfung (HMAC-SHA256) ist implementiert — sobald Freischaltung erfolgt, End-to-End-Test durchführen.
-- Email verification flow verified with simulated Resend API key — verify live with real opt-ins when users join.
-- Presigned URL Expiry und Download-Counter-Dekrement in Produktion verifizieren.
+- End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification will be tested once production domain verification is approved.
 
