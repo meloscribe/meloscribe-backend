@@ -2867,8 +2867,10 @@ def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id:
     import io
     from pypdf import PdfReader, PdfWriter
     try:
-        name_part = f"{buyer_name} " if buyer_name else ""
-        text = f"Licensed to: {name_part}({email}) | Order #{transaction_id}"
+        if buyer_name and buyer_name.strip():
+            text = f"Licensed to: {buyer_name.strip()} ({email}) | Order #{transaction_id}"
+        else:
+            text = f"Licensed to: {email} | Order #{transaction_id}"
         
         watermark_pdf_stream = generate_watermark_page(text)
         watermark_reader = PdfReader(watermark_pdf_stream)
@@ -3097,6 +3099,110 @@ def verify_admin(request: Request):
     if passcode != expected:
         raise HTTPException(status_code=401, detail="Unauthorized admin access")
 
+# -------------------------------------------------------------------
+# Dynamic Songs Catalog APIs
+# -------------------------------------------------------------------
+SONGS_JSON_PATH = Path(__file__).resolve().parent / "songs.json"
+
+def load_songs_list():
+    if not SONGS_JSON_PATH.exists():
+        return []
+    try:
+        with open(SONGS_JSON_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading songs.json: {e}")
+        return []
+
+def save_songs_list(songs_list):
+    try:
+        with open(SONGS_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(songs_list, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"Error saving songs.json: {e}")
+        return False
+
+@app.get("/api/public/songs")
+def get_public_songs():
+    return load_songs_list()
+
+@app.post("/api/admin/songs/add")
+def admin_add_song(request: Request, payload: dict):
+    verify_admin(request)
+    songs_list = load_songs_list()
+    
+    new_song = payload.get("song")
+    if not new_song or not new_song.get("title") or not new_song.get("artist"):
+        raise HTTPException(status_code=400, detail="Song title and artist are required")
+        
+    ids = []
+    for s in songs_list:
+        if s.get("id") and s["id"] != "global_settings":
+            try:
+                ids.append(int(s["id"]))
+            except ValueError:
+                pass
+    new_id = str(max(ids) + 1) if ids else "1"
+    
+    new_song["id"] = new_id
+    new_song["hidden"] = new_song.get("hidden", False)
+    new_song["difficulty"] = new_song.get("difficulty", "Easy")
+    new_song["format"] = new_song.get("format", "full_arrangement")
+    new_song["price"] = new_song.get("price", "6 €")
+    new_song["kofiId"] = new_song.get("kofiId", "")
+    new_song["youtubeUrl"] = new_song.get("youtubeUrl", "")
+    new_song["tags"] = new_song.get("tags", [])
+    
+    songs_list.append(new_song)
+    if save_songs_list(songs_list):
+        return {"success": True, "song": new_song}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
+
+@app.post("/api/admin/songs/edit")
+def admin_edit_song(request: Request, payload: dict):
+    verify_admin(request)
+    songs_list = load_songs_list()
+    
+    updated_song = payload.get("song")
+    if not updated_song or not updated_song.get("id"):
+        raise HTTPException(status_code=400, detail="Song data with ID is required")
+        
+    found = False
+    for i, s in enumerate(songs_list):
+        if s.get("id") == updated_song["id"]:
+            songs_list[i] = {**s, **updated_song}
+            found = True
+            break
+            
+    if not found:
+        raise HTTPException(status_code=404, detail="Song not found")
+        
+    if save_songs_list(songs_list):
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
+
+@app.post("/api/admin/songs/delete")
+def admin_delete_song(request: Request, payload: dict):
+    verify_admin(request)
+    song_id = payload.get("id")
+    if not song_id:
+        raise HTTPException(status_code=400, detail="Song ID is required")
+        
+    songs_list = load_songs_list()
+    initial_len = len(songs_list)
+    songs_list = [s for s in songs_list if s.get("id") != song_id]
+    
+    if len(songs_list) == initial_len:
+        raise HTTPException(status_code=404, detail="Song not found")
+        
+    if save_songs_list(songs_list):
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
+
 @app.get("/api/admin/packages")
 def admin_list_packages(request: Request):
     verify_admin(request)
@@ -3294,9 +3400,9 @@ def request_download(hash: str, type: str, request: Request):
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
     # IP limits removed as requested
-    if download_count >= 100:
+    if download_count >= 50:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
         
     if row:
         types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
