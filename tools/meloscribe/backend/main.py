@@ -16,7 +16,7 @@ from typing import Optional
 
 CREATION_FLAGS = 0x08000000 if os.name == 'nt' else 0
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks, Form, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -3088,6 +3088,183 @@ def get_order_details(hash: str):
         "download_count": row[2]
     }
 
+# -------------------------------------------------------------------
+# Admin / Package Management APIs
+# -------------------------------------------------------------------
+def verify_admin(request: Request):
+    passcode = request.headers.get("x-admin-passcode")
+    expected = load_settings().get("admin_passcode", "meloscribe_admin_2026")
+    if passcode != expected:
+        raise HTTPException(status_code=401, detail="Unauthorized admin access")
+
+@app.get("/api/admin/packages")
+def admin_list_packages(request: Request):
+    verify_admin(request)
+    
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
+        
+    import boto3
+    from botocore.config import Config
+    s3 = boto3.client(
+        's3',
+        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+        aws_access_key_id=r2_access_key,
+        aws_secret_access_key=r2_secret_key,
+        config=Config(signature_version='s3v4')
+    )
+    
+    try:
+        res = s3.list_objects_v2(Bucket=r2_bucket)
+        files = []
+        if 'Contents' in res:
+            for obj in res['Contents']:
+                files.append({
+                    "key": obj['Key'],
+                    "size": obj['Size'],
+                    "last_modified": obj['LastModified'].isoformat()
+                })
+        return {"files": files}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list Cloudflare R2 files: {str(e)}")
+
+@app.post("/api/admin/upload")
+async def admin_upload_file(
+    request: Request,
+    song_name: str = Form(...),
+    type: str = Form(...),
+    file: UploadFile = File(...)
+):
+    verify_admin(request)
+    
+    filename = f"{song_name}.pdf" if type == "pdf" else \
+               f"{song_name}.mid" if type == "midi" else \
+               f"{song_name} slow.mid" if type == "midi_slow" else \
+               f"{song_name}.mp4" if type == "video" else \
+               f"{song_name} slow.mp4" if type == "video_slow" else \
+               f"{song_name} Full Package.zip" if type == "zip" else file.filename
+               
+    if type == "zip":
+        r2_key = filename
+    else:
+        r2_key = f"{song_name}/{filename}"
+        
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
+        
+    import boto3
+    from botocore.config import Config
+    s3 = boto3.client(
+        's3',
+        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+        aws_access_key_id=r2_access_key,
+        aws_secret_access_key=r2_secret_key,
+        config=Config(signature_version='s3v4')
+    )
+    
+    try:
+        content = await file.read()
+        content_type = "application/pdf" if type == "pdf" else \
+                       "audio/midi" if "midi" in type else \
+                       "video/mp4" if "video" in type else \
+                       "application/zip" if type == "zip" else "application/octet-stream"
+                       
+        s3.put_object(
+            Bucket=r2_bucket,
+            Key=r2_key,
+            Body=content,
+            ContentType=content_type
+        )
+        print(f"[Admin Upload] Successfully uploaded {r2_key} to R2")
+        return {"success": True, "key": r2_key}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to upload file to Cloudflare R2: {str(e)}")
+
+@app.post("/api/admin/delete")
+def admin_delete_file(request: Request, payload: dict):
+    verify_admin(request)
+    r2_key = payload.get("key")
+    if not r2_key:
+        raise HTTPException(status_code=400, detail="R2 Key is required")
+        
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
+        
+    import boto3
+    from botocore.config import Config
+    s3 = boto3.client(
+        's3',
+        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+        aws_access_key_id=r2_access_key,
+        aws_secret_access_key=r2_secret_key,
+        config=Config(signature_version='s3v4')
+    )
+    
+    try:
+        s3.delete_object(Bucket=r2_bucket, Key=r2_key)
+        print(f"[Admin Delete] Deleted {r2_key} from R2")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file from Cloudflare R2: {str(e)}")
+
+@app.get("/api/admin/orders")
+def admin_list_orders(request: Request):
+    verify_admin(request)
+    
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path))
+    c = conn.cursor()
+    c.execute("SELECT transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, download_count, created_at FROM purchases ORDER BY created_at DESC")
+    rows = c.fetchall()
+    conn.close()
+    
+    orders = []
+    for row in rows:
+        orders.append({
+            "transaction_id": row[0],
+            "email": row[1],
+            "song_name": row[2],
+            "amount": row[3],
+            "currency": row[4],
+            "status": row[5],
+            "download_hash": row[6],
+            "locale": row[7],
+            "buyer_name": row[8],
+            "download_count": row[9],
+            "created_at": row[10]
+        })
+    return {"orders": orders}
+
+@app.post("/api/admin/orders/reset")
+def admin_reset_order_downloads(request: Request, payload: dict):
+    verify_admin(request)
+    transaction_id = payload.get("transaction_id")
+    if not transaction_id:
+        raise HTTPException(status_code=400, detail="Transaction ID required")
+        
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path))
+    c = conn.cursor()
+    c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
+    conn.commit()
+    conn.close()
+    return {"success": True}
+
 @app.get("/api/download/request")
 def request_download(hash: str, type: str, request: Request):
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
@@ -3125,10 +3302,10 @@ def request_download(hash: str, type: str, request: Request):
         types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
         if type not in types_list:
             types_list.append(type)
-            new_types_str = ",".join(types_list)
-            download_count = download_count + 1
-            c.execute("UPDATE purchases SET download_count = ?, downloaded_types = ? WHERE download_hash = ?", (download_count, new_types_str, hash))
-            conn.commit()
+        new_types_str = ",".join(types_list)
+        download_count = download_count + 1
+        c.execute("UPDATE purchases SET download_count = ?, downloaded_types = ? WHERE download_hash = ?", (download_count, new_types_str, hash))
+        conn.commit()
     conn.close()
     
     # Return absolute URL pointing to our dynamic file downloader/redirector
