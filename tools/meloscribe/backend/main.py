@@ -2848,7 +2848,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str)
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0; font-weight: 800;">meloscribe</h1>
+    <h1 style="font-size: 26px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center; color: #00f5ff; background-image: linear-gradient(to right, #ff2d92, #00f5ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">meloscribe</h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
@@ -3003,15 +3003,17 @@ def request_download(hash: str, type: str):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count, downloaded_types FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
+    downloaded_types = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
+        downloaded_types = row[2] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
@@ -3021,14 +3023,18 @@ def request_download(hash: str, type: str):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    if download_count >= 20:
+    if download_count >= 100:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 20 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
         
     if row:
-        new_count = download_count + 1
-        c.execute("UPDATE purchases SET download_count = ? WHERE download_hash = ?", (new_count, hash))
-        conn.commit()
+        types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
+        if type not in types_list:
+            types_list.append(type)
+            new_types_str = ",".join(types_list)
+            download_count = download_count + 1
+            c.execute("UPDATE purchases SET download_count = ?, downloaded_types = ? WHERE download_hash = ?", (download_count, new_types_str, hash))
+            conn.commit()
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
@@ -3052,6 +3058,7 @@ def request_download(hash: str, type: str):
             suffix = " Full Package.zip"
         return {
             "download_url": f"https://example.com/demo-packages/{song_name}{suffix}",
+            "download_count": download_count,
             "message": "Demo mode: R2 credentials are not configured in settings.json"
         }
         
@@ -3086,7 +3093,7 @@ def request_download(hash: str, type: str):
             ExpiresIn=900
         )
         
-        return {"download_url": presigned_url}
+        return {"download_url": presigned_url, "download_count": download_count}
     except Exception as e:
         print(f"Failed to generate presigned R2 URL: {e}")
         return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)

@@ -221,10 +221,11 @@ def init_db():
     )
     ''')
 
-    # Migrate: add download_hash and download_count to purchases
+    # Migrate: add download_hash, download_count, and downloaded_types to purchases
     for col, coltype in [
         ('download_hash', 'TEXT'),
-        ('download_count', 'INTEGER DEFAULT 0')
+        ('download_count', 'INTEGER DEFAULT 0'),
+        ('downloaded_types', "TEXT DEFAULT ''")
     ]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
