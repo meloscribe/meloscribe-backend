@@ -1645,7 +1645,7 @@ def sync_song_price_to_paddle(song, new_price_str, api_key, is_sandbox=True):
 
     api_url = "https://sandbox-api.paddle.com" if is_sandbox else "https://api.paddle.com"
 
-    price_id = song.get("kofiId")
+    price_id = song.get("paddleId")
     product_id = None
     is_new_product = False
 
@@ -1817,11 +1817,11 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
             new_price = song.get("price", "")
             
             # Sync to Paddle if price changed, or if it doesn't have a valid Paddle Price ID yet
-            has_valid_paddle_id = song.get("kofiId", "").startswith("pri_")
+            has_valid_paddle_id = song.get("paddleId", "").startswith("pri_")
             if (old_price != new_price or not has_valid_paddle_id) and api_key:
                 new_price_id = sync_song_price_to_paddle(song, new_price, api_key, is_sandbox=is_sandbox)
                 if new_price_id:
-                    song["kofiId"] = new_price_id
+                    song["paddleId"] = new_price_id
             updated_songs.append(song)
 
         with open(songs_path, "w", encoding="utf-8") as f:
@@ -3492,7 +3492,7 @@ def admin_add_song(request: Request, payload: dict):
     new_song["difficulty"] = new_song.get("difficulty", "Easy")
     new_song["format"] = new_song.get("format", "full_arrangement")
     new_song["price"] = new_song.get("price", "6 €")
-    new_song["kofiId"] = new_song.get("kofiId", "")
+    new_song["paddleId"] = new_song.get("paddleId", "")
     new_song["youtubeUrl"] = new_song.get("youtubeUrl", "")
     new_song["tags"] = new_song.get("tags", [])
     
