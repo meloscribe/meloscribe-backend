@@ -103,6 +103,159 @@ def get_server_api_key():
         pass
     return _cached_api_key
 
+FORBIDDEN_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>403 — Access Restricted | Meloscribe</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: #07070e;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: #fff;
+    }
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .orb-cyan  { width: 600px; height: 600px; background: rgba(0,245,255,0.12); top: -100px; left: -150px; }
+    .orb-pink  { width: 500px; height: 500px; background: rgba(255,45,146,0.12); bottom: -80px; right: -120px; }
+    .card {
+      position: relative;
+      z-index: 1;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(0,245,255,0.18);
+      border-radius: 24px;
+      padding: 56px 64px;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+      backdrop-filter: blur(24px) saturate(180%);
+      box-shadow: 0 0 80px rgba(0,245,255,0.06), 0 32px 80px rgba(0,0,0,0.6);
+      animation: fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) both;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(28px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .icon-wrap {
+      width: 72px; height: 72px;
+      margin: 0 auto 28px;
+      background: rgba(0,245,255,0.08);
+      border: 1px solid rgba(0,245,255,0.22);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 0 32px rgba(0,245,255,0.15);
+    }
+    .icon-wrap svg { width: 36px; height: 36px; }
+    .code {
+      font-size: 80px;
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, #00f5ff 0%, #ff2d92 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 12px;
+      letter-spacing: -2px;
+    }
+    .title {
+      font-size: 22px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 12px;
+    }
+    .desc {
+      font-size: 14px;
+      color: rgba(255,255,255,0.45);
+      line-height: 1.7;
+      margin-bottom: 36px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(255,45,146,0.1);
+      border: 1px solid rgba(255,45,146,0.25);
+      border-radius: 999px;
+      padding: 6px 16px;
+      font-size: 12px;
+      color: #ff2d92;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+    .footer {
+      margin-top: 40px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.18);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .piano-keys { display: flex; gap: 3px; justify-content: center; margin-top: 32px; }
+    .key-w {
+      width: 18px; height: 52px;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(0,245,255,0.12);
+      border-radius: 0 0 5px 5px;
+    }
+    .key-b {
+      width: 12px; height: 34px;
+      background: rgba(0,245,255,0.18);
+      border: 1px solid rgba(0,245,255,0.3);
+      border-radius: 0 0 4px 4px;
+      margin: 0 -6px;
+      z-index: 1;
+      box-shadow: 0 0 10px rgba(0,245,255,0.2);
+    }
+  </style>
+</head>
+<body>
+  <div class="orb orb-cyan"></div>
+  <div class="orb orb-pink"></div>
+  <div class="card">
+    <div class="icon-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#00f5ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="11" width="18" height="11" rx="2"/>
+        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+    </div>
+    <div class="code">403</div>
+    <div class="title">Access Restricted</div>
+    <p class="desc">This endpoint is protected and requires a valid<br/><code style="color:#00f5ff;font-size:12px;">X-Meloscribe-Key</code> header. Public API routes remain accessible.</p>
+    <div class="badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      Unauthorized Request
+    </div>
+    <div class="piano-keys">
+      <div class="key-w"></div><div class="key-b"></div>
+      <div class="key-w"></div><div class="key-b"></div>
+      <div class="key-w"></div>
+      <div class="key-w"></div><div class="key-b"></div>
+      <div class="key-w"></div><div class="key-b"></div>
+      <div class="key-w"></div><div class="key-b"></div>
+      <div class="key-w"></div>
+    </div>
+    <div class="footer">api.meloscribe.dev</div>
+  </div>
+</body>
+</html>
+"""
+
 # Publicly allowed paths (anyone can request without API key)
 PUBLIC_ROUTES = [
     ("/api/public/songs", "GET"),
@@ -157,10 +310,11 @@ async def security_middleware(request: Request, call_next):
     server_key = get_server_api_key()
 
     if not server_key or client_key != server_key:
-        return JSONResponse(
-            status_code=403,
-            content={"error": "Access Denied: Invalid or missing API key."}
-        )
+        # If the client explicitly requested JSON, respond in kind
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept and "text/html" not in accept:
+            return JSONResponse(status_code=403, content={"error": "Access Denied: Invalid or missing API key."})
+        return HTMLResponse(content=FORBIDDEN_HTML, status_code=403)
 
     return await call_next(request)
 
