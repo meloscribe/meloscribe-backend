@@ -16,7 +16,7 @@ import requests
 from pathlib import Path
 
 APP_ID = "26975285422066567"  # Meta App ID is also Threads Client ID
-APP_SECRET = "70752bda986825b8e63b8ad2c07c93fc"  # Meta App Secret
+APP_SECRET = ""  # Meta App Secret
 REDIRECT_URI = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
 SCOPES = "threads_basic,threads_content_publish,threads_manage_insights"
 TOKENS_PATH = Path(__file__).parent / "threads_tokens.json"

@@ -15,7 +15,7 @@ import requests
 from pathlib import Path
 
 APP_ID = "26975285422066567"
-APP_SECRET = "70752bda986825b8e63b8ad2c07c93fc"
+APP_SECRET = ""
 REDIRECT_URI = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
 SCOPES = "pages_show_list,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_content_publish"
 TOKENS_PATH = Path(__file__).parent / "ig_tokens.json"

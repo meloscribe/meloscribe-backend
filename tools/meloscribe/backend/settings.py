@@ -16,6 +16,12 @@ DEFAULT_SETTINGS = {
     "browser_exec": r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     "browser_user_data": os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\User Data"),
     "pushbullet_token": "",
+    "ig_app_id": "26975285422066567",
+    "ig_app_secret": "",
+    "tiktok_client_key": "sbawwonaqqe71vhfgd",
+    "tiktok_client_secret": "",
+    "threads_app_id": "26975285422066567",
+    "threads_app_secret": "",
     "schedule_interval_days": 3,
     "localUpload": False,
     "desc_template_youtube": (

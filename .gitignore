@@ -78,13 +78,6 @@ tools/meloscribe/backend/*temp*
 # Wir behalten deine Regeln und Baupläne
 !.cursorrules
 !README.md
-!tools/meloscribe/backend/yt_client_secret.json
-!tools/meloscribe/backend/yt_tokens.json
-!tools/meloscribe/backend/ig_tokens.json
-!tools/meloscribe/backend/tiktok_tokens.json
-!tools/meloscribe/backend/threads_tokens.json
-!tools/meloscribe/backend/kofi_cookie.txt
-!tools/meloscribe/backend/settings.json
 
 # Keys and credentials
 *.key

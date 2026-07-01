@@ -22,13 +22,25 @@ from pathlib import Path
 NGROK_EXE      = Path(__file__).parent.parent.parent / "ngrok" / "ngrok.exe"
 NGROK_DOMAIN   = "wooing-encrust-ladle.ngrok-free.dev"   # Permanent static domain
 CLIENT_KEY     = "sbawwonaqqe71vhfgd"
-CLIENT_SECRET  = "HwoHPgIa2wn6agpkQ12tcu9vIBAAY0lP"
+CLIENT_SECRET  = ""
 LOCAL_PORT     = 8080
 REDIRECT_URI   = f"https://{NGROK_DOMAIN}/callback"      # Never changes
 SCOPES         = "user.info.basic,video.list"
 TOKENS_PATH    = Path(__file__).parent / "tiktok_tokens.json"
 TOKEN_URL      = "https://open.tiktokapis.com/v2/oauth/token/"
 AUTH_BASE      = "https://www.tiktok.com/v2/auth/authorize/"
+
+try:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from settings import load_settings
+    _settings = load_settings()
+    if _settings.get("tiktok_client_key"):
+        CLIENT_KEY = str(_settings.get("tiktok_client_key"))
+    if _settings.get("tiktok_client_secret"):
+        CLIENT_SECRET = str(_settings.get("tiktok_client_secret"))
+except Exception:
+    pass
 # -------------------------------------------------------
 
 

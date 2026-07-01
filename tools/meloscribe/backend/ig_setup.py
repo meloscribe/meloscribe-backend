@@ -4,8 +4,20 @@ import requests
 from pathlib import Path
 
 APP_ID = "26975285422066567"
-APP_SECRET = "70752bda986825b8e63b8ad2c07c93fc"
+APP_SECRET = ""
 TOKENS_PATH = Path(__file__).parent / "ig_tokens.json"
+
+try:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from settings import load_settings
+    _settings = load_settings()
+    if _settings.get("ig_app_id"):
+        APP_ID = str(_settings.get("ig_app_id"))
+    if _settings.get("ig_app_secret"):
+        APP_SECRET = str(_settings.get("ig_app_secret"))
+except Exception:
+    pass
 
 def setup_instagram_account(short_lived_token: str):
     print("--- Instagram Graph API Setup ---")
@@ -71,6 +83,12 @@ def setup_instagram_account(short_lived_token: str):
         return False
 
 if __name__ == "__main__":
-    # The token the user just provided:
-    SHORT_TOKEN = "EAFZCV4RFMC4cBRT14AWbrn3aeidZAGwYjJht8sCRWiPZCjtcZAQsbKf9iSUZBbTnc88C87s3HlfCIFmnwOuZB8ebXZBUVLy1FdGurCxmiSOOyiLxO0kWUK0ZCWoKxHEy8JwB9yC7jE1xDIdiPdfXJCMcrvs7zQSwodp70uh7nkiNUurtjZApcfhylnMF2TECXZAtwXqh7ztNVnZBWLQcUb8aW4ywNF3z2Knvod6ZANUK6YiU5vAeZAtVknijkaAHuBWWUqjjz3siZCGIqfEnmtOapI5QhskUgF"
-    setup_instagram_account(SHORT_TOKEN)
+    import sys
+    if len(sys.argv) > 1:
+        SHORT_TOKEN = sys.argv[1]
+    else:
+        SHORT_TOKEN = input("Please enter your Facebook Graph short-lived user access token: ").strip()
+    if SHORT_TOKEN:
+        setup_instagram_account(SHORT_TOKEN)
+    else:
+        print("[X] Token is required.")
