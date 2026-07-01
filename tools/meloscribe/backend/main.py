@@ -13,6 +13,8 @@ import sqlite3
 import datetime
 from pathlib import Path
 from typing import Optional
+import secrets
+import collections
 
 CREATION_FLAGS = 0x08000000 if os.name == 'nt' else 0
 
@@ -45,6 +47,122 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting database-backed helper for multi-worker shared state
+def is_rate_limited(ip: str, endpoint: str, max_requests: int, window_seconds: int) -> bool:
+    import time
+    now = time.time()
+    cutoff = now - window_seconds
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM rate_limits WHERE timestamp < ?", (cutoff,))
+        c.execute("SELECT COUNT(*) FROM rate_limits WHERE ip = ? AND endpoint = ?", (ip, endpoint))
+        count = c.fetchone()[0]
+        if count >= max_requests:
+            conn.close()
+            return True
+        c.execute("INSERT INTO rate_limits (ip, endpoint, timestamp) VALUES (?, ?, ?)", (ip, endpoint, now))
+        conn.commit()
+        conn.close()
+        return False
+    except Exception as e:
+        print(f"[Rate Limit] Database error: {e}")
+        return False
+
+def initialize_server_api_key():
+    try:
+        settings_path = Path(__file__).resolve().parent / "settings.json"
+        s = {}
+        if settings_path.exists():
+            with open(settings_path, "r", encoding="utf-8") as f:
+                s = json.load(f)
+        if not s.get("server_api_key"):
+            s["server_api_key"] = secrets.token_hex(16)
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=4)
+            print(f"[Security] Generated new server_api_key: {s['server_api_key']}")
+        else:
+            print(f"[Security] Loaded server_api_key")
+    except Exception as e:
+        print(f"[Security] Failed to initialize server_api_key: {e}")
+
+_cached_api_key = None
+def get_server_api_key():
+    global _cached_api_key
+    if _cached_api_key:
+        return _cached_api_key
+    try:
+        settings_path = Path(__file__).resolve().parent / "settings.json"
+        if settings_path.exists():
+            with open(settings_path, "r", encoding="utf-8") as f:
+                s = json.load(f)
+                _cached_api_key = s.get("server_api_key")
+    except Exception:
+        pass
+    return _cached_api_key
+
+# Publicly allowed paths (anyone can request without API key)
+PUBLIC_ROUTES = [
+    ("/api/public/songs", "GET"),
+    ("/api/public/stats", "GET"),
+    ("/api/public/suggestions", "GET"),
+    ("/api/public/suggestions", "POST"),
+    ("/api/order/hash-by-checkout", "GET"),
+    ("/api/order/details", "GET"),
+    ("/api/download/request", "GET"),
+    ("/api/download/verify", "GET"),
+    ("/api/download/file", "GET"),
+    ("/api/notify/subscribe", "POST"),
+    ("/api/notify/confirm", "GET"),
+    ("/api/notify/unsubscribe", "GET"),
+    ("/callback", "GET"),
+    ("/api/paddle/webhook", "POST"),
+]
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    path = request.url.path
+    method = request.method
+
+    # Always allow static files and video streams
+    if path.startswith("/public") or path.startswith("/api/public/video-stream"):
+        return await call_next(request)
+
+    is_public = False
+    for p_route, p_method in PUBLIC_ROUTES:
+        if path == p_route and method == p_method:
+            is_public = True
+            break
+
+    # Support suggestions vote/unvote variable paths
+    if path.startswith("/api/public/suggestions/") and (path.endswith("/vote") or path.endswith("/unvote")):
+        if method == "POST":
+            is_public = True
+
+    if is_public:
+        # Rate limit suggestions creation and voting
+        client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+        if path == "/api/public/suggestions" and method == "POST":
+            if is_rate_limited(client_ip, "suggestion", max_requests=5, window_seconds=3600):
+                return JSONResponse(status_code=429, content={"error": "Rate limit exceeded. Max 5 suggestions per hour."})
+        elif path.startswith("/api/public/suggestions/") and (path.endswith("/vote") or path.endswith("/unvote")):
+            if is_rate_limited(client_ip, "vote", max_requests=20, window_seconds=600):
+                return JSONResponse(status_code=429, content={"error": "Rate limit exceeded. Max 20 votes per 10 minutes."})
+        return await call_next(request)
+
+    # Validate X-Meloscribe-Key for all other routes
+    client_key = request.headers.get("x-meloscribe-key")
+    server_key = get_server_api_key()
+
+    if not server_key or client_key != server_key:
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Access Denied: Invalid or missing API key."}
+        )
+
+    return await call_next(request)
 
 # -------------------------------------------------------------------
 # Local Windows Proxy logic (redirects to the VM server database)
@@ -172,6 +290,9 @@ _sync_errors = []  # Collect errors from startup syncs (deferred until log_error
 
 @app.on_event("startup")
 def startup_event():
+    # --- Initialize Server API Key ---
+    initialize_server_api_key()
+
     # --- Database Initialization / Migration ---
     try:
         from db_setup import init_db

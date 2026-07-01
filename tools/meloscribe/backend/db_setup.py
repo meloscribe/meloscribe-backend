@@ -274,6 +274,20 @@ def init_db():
     )
     ''')
 
+    # ── RATE LIMITS (shared-state SQLite backend for workers) ──────────────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS rate_limits (
+        ip          TEXT,
+        endpoint    TEXT,
+        timestamp   REAL
+    )
+    ''')
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_rate_limits_ip_endpoint ON rate_limits(ip, endpoint)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_rate_limits_timestamp ON rate_limits(timestamp)')
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")
