@@ -54,6 +54,35 @@ def fetch_recent_data():
     # Get dismissed suggestions to avoid recommending them again
     dismissed = [r["song_name"] for r in c.execute("SELECT song_name FROM dismissed_suggestions").fetchall()] if "dismissed_suggestions" in [row[0] for row in c.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else []
     
+    # Paddle purchases metrics
+    purchases_stats = []
+    try:
+        purchases_stats = [dict(r) for r in c.execute("SELECT song_name, COUNT(*) as sales_count, SUM(CAST(amount as REAL)) as total_sales FROM purchases GROUP BY song_name").fetchall()]
+    except Exception as e:
+        print(f"[AI Agent] Failed to fetch purchases stats: {e}")
+
+    # Overall revenue summary
+    revenue_summary = {"total_amount": 0.0, "transactions_count": 0}
+    try:
+        rev_row = c.execute("SELECT SUM(CAST(amount as REAL)) as total, COUNT(*) as count FROM revenue").fetchone()
+        if rev_row and rev_row["total"] is not None:
+            revenue_summary = {"total_amount": rev_row["total"], "transactions_count": rev_row["count"]}
+    except Exception as e:
+        print(f"[AI Agent] Failed to fetch revenue stats: {e}")
+
+    # Channel insights (latest followers & profile views for platform views)
+    channel_insights = []
+    try:
+        channel_insights = [dict(r) for r in c.execute("""
+            SELECT platform, followers, profile_views, website_clicks, date 
+            FROM channel_insights 
+            WHERE (platform, date) IN (
+                SELECT platform, MAX(date) FROM channel_insights GROUP BY platform
+            )
+        """).fetchall()]
+    except Exception as e:
+        print(f"[AI Agent] Failed to fetch channel insights: {e}")
+        
     conn.close()
     return {
         "total_lifetime_views": total_views,
@@ -61,7 +90,10 @@ def fetch_recent_data():
         "length_performance": length_stats,
         "recent_top_songs": recent_top,
         "current_todo_list": todos,
-        "dismissed_suggestions": dismissed
+        "dismissed_suggestions": dismissed,
+        "purchases_stats": purchases_stats,
+        "revenue_summary": revenue_summary,
+        "channel_insights": channel_insights
     }
 
 def generate_daily_briefing():

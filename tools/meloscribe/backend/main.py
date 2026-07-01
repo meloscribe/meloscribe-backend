@@ -910,7 +910,7 @@ def oauth_callback(code: str, state: str = None):
                 settings = json.load(f)
             
             app_id = settings.get("threads_app_id", "2376057852870646")
-            app_secret = settings.get("threads_app_secret", "61e4182251b85e2efdb4c610b0ed119d")
+            app_secret = settings.get("threads_app_secret", "")
             redirect_uri = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
 
             # Exchange code for short-lived token
@@ -2204,17 +2204,57 @@ async def sync_competitors():
 
 @app.get("/api/todos")
 async def get_todos():
+    # Load published songs from songs.json to auto-complete matching todos
+    published_titles = set()
+    songs_path = Path(__file__).resolve().parent / "songs.json"
+    if songs_path.exists():
+        try:
+            with open(songs_path, "r", encoding="utf-8") as f:
+                songs_list = json.load(f)
+                for s in songs_list:
+                    if isinstance(s, dict) and "title" in s:
+                        published_titles.add(s["title"])
+        except Exception as e:
+            print(f"[Todo Auto-Complete] Error reading songs.json: {e}")
+
+    def clean_name(todo_name):
+        name = todo_name
+        for prefix in ["[PRIORITY] ", "[FORMAT-SHIFT] ", "[RE-PURPOSE] "]:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+        return "".join(c for c in name.lower() if c.isalnum())
+
+    published_cleaned = {clean_name(t) for t in published_titles}
+
     conn = sqlite3.connect(_DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    # Intentionally removed aggressive auto-delete here so manual tasks aren't wiped out.
-    
     # Get all todos
-    todos_raw = [dict(r) for r in c.execute("SELECT * FROM todos WHERE status='pending' ORDER BY added_date DESC").fetchall()]
+    todos_raw_db = [dict(r) for r in c.execute("SELECT * FROM todos WHERE status='pending'").fetchall()]
+    
+    completed_ids = []
+    todos_raw = []
+    
+    for t in todos_raw_db:
+        t_cleaned = clean_name(t["song_name"])
+        is_completed = False
+        for p_clean in published_cleaned:
+            if p_clean and (p_clean == t_cleaned or p_clean in t_cleaned or t_cleaned in p_clean):
+                is_completed = True
+                break
+        
+        if is_completed:
+            completed_ids.append(t["id"])
+        else:
+            todos_raw.append(t)
+            
+    if completed_ids:
+        c.executemany("UPDATE todos SET status='completed' WHERE id=?", [(tid,) for tid in completed_ids])
+        conn.commit()
+        print(f"[Todo Auto-Complete] Auto-completed {len(completed_ids)} todos: {completed_ids}")
     
     # Smart sort: prioritize songs that match high-performing patterns
-    # Score = average views of same song across platforms (if data exists), else 0
     for t in todos_raw:
         song = t["song_name"].replace("[PRIORITY] ", "").replace("[FORMAT-SHIFT] ", "").replace("[RE-PURPOSE] ", "")
         row = c.execute("SELECT AVG(views) as avg_v FROM videos WHERE song_name LIKE ?", (f"%{song.split(' - ')[0].strip()}%",)).fetchone()
@@ -2859,10 +2899,10 @@ async def paddle_webhook(request: Request):
                 db_path = Path(__file__).resolve().parent / "analytics.db"
                 conn = sqlite3.connect(str(db_path))
                 c = conn.cursor()
-                c.execute("UPDATE purchases SET status = 'inactive' WHERE transaction_id = ?", (txn_id,))
+                c.execute("UPDATE purchases SET status = 'refunded' WHERE transaction_id = ?", (txn_id,))
                 conn.commit()
                 conn.close()
-                print(f"[Paddle Webhook] Event {event_type} (Txn: {txn_id}, Action: {action}, Status: {status}) matches refund. Set status to inactive.")
+                print(f"[Paddle Webhook] Event {event_type} (Txn: {txn_id}, Action: {action}, Status: {status}) matches refund. Set status to refunded.")
             
     except Exception as e:
         print(f"Paddle Webhook processing error: {e}")
@@ -3090,7 +3130,7 @@ def get_order_details(hash: str):
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, download_count, status FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, download_count, created_at, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     conn.close()
     
@@ -3099,20 +3139,22 @@ def get_order_details(hash: str):
             "song_name": "Sweetest Rain",
             "email": "demo_customer@example.com",
             "download_count": 0,
+            "created_at": "25.10.2025, 14:32 Uhr",
             "status": "completed"
         }
         
     if not row:
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    status = row[3] or ""
+    status = row[4] or ""
     if status in ("inactive", "refunded", "deactivated"):
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     return {
         "song_name": row[0],
         "email": row[1],
-        "download_count": row[2]
+        "download_count": row[2],
+        "created_at": row[3]
     }
 
 # -------------------------------------------------------------------
@@ -4151,6 +4193,26 @@ def downvote_suggestion(sug_id: str):
 def get_public_stats():
     # Helper to return dynamic stats count
     db_path = Path(__file__).resolve().parent / "analytics.db"
+    
+    # Increment website page views for today
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        from datetime import date
+        today_str = date.today().isoformat()
+        
+        # Check if entry exists for 'website' today
+        c.execute("SELECT profile_views FROM channel_insights WHERE platform = ? AND date = ?", ("website", today_str))
+        row = c.fetchone()
+        if row:
+            c.execute("UPDATE channel_insights SET profile_views = profile_views + 1 WHERE platform = ? AND date = ?", ("website", today_str))
+        else:
+            c.execute("INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks) VALUES (?, ?, 0, 1, 0)", ("website", today_str))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[Stats Track] Error logging website visitor views: {e}")
+        
     try:
         conn = sqlite3.connect(str(db_path))
         c = conn.cursor()

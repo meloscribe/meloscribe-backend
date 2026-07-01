@@ -121,7 +121,7 @@ git add . && git commit -m "..." && git push
 **`purchases` table** (payment + download tracking):
 - `id`, `paddle_order_id`, `product_id`, `buyer_email`
 - `download_hash` (unique URL token)
-- `download_count` (max 20)
+- `download_count` (max 50)
 - `created_at`
 
 **`notify_subscribers` table** (opt-in email alert list):
@@ -146,7 +146,7 @@ git add . && git commit -m "..." && git push
 - [x] OCI Security List + iptables firewall rules
 - [x] Deploy FastAPI backend via public GitHub repo
 - [x] Paddle webhook endpoint + purchase recording
-- [x] Cloudflare R2 presigned download URL generation (15 min, max 100 hits)
+- [x] Cloudflare R2 presigned download URL generation (15 min, max 50 hits)
 - [x] SQLite WAL mode + connection timeout to prevent locking under concurrent load
 - [x] `download_hash` + `download_count` + `downloaded_types` columns migrated into `purchases` table
 - [x] Inject R2 credentials + Paddle API key into server `settings.json`
@@ -156,6 +156,9 @@ git add . && git commit -m "..." && git push
 - [x] Deployed and verified backend updates live on Oracle Cloud VM
 - [x] Implemented unique file downloaded types tracking to prevent double count decrements on duplicate downloads
 - [x] Applied brand gradient header styling to delivery emails with a solid cyan fallback
+- [x] Reduced default download limit from 100 to 50 hits, added informative help tooltips, and routed support mailto links to info@meloscribe.dev
+- [x] Updated Paddle webhook refund processing to handle adjustment.created and adjustment.updated events, setting the purchase status specifically to 'refunded'
+- [x] Cleaned up public backend .gitignore to ensure token, credential, and settings files are strictly ignored and never exposed
 
 ## Active Blockers / Next Steps
 
