@@ -590,8 +590,14 @@ def startup_event():
 import collections
 _error_log = collections.deque(maxlen=100)
 
-def log_error(source: str, message: str, level: str = "error"):
-    """Log an API error for display in the UI."""
+def log_error(source: str, message: str = None, level: str = "error"):
+    """Log an API or system error."""
+    if message is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        SYSTEM_LOGS.appendleft({"time": timestamp, "msg": source})
+        print(f"[SYSTEM] {source}")
+        return
+        
     entry = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "source": source,
@@ -1807,7 +1813,7 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
             except Exception as read_err:
                 print(f"[Paddle Pricing] Failed to parse old songs list: {read_err}")
                 
-        # Compare prices and sync if changed
+        # Update songs catalog
         updated_songs = []
         for song in songs_list:
             if not isinstance(song, dict):
@@ -1817,17 +1823,6 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
             if song_id == "global_settings":
                 updated_songs.append(song)
                 continue
-                
-            old_song = old_songs_map.get(song_id)
-            old_price = old_song.get("price", "") if old_song else ""
-            new_price = song.get("price", "")
-            
-            # Sync to Paddle if price changed, or if it doesn't have a valid Paddle Price ID yet
-            has_valid_paddle_id = song.get("paddleId", "").startswith("pri_")
-            if (old_price != new_price or not has_valid_paddle_id) and api_key:
-                new_price_id = sync_song_price_to_paddle(song, new_price, api_key, is_sandbox=is_sandbox)
-                if new_price_id:
-                    song["paddleId"] = new_price_id
             updated_songs.append(song)
 
         with open(songs_path, "w", encoding="utf-8") as f:
@@ -3150,15 +3145,15 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 },
                 "quantity": 1,
             }],
-            invoice_creation={"enabled": True},
-            billing_address_collection="required",
-            success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{origin}/",
             metadata={
                 "song_title": song.get("title"),
                 "download_hash": download_hash,
                 "locale": req.language
-            }
+            },
+            invoice_creation={"enabled": True},
+            billing_address_collection="required",
+            success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{origin}/",
         )
         return {"url": session.url}
     except Exception as e:
@@ -3666,7 +3661,7 @@ def admin_add_song(request: Request, payload: dict):
     new_song["difficulty"] = new_song.get("difficulty", "Easy")
     new_song["format"] = new_song.get("format", "full_arrangement")
     new_song["price"] = new_song.get("price", "6 €")
-    new_song["paddleId"] = new_song.get("paddleId", "")
+    new_song["stripePriceId"] = new_song.get("stripePriceId", "")
     new_song["youtubeUrl"] = new_song.get("youtubeUrl", "")
     new_song["tags"] = new_song.get("tags", [])
     
