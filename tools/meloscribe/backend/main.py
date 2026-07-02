@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import requests
+import stripe
 
 # -------------------------------------------------------------------
 # Paths
@@ -271,7 +272,8 @@ PUBLIC_ROUTES = [
     ("/api/notify/confirm", "GET"),
     ("/api/notify/unsubscribe", "GET"),
     ("/callback", "GET"),
-    ("/api/paddle/webhook", "POST"),
+    ("/api/webhooks/stripe", "POST"),
+    ("/api/checkout/create-session", "POST"),
 ]
 
 @app.middleware("http")
@@ -415,10 +417,10 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
-    @app.get("/api/paddle/sales")
-    def get_local_paddle_sales():
+    @app.get("/api/stripe/sales")
+    def get_local_stripe_sales():
         try:
-            r = requests.get(f"{VM_API_BASE}/api/paddle/sales", timeout=5.0)
+            r = requests.get(f"{VM_API_BASE}/api/stripe/sales", timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -3056,134 +3058,289 @@ def run_credentials_watcher():
 threading.Thread(target=run_credentials_watcher, daemon=True).start()
 
 # -------------------------------------------------------------------
-# Paddle Webhook & R2 Secure Download System
+# Stripe Webhook & R2 Secure Download System
 # -------------------------------------------------------------------
-def verify_paddle_signature(request_body: str, signature_header: str, secret: str) -> bool:
-    import hmac
-    import hashlib
-    if not signature_header or not secret:
-        return False
-    try:
-        parts = dict(item.split('=') for item in signature_header.split(';'))
-        ts = parts.get('ts')
-        h1 = parts.get('h1')
-        if not ts or not h1:
-            return False
-        payload = f"{ts}:{request_body}"
-        computed_hash = hmac.new(
-            secret.encode('utf-8'),
-            payload.encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
-        return hmac.compare_digest(computed_hash, h1)
-    except Exception:
-        return False
+def get_stripe_api_key():
+    settings = load_settings()
+    is_sandbox = settings.get("environment", "sandbox") == "sandbox"
+    if is_sandbox:
+        return settings.get("stripe_sandbox_secret_key") or os.environ.get("STRIPE_SECRET_KEY")
+    else:
+        return settings.get("stripe_live_secret_key") or os.environ.get("STRIPE_SECRET_KEY")
 
-@app.post("/api/paddle/webhook")
-async def paddle_webhook(request: Request):
-    signature = request.headers.get("Paddle-Signature")
-    raw_body = await request.body()
-    body_str = raw_body.decode("utf-8")
+class CheckoutRequest(BaseModel):
+    songId: str
+    format: str = "full_arrangement"
+    difficulty: str = "Original"
+    language: str = "en"
+
+@app.post("/api/checkout/create-session")
+async def create_checkout_session(req: CheckoutRequest, request: Request):
+    try:
+        # Load songs list to find the song and price
+        songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+        if not os.path.exists(songs_path):
+            songs_path = Path(__file__).resolve().parent / "songs.json"
+            
+        with open(songs_path, "r", encoding="utf-8") as f:
+            songs_list = json.load(f)
+            
+        song = next((s for s in songs_list if s.get("id") == req.songId), None)
+        if not song:
+            raise HTTPException(status_code=404, detail="Song not found")
+            
+        if song.get("paymentsDisabled") or song.get("hidden"):
+            raise HTTPException(status_code=403, detail="Product is no longer available")
+            
+        # Parse price
+        price_str = song.get("price", "6 €")
+        try:
+            import re
+            digits = re.findall(r"\d+", price_str)
+            if digits:
+                amount_cents = int(digits[0]) * 100
+            else:
+                amount_cents = 600
+        except Exception:
+            amount_cents = 600
+            
+        # Generate secure download hash
+        import uuid
+        download_hash = uuid.uuid4().hex
+        
+        # Determine origin for success/cancel URLs
+        origin = request.headers.get("origin") or "https://meloscribe.dev"
+        
+        stripe.api_key = get_stripe_api_key()
+        if not stripe.api_key:
+            raise HTTPException(status_code=500, detail="Stripe API key is not configured")
+            
+        product_name = f"{song.get('title')} ({req.format.replace('_', ' ').title()} - {req.difficulty})"
+        product_desc = "Includes PDF Sheet Music, MIDI Files, and Practice Video Tutorials"
+        
+        cover_image_path = song.get("coverImage", "")
+        product_image = None
+        if cover_image_path:
+            product_image = f"https://meloscribe.dev{cover_image_path}"
+            
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=[{
+                "price_data": {
+                    "currency": "eur",
+                    "product_data": {
+                        "name": product_name,
+                        "description": product_desc,
+                        "images": [product_image] if product_image else [],
+                    },
+                    "unit_amount": amount_cents,
+                },
+                "quantity": 1,
+            }],
+            invoice_creation={"enabled": True},
+            billing_address_collection="required",
+            success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{origin}/",
+            metadata={
+                "song_title": song.get("title"),
+                "download_hash": download_hash,
+                "locale": req.language
+            }
+        )
+        return {"url": session.url}
+    except Exception as e:
+        print(f"[Stripe Checkout] Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("Stripe-Signature")
     
-    # Signature Verification
-    webhook_secret = settings.get("paddle_webhook_secret") or os.environ.get("PADDLE_WEBHOOK_SECRET")
-    if webhook_secret:
-        if not verify_paddle_signature(body_str, signature, webhook_secret):
-            return JSONResponse(content={"error": "Invalid signature"}, status_code=400)
+    settings = load_settings()
+    webhook_secret = settings.get("stripe_webhook_secret") or os.environ.get("STRIPE_WEBHOOK_SECRET")
+    
+    stripe.api_key = get_stripe_api_key()
     
     try:
-        payload = json.loads(body_str)
-        event_type = payload.get("event_type")
-        data = payload.get("data", {})
+        if webhook_secret:
+            event = stripe.Webhook.construct_event(
+                payload, sig_header, webhook_secret
+            )
+        else:
+            print("[Stripe Webhook] WARNING: stripe_webhook_secret not set. Proceeding without signature verification.")
+            event = stripe.Event.construct_from(json.loads(payload.decode('utf-8')), stripe.api_key)
+    except Exception as e:
+        print(f"[Stripe Webhook] Signature verification failed: {e}")
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+    event_type = event.type
+    data_object = event.data.object
+
+    try:
+        db_path = Path(__file__).resolve().parent / "analytics.db"
         
-        if event_type == "transaction.completed":
-            txn_id = data.get("id")
-            status = data.get("status")
-            custom_data = data.get("custom_data", {})
-            song_title = custom_data.get("song_title") or "Unknown Song"
+        if event_type == "checkout.session.completed":
+            session_id = data_object.get("id")
+            payment_status = data_object.get("payment_status")
             
-            # Verify if the song is currently disabled or hidden on the website
-            try:
-                songs_json_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
-                if os.path.exists(songs_json_path):
-                    with open(songs_json_path, "r", encoding="utf-8") as f:
-                        songs_db = json.load(f)
-                    matched_song = next((s for s in songs_db if s.get("title") == song_title), None)
-                    if matched_song:
-                        if matched_song.get("paymentsDisabled") or matched_song.get("hidden"):
-                            print(f"[Paddle Webhook] REJECTED purchase for '{song_title}' (paymentsDisabled or hidden).")
-                            return JSONResponse(content={"error": "Product is no longer available"}, status_code=403)
-            except Exception as check_err:
-                print(f"[Paddle Webhook] Error checking song availability: {check_err}")
-            
-            import uuid
-            download_hash = custom_data.get("download_hash")
-            if not download_hash:
-                download_hash = uuid.uuid4().hex
-            
-            totals = (data.get("details") or {}).get("totals") or {}
-            grand_total = float(totals.get("grand_total", 0)) / 100.0
-            currency = totals.get("currency_code", "EUR")
-            
-            # Extract locale and buyer name
-            locale = data.get("locale") or (data.get("checkout") or {}).get("locale") or "en"
-            buyer_name = ((data.get("customer") or {}).get("name") or 
-                          (data.get("billing_details") or {}).get("name") or 
-                          "")
-            
-            email = (data.get("billing_details") or {}).get("email_address") or (data.get("customer") or {}).get("email") or "customer@example.com"
-            
-            db_path = Path(__file__).resolve().parent / "analytics.db"
-            conn = sqlite3.connect(str(db_path))
-            c = conn.cursor()
-            c.execute(
-                "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (txn_id, email, song_title, grand_total, currency, status, download_hash, locale, buyer_name)
-            )
-            is_new = c.rowcount > 0
-            
-            # Ensure we update locale and buyer_name if the record was inserted before by the fallback API
-            c.execute(
-                "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
-                (locale, buyer_name, txn_id)
-            )
-            
-            c.execute(
-                "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (grand_total, currency, "paddle", event_type, email, f"Paddle txn {txn_id}", song_title)
-            )
-            conn.commit()
-            conn.close()
-            print(f"[Paddle Webhook] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
-            
-            if is_new:
-                send_purchase_delivery_email(email, song_title, download_hash, locale)
-        
-        elif event_type in ("transaction.refunded", "transaction.updated", "adjustment.created", "adjustment.updated"):
-            txn_id = data.get("transaction_id") or data.get("id")
-            status = data.get("status")
-            action = data.get("action")
-            
-            is_refund = (
-                event_type == "transaction.refunded" or
-                status in ("refunded", "cancelled") or
-                action == "refund"
-            )
-            
-            if is_refund and txn_id:
-                db_path = Path(__file__).resolve().parent / "analytics.db"
+            if payment_status == "paid":
+                metadata = data_object.get("metadata", {})
+                song_title = metadata.get("song_title") or "Unknown Song"
+                download_hash = metadata.get("download_hash")
+                locale = metadata.get("locale") or "en"
+                
+                # Check availability in songs.json
+                try:
+                    songs_json_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+                    if not os.path.exists(songs_json_path):
+                        songs_json_path = Path(__file__).resolve().parent / "songs.json"
+                    if os.path.exists(songs_json_path):
+                        with open(songs_json_path, "r", encoding="utf-8") as f:
+                            songs_db = json.load(f)
+                        matched_song = next((s for s in songs_db if s.get("title") == song_title), None)
+                        if matched_song:
+                            if matched_song.get("paymentsDisabled") or matched_song.get("hidden"):
+                                print(f"[Stripe Webhook] REJECTED purchase for '{song_title}' (paymentsDisabled or hidden).")
+                                return JSONResponse(content={"error": "Product is no longer available"}, status_code=403)
+                except Exception as check_err:
+                    print(f"[Stripe Webhook] Error checking song availability: {check_err}")
+                
+                if not download_hash:
+                    import uuid
+                    download_hash = uuid.uuid4().hex
+
+                customer_details = data_object.get("customer_details") or {}
+                email = customer_details.get("email") or "customer@example.com"
+                buyer_name = customer_details.get("name") or ""
+                
+                amount_total = float(data_object.get("amount_total", 0)) / 100.0
+                currency = (data_object.get("currency") or "eur").upper()
+
                 conn = sqlite3.connect(str(db_path))
                 c = conn.cursor()
-                c.execute("UPDATE purchases SET status = 'refunded' WHERE transaction_id = ?", (txn_id,))
+                c.execute(
+                    "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (session_id, email, song_title, amount_total, currency, "🟢 Active", download_hash, locale, buyer_name)
+                )
+                is_new = c.rowcount > 0
+                
+                c.execute(
+                    "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
+                    (locale, buyer_name, session_id)
+                )
+                
+                c.execute(
+                    "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (amount_total, currency, "stripe", event_type, email, f"Stripe txn {session_id}", song_title)
+                )
                 conn.commit()
                 conn.close()
-                print(f"[Paddle Webhook] Event {event_type} (Txn: {txn_id}, Action: {action}, Status: {status}) matches refund. Set status to refunded.")
+                print(f"[Stripe Webhook] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
+                
+                if is_new:
+                    send_purchase_delivery_email(email, song_title, download_hash, locale)
+                    
+        elif event_type == "charge.refunded":
+            charge_id = data_object.get("id")
+            payment_intent_id = data_object.get("payment_intent")
+            
+            conn = sqlite3.connect(str(db_path))
+            c = conn.cursor()
+            c.execute("SELECT transaction_id FROM purchases WHERE transaction_id = ? OR transaction_id = ?", (payment_intent_id, charge_id))
+            row = c.fetchone()
+            
+            if not row and payment_intent_id:
+                try:
+                    sessions = stripe.checkout.Session.list(payment_intent=payment_intent_id, limit=1)
+                    if sessions and len(sessions.data) > 0:
+                        stripe_session_id = sessions.data[0].id
+                        c.execute("SELECT transaction_id FROM purchases WHERE transaction_id = ?", (stripe_session_id,))
+                        row = c.fetchone()
+                except Exception as search_err:
+                    print(f"[Stripe Webhook] Error listing sessions for refund: {search_err}")
+            
+            if row:
+                txn_id = row[0]
+                c.execute("UPDATE purchases SET status = '🔴 Refunded' WHERE transaction_id = ?", (txn_id,))
+                conn.commit()
+                print(f"[Stripe Webhook] Refund recorded for transaction {txn_id}.")
+            else:
+                print(f"[Stripe Webhook] Warning: Could not find purchase for refund of payment intent {payment_intent_id} / charge {charge_id}.")
+            conn.close()
             
     except Exception as e:
-        print(f"Paddle Webhook processing error: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        print(f"[Stripe Webhook] Error processing webhook: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+    return {"status": "success"}
+
+@app.get("/api/order/hash-by-checkout")
+def get_hash_by_checkout(checkout_id: str):
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    c = conn.cursor()
+    c.execute("SELECT download_hash FROM purchases WHERE transaction_id = ?", (checkout_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row and checkout_id.startswith("demo_"):
+        return {"download_hash": f"demo_hash_{checkout_id}"}
         
-    return {"status": "ok"}
+    if not row and checkout_id.startswith("cs_"):
+        try:
+            stripe.api_key = get_stripe_api_key()
+            if stripe.api_key:
+                session = stripe.checkout.Session.retrieve(checkout_id)
+                if session.payment_status == "paid":
+                    metadata = session.metadata or {}
+                    song_title = metadata.get("song_title") or "Unknown Song"
+                    download_hash = metadata.get("download_hash")
+                    locale = metadata.get("locale") or "en"
+                    
+                    if not download_hash:
+                        import uuid
+                        download_hash = uuid.uuid4().hex
+                    
+                    customer_details = session.customer_details or {}
+                    email = customer_details.get("email") or "customer@example.com"
+                    buyer_name = customer_details.get("name") or ""
+                    
+                    amount_total = float(session.amount_total or 0) / 100.0
+                    currency = (session.currency or "eur").upper()
+                    
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
+                    c = conn.cursor()
+                    c.execute(
+                        "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (checkout_id, email, song_title, amount_total, currency, "🟢 Active", download_hash, locale, buyer_name)
+                    )
+                    is_new = c.rowcount > 0
+                    
+                    c.execute(
+                        "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
+                        (locale, buyer_name, checkout_id)
+                    )
+                    
+                    c.execute(
+                        "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (amount_total, currency, "stripe", "checkout.session.completed", email, f"Stripe txn {checkout_id} (API Fallback)", song_title)
+                    )
+                    conn.commit()
+                    conn.close()
+                    print(f"[Stripe API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
+                    
+                    if is_new:
+                        send_purchase_delivery_email(email, song_title, download_hash, locale)
+                    
+                    return {"download_hash": download_hash}
+        except Exception as api_err:
+            print(f"[Stripe API Fallback] Error verifying transaction: {api_err}")
+        
+    if not row:
+        return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
+        
+    return {"download_hash": row[0]}
 
 def generate_watermark_page(text: str):
     import io
@@ -4538,8 +4695,8 @@ def delete_suggestion(sug_id: str):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/api/paddle/sales")
-def get_paddle_sales():
+@app.get("/api/stripe/sales")
+def get_stripe_sales():
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
