@@ -288,6 +288,23 @@ def init_db():
     except Exception:
         pass
 
+    # ── BATCH INGEST QUEUE ────────────────────────────────────────────────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS batch_ingest_queue (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        song_name       TEXT UNIQUE,
+        author          TEXT,
+        theme           TEXT,
+        price           TEXT,
+        format          TEXT,
+        difficulty      TEXT,
+        status          TEXT DEFAULT 'initialized',
+        error_message   TEXT,
+        created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        processed_at    TIMESTAMP
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")

@@ -263,6 +263,7 @@ PUBLIC_ROUTES = [
     ("/api/public/stats", "GET"),
     ("/api/public/suggestions", "GET"),
     ("/api/public/suggestions", "POST"),
+    ("/api/public/download", "GET"),       # Public direct free downloads
     ("/api/order/hash-by-checkout", "GET"),
     ("/api/order/details", "GET"),
     ("/api/download/request", "GET"),
@@ -1774,6 +1775,107 @@ def sync_song_price_to_paddle(song, new_price_str, api_key, is_sandbox=True):
     except Exception as e:
         print(f"[Paddle Pricing] Error creating price: {e}")
         return None
+
+def delete_song_assets(song_name: str):
+    # 1. Local Cakewalk directories
+    try:
+        settings = load_settings()
+        cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
+        for suffix in ["", " Easy"]:
+            path = Path(cakewalk_dir) / f"{song_name}{suffix}"
+            if path.exists() and path.is_dir():
+                import shutil
+                shutil.rmtree(str(path))
+                print(f"[Delete] Removed local directory: {path}")
+    except Exception as e:
+        print(f"[Delete] Local Cakewalk folders cleanup skipped or failed: {e}")
+
+    # 2. Local packages
+    try:
+        settings = load_settings()
+        packages_dir = settings.get("packages_dir", r"C:\Dev\meloscribe\packages")
+        zip_path = Path(packages_dir) / f"{song_name} Full Package.zip"
+        if zip_path.exists():
+            os.remove(str(zip_path))
+            print(f"[Delete] Removed local package: {zip_path}")
+    except Exception as e:
+        print(f"[Delete] Local package cleanup skipped or failed: {e}")
+
+    # 3. Cloudflare R2 assets
+    try:
+        settings = load_settings()
+        r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+        r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+        r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+
+        if r2_account_id and r2_access_key and r2_secret_key:
+            import boto3
+            s3 = boto3.client(
+                's3',
+                endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+                aws_access_key_id=r2_access_key,
+                aws_secret_access_key=r2_secret_key
+            )
+            # Delete package ZIP
+            try:
+                s3.delete_object(Bucket=r2_bucket, Key=f"{song_name} Full Package.zip")
+                print(f"[Delete] Removed R2 package ZIP: {song_name} Full Package.zip")
+            except Exception:
+                pass
+
+            # Delete folder contents
+            prefix = f"{song_name}/"
+            paginator = s3.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=r2_bucket, Prefix=prefix):
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        s3.delete_object(Bucket=r2_bucket, Key=obj['Key'])
+                        print(f"[Delete] Removed R2 object: {obj['Key']}")
+    except Exception as e:
+        print(f"[Delete] Cloudflare R2 assets cleanup failed: {e}")
+
+@app.delete("/api/website/songs/{song_id}")
+async def delete_website_song(song_id: str, delete_assets: bool = False, background_tasks: BackgroundTasks = None):
+    try:
+        songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+        if not os.path.exists(songs_path):
+            raise HTTPException(status_code=404, detail="songs.json file not found")
+            
+        with open(songs_path, "r", encoding="utf-8") as f:
+            songs_list = json.load(f)
+            
+        # Find song details before deleting
+        target_song = None
+        for s in songs_list:
+            if s.get("id") == song_id:
+                target_song = s
+                break
+                
+        if not target_song:
+            raise HTTPException(status_code=404, detail="Song not found in catalog")
+            
+        # Filter list
+        updated_list = [s for s in songs_list if s.get("id") != song_id]
+        
+        with open(songs_path, "w", encoding="utf-8") as f:
+            json.dump(updated_list, f, indent=2, ensure_ascii=False)
+            
+        song_title = target_song.get("title", "")
+        
+        if delete_assets and song_title:
+            delete_song_assets(song_title)
+            
+        settings = load_settings()
+        env = settings.get("environment", "sandbox")
+        block_push = settings.get("block_sandbox_git_push", True)
+        if env == "live" or not block_push:
+            if background_tasks:
+                background_tasks.add_task(run_git_push)
+                
+        return {"status": "success", "message": f"Deleted song '{song_title}'"}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.post("/api/website/songs")
 async def update_website_songs(request: Request, background_tasks: BackgroundTasks):
@@ -4752,8 +4854,6 @@ def get_preview_video(song_name: str):
         import boto3
         from botocore.config import Config
 
-        file_key = f"{clean_name}/{clean_name}.mp4"
-
         s3 = boto3.client(
             's3',
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
@@ -4762,11 +4862,17 @@ def get_preview_video(song_name: str):
             config=Config(signature_version='s3v4')
         )
 
+        file_key = f"{clean_name}/{clean_name}_preview.mp4"
         try:
             s3.head_object(Bucket=r2_bucket, Key=file_key)
-        except Exception as head_err:
-            print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}'. Falling back to default 'Mary On A Cross/Mary On A Cross.mp4'.")
-            file_key = "Mary On A Cross/Mary On A Cross.mp4"
+        except Exception:
+            # Fallback to the full video if preview does not exist
+            file_key = f"{clean_name}/{clean_name}.mp4"
+            try:
+                s3.head_object(Bucket=r2_bucket, Key=file_key)
+            except Exception as head_err:
+                print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}'. Falling back to default 'Mary On A Cross/Mary On A Cross.mp4'.")
+                file_key = "Mary On A Cross/Mary On A Cross.mp4"
 
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',
@@ -4960,6 +5066,399 @@ async def notify_broadcast(req: BroadcastRequest):
             sent_count += 1
             
     return {"status": "success", "sent_count": sent_count, "total_subscribers": len(subscribers)}
+
+
+# -------------------------------------------------------------------
+# Public Direct Free Downloads
+# -------------------------------------------------------------------
+@app.get("/api/public/download")
+def public_free_download(song_id: str, type: str, request: Request):
+    if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
+        return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
+
+    songs_list = load_songs_list()
+    target_song = None
+    for song in songs_list:
+        if str(song.get("id")) == str(song_id):
+            target_song = song
+            break
+
+    if not target_song:
+        return JSONResponse(content={"error": "Song not found"}, status_code=404)
+
+    # Check if free
+    price_str = str(target_song.get("price", "")).strip().lower()
+    is_free = False
+    if not price_str or "free" in price_str or price_str.startswith("0") or price_str == "0" or "0 €" in price_str or "0$" in price_str:
+        is_free = True
+
+    if not is_free:
+        return JSONResponse(content={"error": "This song is not free"}, status_code=403)
+
+    song_name = target_song.get("title")
+
+    # Generate public Cloudflare R2 download URL
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        if type == "pdf":
+            suffix = f"/{song_name}.pdf"
+        elif type == "midi":
+            suffix = f"/{song_name}.mid"
+        elif type == "midi_slow":
+            suffix = f"/{song_name} slow.mid"
+        elif type == "video":
+            suffix = f"/{song_name}.mp4"
+        elif type == "video_slow":
+            suffix = f"/{song_name} slow.mp4"
+        else:
+            suffix = " Full Package.zip"
+        return {"download_url": f"https://example.com/demo-packages/{song_name}{suffix}"}
+
+    try:
+        import boto3
+        from botocore.config import Config
+
+        if type == "pdf":
+            file_key = f"{song_name}/{song_name}.pdf"
+        elif type == "midi":
+            file_key = f"{song_name}/{song_name}.mid"
+        elif type == "midi_slow":
+            file_key = f"{song_name}/{song_name} slow.mid"
+        elif type == "video":
+            file_key = f"{song_name}/{song_name}.mp4"
+        elif type == "video_slow":
+            file_key = f"{song_name}/{song_name} slow.mp4"
+        else:
+            file_key = f"{song_name} Full Package.zip"
+
+        s3 = boto3.client(
+            's3',
+            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+            aws_access_key_id=r2_access_key,
+            aws_secret_access_key=r2_secret_key,
+            config=Config(signature_version='s3v4')
+        )
+
+        presigned_url = s3.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': r2_bucket, 'Key': file_key},
+            ExpiresIn=3600
+        )
+        return {"download_url": presigned_url}
+    except Exception as e:
+        print(f"Failed to generate free presigned url: {e}")
+        return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)
+
+
+# -------------------------------------------------------------------
+# Smart Batch Ingest Queue APIs
+# -------------------------------------------------------------------
+from fastapi import UploadFile, File, Form, HTTPException
+import shutil
+
+is_batch_processing = False
+
+def batch_processor_worker():
+    global is_batch_processing
+    is_batch_processing = True
+    
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
+    python = sys.executable
+    
+    log_error("[Batch Worker] Background processor loop started.")
+    
+    try:
+        while True:
+            # Fetch all initialized items to see which ones are ready with audio
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            c = conn.cursor()
+            c.execute("SELECT song_name, author, theme, price, format, difficulty FROM batch_ingest_queue WHERE status = 'initialized' ORDER BY id ASC")
+            rows = c.fetchall()
+            conn.close()
+            
+            target_item = None
+            for row in rows:
+                song_name = row[0]
+                audio_path = Path(cakewalk_dir) / song_name / "Audio Export" / f"{song_name}.wav"
+                if audio_path.exists():
+                    target_item = row
+                    break
+                    
+            if not target_item:
+                log_error("[Batch Worker] No more initialized queue items with ready audio files. Stopping loop.")
+                break # No items are ready with audio files
+                
+            song_name, author, theme, price, fmt, difficulty = target_item
+            
+            # Change status to 'processing'
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            c = conn.cursor()
+            c.execute("UPDATE batch_ingest_queue SET status = 'processing', error_message = NULL WHERE song_name = ?", (song_name,))
+            conn.commit()
+            conn.close()
+            
+            log_error(f"[Batch Worker] Started processing '{song_name}'")
+            
+            should_abort_queue = False
+            try:
+                has_easy = (difficulty == "both")
+                
+                # Construct sequential step commands
+                steps = []
+                
+                # Keysight Render (Original)
+                steps.append([python, "-u", str(TOOLS_DIR / "keysight_bot.py"), "--song", song_name, "--theme", theme])
+                # Compression (Original Normal)
+                normal_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name}.mp4"
+                steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(normal_vid)])
+                # Compression (Original Slow)
+                slow_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name} slow.mp4"
+                steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(slow_vid)])
+                
+                if has_easy:
+                    # Keysight Render (Easy)
+                    steps.append([python, "-u", str(TOOLS_DIR / "keysight_bot.py"), "--song", f"{song_name} Easy", "--theme", theme])
+                    # Compression (Easy Normal)
+                    easy_normal_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name} Easy.mp4"
+                    steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(easy_normal_vid)])
+                    # Compression (Easy Slow)
+                    easy_slow_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name} Easy slow.mp4"
+                    steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(easy_slow_vid)])
+                    
+                # Portrait / Widescreen versions
+                versions = [("", song_name)]
+                if has_easy:
+                    versions.append((" Easy", f"{song_name} Easy"))
+                    
+                zoom_val = "1.50"
+                shift_val = "0"
+                
+                for suffix, folder_name in versions:
+                    v_song = f"{song_name}{suffix}"
+                    for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
+                        vid_in = str(TOOLS_DIR.parent / "Keysight export" / f"{v_song}{prefix}.mp4")
+                        midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
+                        
+                        cmd_portrait = [
+                            python, "-u", str(TOOLS_DIR / "video_generator.py"),
+                            "--video", vid_in, "--title", v_song, "--author", author,
+                            "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
+                            "--midipath", midi_path, "--theme", theme, "--use_portrait_addon"
+                        ]
+                        steps.append(cmd_portrait)
+                        
+                        if fmt == "full_arrangement":
+                            cmd_widescreen = [
+                                python, "-u", str(TOOLS_DIR / "video_generator.py"),
+                                "--video", vid_in, "--title", v_song, "--author", author,
+                                "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
+                                "--midipath", midi_path, "--theme", theme, "--wide"
+                            ]
+                            steps.append(cmd_widescreen)
+                            
+                    # Cover Generator
+                    steps.append([python, "-u", str(TOOLS_DIR / "cover_generator.py"), "--song", v_song, "--author", author, "--theme", theme])
+                    # Ko-Fi Packager
+                    steps.append([python, "-u", str(TOOLS_DIR / "legacy" / "kofi_zipper.py"), "--song", v_song, "--author", author])
+                    # R2 Upload
+                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2"])
+                    # Website Catalog Add
+                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website"])
+                
+                # Execute all steps sequentially
+                success = True
+                err_msg = ""
+                for cmd in steps:
+                    log_error(f"[Batch Worker] Running sub-task: {' '.join(cmd[:4])}...")
+                    rc = subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0).returncode
+                    if rc != 0:
+                        success = False
+                        err_msg = f"Step failed: {' '.join(cmd[:4])}..."
+                        log_error(f"[Batch Worker] Error during step: {err_msg}")
+                        break
+                        
+                if success:
+                    # Update status to 'active'
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
+                    c = conn.cursor()
+                    c.execute("UPDATE batch_ingest_queue SET status = 'active', processed_at = CURRENT_TIMESTAMP WHERE song_name = ?", (song_name,))
+                    conn.commit()
+                    conn.close()
+                    log_error(f"[Batch Worker] Successfully processed '{song_name}'")
+                else:
+                    # Update status to 'failed'
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
+                    c = conn.cursor()
+                    c.execute("UPDATE batch_ingest_queue SET status = 'failed', error_message = ? WHERE song_name = ?", (err_msg, song_name))
+                    conn.commit()
+                    conn.close()
+                    should_abort_queue = True
+            except Exception as ex:
+                conn = sqlite3.connect(str(db_path), timeout=30.0)
+                c = conn.cursor()
+                c.execute("UPDATE batch_ingest_queue SET status = 'failed', error_message = ? WHERE song_name = ?", (str(ex), song_name))
+                conn.commit()
+                conn.close()
+                log_error(f"[Batch Worker] Exception processing '{song_name}': {ex}")
+                should_abort_queue = True
+                
+            if should_abort_queue:
+                log_error("[Batch Worker] Queue processing aborted due to error to prevent cascaded failures. Fix the error and restart the queue.")
+                break
+                
+    finally:
+        is_batch_processing = False
+        log_error("[Batch Worker] Background processor loop stopped.")
+
+@app.post("/api/batch/initialize")
+async def batch_initialize(
+    metadata: str = Form(...),
+    files: list[UploadFile] = File(...)
+):
+    try:
+        items = json.loads(metadata)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {str(e)}")
+
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    c = conn.cursor()
+
+    # Map metadata by filename
+    meta_map = {item["fileName"]: item for item in items}
+    cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
+
+    initialized_songs = []
+
+    try:
+        for file in files:
+            meta = meta_map.get(file.filename)
+            if not meta:
+                continue
+
+            song_name = meta.get("title", "").strip()
+            author = meta.get("artist", "").strip()
+            theme = meta.get("theme", "warm").strip()
+            price = meta.get("price", "6.00").strip()
+            fmt = meta.get("format", "full_arrangement").strip()
+            include_easy = meta.get("includeEasy", False)
+            difficulty = "both" if include_easy else "original"
+
+            if not song_name or not author:
+                continue
+
+            # Create primary Cakewalk project folder
+            song_dir = Path(cakewalk_dir) / song_name
+            os.makedirs(str(song_dir), exist_ok=True)
+
+            # Save normal MIDI
+            midi_path = song_dir / f"{song_name}.mid"
+            with open(midi_path, "wb") as f:
+                shutil.copyfileobj(file.file, f)
+
+            # Save easy version if included
+            if include_easy:
+                easy_dir = Path(cakewalk_dir) / f"{song_name} Easy"
+                os.makedirs(str(easy_dir), exist_ok=True)
+                # Reset stream pointer and write copy to easy directory
+                file.file.seek(0)
+                easy_midi_path = easy_dir / f"{song_name} Easy.mid"
+                with open(easy_midi_path, "wb") as f:
+                    shutil.copyfileobj(file.file, f)
+
+            # Insert/Replace queue entry
+            c.execute(
+                """
+                INSERT OR REPLACE INTO batch_ingest_queue 
+                (song_name, author, theme, price, format, difficulty, status, error_message, processed_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL)
+                """,
+                (song_name, author, theme, price, fmt, difficulty)
+            )
+            initialized_songs.append(song_name)
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Database or filesystem error: {str(e)}")
+
+    conn.close()
+    return {"status": "success", "initialized": initialized_songs}
+
+@app.get("/api/batch/queue")
+def get_batch_queue():
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT song_name, author, theme, price, format, difficulty, status, error_message, created_at, processed_at FROM batch_ingest_queue ORDER BY id DESC")
+        rows = c.fetchall()
+        conn.close()
+    except Exception as e:
+        return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
+
+    queue = []
+    for r in rows:
+        queue.append({
+            "songName": r[0],
+            "author": r[1],
+            "theme": r[2],
+            "price": r[3],
+            "format": r[4],
+            "difficulty": r[5],
+            "status": r[6],
+            "errorMessage": r[7],
+            "createdAt": r[8],
+            "processedAt": r[9]
+        })
+    return queue
+
+@app.post("/api/batch/retry")
+async def retry_batch_item(req: dict):
+    song_name = req.get("song_name")
+    if not song_name:
+        raise HTTPException(status_code=400, detail="song_name is required")
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("UPDATE batch_ingest_queue SET status = 'initialized', error_message = NULL WHERE song_name = ?", (song_name,))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": f"Reset status of '{song_name}' to initialized"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/batch/delete")
+async def delete_batch_item(req: dict):
+    song_name = req.get("song_name")
+    if not song_name:
+        raise HTTPException(status_code=400, detail="song_name is required")
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM batch_ingest_queue WHERE song_name = ?", (song_name,))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": f"Removed '{song_name}' from the queue"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/batch/process")
+def trigger_batch_process():
+    global is_batch_processing
+    if is_batch_processing:
+        return {"status": "already_running"}
+        
+    threading.Thread(target=batch_processor_worker, daemon=True).start()
+    return {"status": "started"}
 
 
 # -------------------------------------------------------------------

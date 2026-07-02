@@ -159,9 +159,10 @@ git add . && git commit -m "..." && git push
 - [x] Reduced default download limit from 100 to 50 hits, added informative help tooltips, and routed support mailto links to info@meloscribe.dev
 - [x] Updated Paddle webhook refund processing to handle adjustment.created and adjustment.updated events, setting the purchase status specifically to 'refunded'
 - [x] Cleaned up public backend .gitignore to ensure token, credential, and settings files are strictly ignored and never exposed
+- [x] Updated get_preview_video endpoint to dynamically check and stream lightweight preview video files ([Song]_preview.mp4) from Cloudflare R2 bucket with full video fallback
 
 ## Active Blockers / Next Steps
 
 - **BLOCKED — Paddle Domain Verification abgelehnt**: Paddle Dashboard zeigt "Action required" für meloscribe.dev. Kein Live-Webhook-Test möglich bis Support-Ticket (sellers@paddle.com) gelöst ist. Klärung: Anforderungen für Domain-Freischaltung + undokumentierter 10%-Flat-Fee-Tarif.
-- End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification will be tested once production domain verification is approved.
+- End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification will be tested once production domain verification is approved. Preview video R2 streaming logic is fully functional.
 
