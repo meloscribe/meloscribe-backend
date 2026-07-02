@@ -160,6 +160,9 @@ git add . && git commit -m "..." && git push
 - [x] Updated Paddle webhook refund processing to handle adjustment.created and adjustment.updated events, setting the purchase status specifically to 'refunded'
 - [x] Cleaned up public backend .gitignore to ensure token, credential, and settings files are strictly ignored and never exposed
 - [x] Updated get_preview_video endpoint to dynamically check and stream lightweight preview video files ([Song]_preview.mp4) from Cloudflare R2 bucket with full video fallback
+- [x] Implemented direct download button flow for free ($0.00) songs, bypassing Stripe payment screen on the website
+- [x] Upgraded batch processor loop to automatically abort queue execution on step failures to prevent cascaded errors
+- [x] Enriched logs proxying to merge local and remote log streams, and added subprocess execution details capture for precise failure diagnostics
 
 ## Active Blockers / Next Steps
 
