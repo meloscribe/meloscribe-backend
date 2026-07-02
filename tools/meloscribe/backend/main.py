@@ -3158,7 +3158,11 @@ async def stripe_webhook(request: Request):
     sig_header = request.headers.get("Stripe-Signature")
     
     settings = load_settings()
-    webhook_secret = settings.get("stripe_webhook_secret") or os.environ.get("STRIPE_WEBHOOK_SECRET")
+    is_sandbox = settings.get("environment", "sandbox") == "sandbox"
+    if is_sandbox:
+        webhook_secret = settings.get("stripe_sandbox_webhook_secret") or settings.get("stripe_webhook_secret") or os.environ.get("STRIPE_WEBHOOK_SECRET")
+    else:
+        webhook_secret = settings.get("stripe_live_webhook_secret") or settings.get("stripe_webhook_secret") or os.environ.get("STRIPE_WEBHOOK_SECRET")
     
     stripe.api_key = get_stripe_api_key()
     
