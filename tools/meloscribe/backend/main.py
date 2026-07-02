@@ -3096,8 +3096,14 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if song.get("paymentsDisabled") or song.get("hidden"):
             raise HTTPException(status_code=403, detail="Product is no longer available")
             
-        # Parse price
+        # Parse price and currency
         price_str = song.get("price", "6 €")
+        currency = "eur"
+        if "$" in price_str:
+            currency = "usd"
+        elif "£" in price_str:
+            currency = "gbp"
+            
         try:
             import re
             digits = re.findall(r"\d+", price_str)
@@ -3125,13 +3131,16 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         cover_image_path = song.get("coverImage", "")
         product_image = None
         if cover_image_path:
-            product_image = f"https://meloscribe.dev{cover_image_path}"
+            import urllib.parse
+            # URL encode path segments to handle spaces and special characters safely
+            quoted_path = urllib.parse.quote(cover_image_path)
+            product_image = f"https://meloscribe.dev{quoted_path}"
             
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=[{
                 "price_data": {
-                    "currency": "eur",
+                    "currency": currency,
                     "product_data": {
                         "name": product_name,
                         "description": product_desc,
