@@ -343,11 +343,24 @@ if platform.system() == "Windows":
 
     @app.get("/api/logs")
     def get_local_logs():
+        remote_logs = []
         try:
-            r = requests.get(f"{VM_API_BASE}/api/logs", timeout=5.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            r = requests.get(f"{VM_API_BASE}/api/logs", headers=get_proxy_headers(), timeout=3.0)
+            if r.status_code == 200:
+                remote_logs = r.json()
         except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+            print(f"[Proxy] Failed to fetch remote logs: {e}")
+            
+        # Enrich local logs to differentiate them
+        local_logs = []
+        for entry in SYSTEM_LOGS:
+            local_logs.append({
+                "time": entry.get("time", ""),
+                "msg": f"[LOCAL] {entry.get('msg', '')}"
+            })
+            
+        combined = local_logs + remote_logs
+        return JSONResponse(content=combined)
 
     @app.get("/api/notify/subscribers")
     def get_local_subscribers():
@@ -5275,10 +5288,12 @@ def batch_processor_worker():
                 err_msg = ""
                 for cmd in steps:
                     log_error(f"[Batch Worker] Running sub-task: {' '.join(cmd[:4])}...")
-                    rc = subprocess.run(cmd, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0).returncode
+                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
+                    rc = res.returncode
                     if rc != 0:
                         success = False
-                        err_msg = f"Step failed: {' '.join(cmd[:4])}..."
+                        sub_err = (res.stderr or res.stdout or "").strip()
+                        err_msg = f"Step failed: {' '.join(cmd[:4])}... Details: {sub_err}"
                         log_error(f"[Batch Worker] Error during step: {err_msg}")
                         break
                         
