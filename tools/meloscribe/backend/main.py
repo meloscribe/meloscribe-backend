@@ -281,6 +281,10 @@ async def security_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method
 
+    # Always allow CORS preflight OPTIONS requests
+    if method == "OPTIONS":
+        return await call_next(request)
+
     # Always allow static files and video streams
     if path.startswith("/public") or path.startswith("/api/public/video-stream"):
         return await call_next(request)
