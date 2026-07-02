@@ -3296,10 +3296,13 @@ def get_hash_by_checkout(checkout_id: str):
     row = c.fetchone()
     conn.close()
     
-    if not row and checkout_id.startswith("demo_"):
+    if row:
+        return {"download_hash": row[0]}
+        
+    if checkout_id.startswith("demo_"):
         return {"download_hash": f"demo_hash_{checkout_id}"}
         
-    if not row and checkout_id.startswith("cs_"):
+    if checkout_id.startswith("cs_"):
         try:
             stripe.api_key = get_stripe_api_key()
             if stripe.api_key:
@@ -3348,11 +3351,76 @@ def get_hash_by_checkout(checkout_id: str):
                     return {"download_hash": download_hash}
         except Exception as api_err:
             print(f"[Stripe API Fallback] Error verifying transaction: {api_err}")
-        
-    if not row:
-        return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
-        
-    return {"download_hash": row[0]}
+            
+    elif checkout_id.startswith("txn_"):
+        try:
+            s_settings = load_settings()
+            is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
+            api_key = s_settings.get("paddle_sandbox_api_key" if is_sandbox else "paddle_live_api_key")
+            url_prefix = "https://sandbox-api.paddle.com" if is_sandbox else "https://api.paddle.com"
+            
+            if api_key:
+                headers = {"Authorization": f"Bearer {api_key}"}
+                tx_resp = requests.get(f"{url_prefix}/transactions/{checkout_id}", headers=headers, timeout=10.0)
+                if tx_resp.status_code == 200:
+                    tx_data = tx_resp.json().get("data", {})
+                    status = tx_data.get("status")
+                    if status == "completed":
+                        customer_id = tx_data.get("customer_id")
+                        email = "customer@example.com"
+                        buyer_name = ""
+                        if customer_id:
+                            cust_resp = requests.get(f"{url_prefix}/customers/{customer_id}", headers=headers, timeout=10.0)
+                            if cust_resp.status_code == 200:
+                                cust_info = cust_resp.json().get("data") or {}
+                                email = cust_info.get("email", email)
+                                buyer_name = cust_info.get("name", "")
+                        
+                        if not buyer_name:
+                            buyer_name = (tx_data.get("billing_details") or {}).get("name") or ""
+                            
+                        locale = tx_data.get("locale") or "en"
+                        
+                        custom_data = tx_data.get("custom_data") or {}
+                        song_title = custom_data.get("song_title") or "Unknown Song"
+                        download_hash = custom_data.get("download_hash")
+                        if not download_hash:
+                            import uuid
+                            download_hash = uuid.uuid4().hex
+                        
+                        totals = (tx_data.get("details") or {}).get("totals") or {}
+                        grand_total = float(totals.get("grand_total", 0)) / 100.0
+                        currency = totals.get("currency_code", "EUR")
+                        
+                        conn = sqlite3.connect(str(db_path), timeout=30.0)
+                        c = conn.cursor()
+                        c.execute(
+                            "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (checkout_id, email, song_title, grand_total, currency, status, download_hash, locale, buyer_name)
+                        )
+                        is_new = c.rowcount > 0
+                        
+                        c.execute(
+                            "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
+                            (locale, buyer_name, checkout_id)
+                        )
+                        
+                        c.execute(
+                            "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (grand_total, currency, "paddle", "transaction.completed", email, f"Paddle txn {checkout_id} (API Fallback)", song_title)
+                        )
+                        conn.commit()
+                        conn.close()
+                        print(f"[Paddle API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
+                        
+                        if is_new:
+                            send_purchase_delivery_email(email, song_title, download_hash, locale)
+                        
+                        return {"download_hash": download_hash}
+        except Exception as api_err:
+            print(f"[Paddle API Fallback] Error verifying transaction: {api_err}")
+            
+    return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
 
 def generate_watermark_page(text: str):
     import io
@@ -3481,93 +3549,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
         print(f"[Notify] Resend exception: {err}")
         return False
 
-@app.get("/api/order/hash-by-checkout")
-def get_hash_by_checkout(checkout_id: str):
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    c = conn.cursor()
-    c.execute("SELECT download_hash FROM purchases WHERE transaction_id = ?", (checkout_id,))
-    row = c.fetchone()
-    conn.close()
-    
-    if not row and checkout_id.startswith("demo_"):
-        return {"download_hash": f"demo_hash_{checkout_id}"}
-        
-    if not row and checkout_id.startswith("txn_"):
-        # FALLBACK: Webhook failed or was delayed. Query Paddle API directly!
-        try:
-            s_settings = load_settings()
-            is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
-            api_key = s_settings.get("paddle_sandbox_api_key" if is_sandbox else "paddle_live_api_key")
-            url_prefix = "https://sandbox-api.paddle.com" if is_sandbox else "https://api.paddle.com"
-            
-            if api_key:
-                headers = {"Authorization": f"Bearer {api_key}"}
-                tx_resp = requests.get(f"{url_prefix}/transactions/{checkout_id}", headers=headers, timeout=10.0)
-                if tx_resp.status_code == 200:
-                    tx_data = tx_resp.json().get("data", {})
-                    status = tx_data.get("status")
-                    if status == "completed":
-                        customer_id = tx_data.get("customer_id")
-                        email = "customer@example.com"
-                        buyer_name = ""
-                        if customer_id:
-                            cust_resp = requests.get(f"{url_prefix}/customers/{customer_id}", headers=headers, timeout=10.0)
-                            if cust_resp.status_code == 200:
-                                cust_info = cust_resp.json().get("data") or {}
-                                email = cust_info.get("email", email)
-                                buyer_name = cust_info.get("name", "")
-                        
-                        if not buyer_name:
-                            buyer_name = (tx_data.get("billing_details") or {}).get("name") or ""
-                            
-                        locale = tx_data.get("locale") or "en"
-                        
-                        custom_data = tx_data.get("custom_data") or {}
-                        song_title = custom_data.get("song_title") or "Unknown Song"
-                        download_hash = custom_data.get("download_hash")
-                        if not download_hash:
-                            import uuid
-                            download_hash = uuid.uuid4().hex
-                        
-                        totals = (tx_data.get("details") or {}).get("totals") or {}
-                        grand_total = float(totals.get("grand_total", 0)) / 100.0
-                        currency = totals.get("currency_code", "EUR")
-                        
-                        # Save purchase in local database
-                        conn = sqlite3.connect(str(db_path), timeout=30.0)
-                        c = conn.cursor()
-                        c.execute(
-                            "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (checkout_id, email, song_title, grand_total, currency, status, download_hash, locale, buyer_name)
-                        )
-                        is_new = c.rowcount > 0
-                        
-                        c.execute(
-                            "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
-                            (locale, buyer_name, checkout_id)
-                        )
-                        
-                        c.execute(
-                            "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (grand_total, currency, "paddle", "transaction.completed", email, f"Paddle txn {checkout_id} (API Fallback)", song_title)
-                        )
-                        conn.commit()
-                        conn.close()
-                        print(f"[Paddle API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
-                        
-                        # Send purchase delivery email using Resend!
-                        if is_new:
-                            send_purchase_delivery_email(email, song_title, download_hash, locale)
-                        
-                        return {"download_hash": download_hash}
-        except Exception as api_err:
-            print(f"[Paddle API Fallback] Error verifying transaction: {api_err}")
-        
-    if not row:
-        return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
-        
-    return {"download_hash": row[0]}
+
 
 @app.get("/api/order/details")
 def get_order_details(hash: str):
