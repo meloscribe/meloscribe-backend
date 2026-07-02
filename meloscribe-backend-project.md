@@ -163,6 +163,7 @@ git add . && git commit -m "..." && git push
 - [x] Implemented direct download button flow for free ($0.00) songs, bypassing Stripe payment screen on the website
 - [x] Upgraded batch processor loop to automatically abort queue execution on step failures to prevent cascaded errors
 - [x] Enriched logs proxying to merge local and remote log streams, and added subprocess execution details capture for precise failure diagnostics
+- [x] Swapped `pythonw.exe` for standard `python.exe` in Electron's `main.js` to ensure the backend spawns inside an interactive Windows session with screen capture privileges
 
 ## Active Blockers / Next Steps
 
