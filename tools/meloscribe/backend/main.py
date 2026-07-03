@@ -13,12 +13,10 @@ import sqlite3
 import datetime
 from pathlib import Path
 from typing import Optional
-import secrets
-import collections
 
 CREATION_FLAGS = 0x08000000 if os.name == 'nt' else 0
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks, Form, File, UploadFile, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -39,6 +37,25 @@ except Exception as e:
     print(f"Error loading settings in main.py: {e}")
     settings = {}
 
+# Startup database backup check
+try:
+    backup_marker = Path(__file__).resolve().parent / ".db_backup_done"
+    if not backup_marker.exists():
+        db_file = Path(__file__).resolve().parent / "analytics.db"
+        if db_file.exists():
+            import shutil
+            import datetime
+            backup_dir = Path(__file__).resolve().parent / "backups"
+            backup_dir.mkdir(exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = backup_dir / f"analytics_backup_{timestamp}.db"
+            shutil.copy2(db_file, backup_file)
+            print(f"[Backup] Automatically backed up database to {backup_file}")
+            with open(backup_marker, "w", encoding="utf-8") as f:
+                f.write(f"backup done at {timestamp}")
+except Exception as backup_err:
+    print(f"[Backup] Failed to create auto-backup on update: {backup_err}")
+
 app = FastAPI(title="Meloscribe Backend", version="1.0.0")
 
 app.add_middleware(
@@ -52,18 +69,26 @@ app.add_middleware(
 # Rate limiting database-backed helper for multi-worker shared state
 def is_rate_limited(ip: str, endpoint: str, max_requests: int, window_seconds: int) -> bool:
     import time
+    import sqlite3
     now = time.time()
     cutoff = now - window_seconds
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        
+        # 1. Clean up old rate limits
         c.execute("DELETE FROM rate_limits WHERE timestamp < ?", (cutoff,))
+        
+        # 2. Count requests from this IP in the window
         c.execute("SELECT COUNT(*) FROM rate_limits WHERE ip = ? AND endpoint = ?", (ip, endpoint))
         count = c.fetchone()[0]
+        
         if count >= max_requests:
             conn.close()
             return True
+            
+        # 3. Record this request
         c.execute("INSERT INTO rate_limits (ip, endpoint, timestamp) VALUES (?, ?, ?)", (ip, endpoint, now))
         conn.commit()
         conn.close()
@@ -72,38 +97,7 @@ def is_rate_limited(ip: str, endpoint: str, max_requests: int, window_seconds: i
         print(f"[Rate Limit] Database error: {e}")
         return False
 
-def initialize_server_api_key():
-    try:
-        settings_path = Path(__file__).resolve().parent / "settings.json"
-        s = {}
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                s = json.load(f)
-        if not s.get("server_api_key"):
-            s["server_api_key"] = secrets.token_hex(16)
-            with open(settings_path, "w", encoding="utf-8") as f:
-                json.dump(s, f, indent=4)
-            print(f"[Security] Generated new server_api_key: {s['server_api_key']}")
-        else:
-            print(f"[Security] Loaded server_api_key")
-    except Exception as e:
-        print(f"[Security] Failed to initialize server_api_key: {e}")
-
-_cached_api_key = None
-def get_server_api_key():
-    global _cached_api_key
-    if _cached_api_key:
-        return _cached_api_key
-    try:
-        settings_path = Path(__file__).resolve().parent / "settings.json"
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                s = json.load(f)
-                _cached_api_key = s.get("server_api_key")
-    except Exception:
-        pass
-    return _cached_api_key
-
+# Publicly allowed paths (anyone can request)
 FORBIDDEN_HTML = """
 <!DOCTYPE html>
 <html lang="en">
@@ -257,18 +251,16 @@ FORBIDDEN_HTML = """
 </html>
 """
 
-# Publicly allowed paths (anyone can request without API key)
 PUBLIC_ROUTES = [
     ("/api/public/songs", "GET"),
     ("/api/public/stats", "GET"),
     ("/api/public/suggestions", "GET"),
-    ("/api/public/suggestions", "POST"),
+    ("/api/public/suggestions", "POST"),  # Submit suggestions
     ("/api/public/download", "GET"),       # Public direct free downloads
     ("/api/order/hash-by-checkout", "GET"),
     ("/api/order/details", "GET"),
     ("/api/download/request", "GET"),
     ("/api/download/verify", "GET"),
-    ("/api/download/file", "GET"),
     ("/api/notify/subscribe", "POST"),
     ("/api/notify/confirm", "GET"),
     ("/api/notify/unsubscribe", "GET"),
@@ -281,48 +273,58 @@ PUBLIC_ROUTES = [
 async def security_middleware(request: Request, call_next):
     path = request.url.path
     method = request.method
-
+    
     # Always allow CORS preflight OPTIONS requests
     if method == "OPTIONS":
         return await call_next(request)
-
-    # Always allow static files and video streams
+        
+    # Bypass for static preview files & video streams
     if path.startswith("/public") or path.startswith("/api/public/video-stream"):
         return await call_next(request)
-
+        
     is_public = False
     for p_route, p_method in PUBLIC_ROUTES:
         if path == p_route and method == p_method:
             is_public = True
             break
-
-    # Support suggestions vote/unvote variable paths
+            
+    # Support suggestions vote/unvote paths variables
     if path.startswith("/api/public/suggestions/") and (path.endswith("/vote") or path.endswith("/unvote")):
         if method == "POST":
             is_public = True
-
+            
     if is_public:
         # Rate limit suggestions creation and voting
-        client_ip = request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+        client_ip = request.headers.get("x-real-ip") or request.client.host
         if path == "/api/public/suggestions" and method == "POST":
             if is_rate_limited(client_ip, "suggestion", max_requests=5, window_seconds=3600):
                 return JSONResponse(status_code=429, content={"error": "Rate limit exceeded. Max 5 suggestions per hour."})
         elif path.startswith("/api/public/suggestions/") and (path.endswith("/vote") or path.endswith("/unvote")):
             if is_rate_limited(client_ip, "vote", max_requests=20, window_seconds=600):
                 return JSONResponse(status_code=429, content={"error": "Rate limit exceeded. Max 20 votes per 10 minutes."})
+                
         return await call_next(request)
-
-    # Validate X-Meloscribe-Key for all other routes
+        
+    # Check if request is local (host localhost/127.0.0.1 and no proxy headers)
+    host_header = request.headers.get("host", "")
+    is_local = False
+    if "localhost" in host_header or "127.0.0.1" in host_header:
+        if not request.headers.get("x-real-ip") and not request.headers.get("x-forwarded-for"):
+            is_local = True
+            
+    if is_local:
+        return await call_next(request)
+        
+    # Remote request: validate X-Meloscribe-Key
     client_key = request.headers.get("x-meloscribe-key")
     server_key = get_server_api_key()
-
+    
     if not server_key or client_key != server_key:
-        # If the client explicitly requested JSON, respond in kind
         accept = request.headers.get("accept", "")
         if "application/json" in accept and "text/html" not in accept:
             return JSONResponse(status_code=403, content={"error": "Access Denied: Invalid or missing API key."})
         return HTMLResponse(content=FORBIDDEN_HTML, status_code=403)
-
+        
     return await call_next(request)
 
 # -------------------------------------------------------------------
@@ -333,10 +335,17 @@ if platform.system() == "Windows":
     import requests
     VM_API_BASE = "https://api.meloscribe.dev"
 
+    def get_proxy_headers():
+        headers = {}
+        api_key = get_server_api_key()
+        if api_key:
+            headers["X-Meloscribe-Key"] = api_key
+        return headers
+
     @app.get("/api/analytics")
     def get_local_analytics(range: str = "30d"):
         try:
-            r = requests.get(f"{VM_API_BASE}/api/analytics?range={range}", timeout=5.0)
+            r = requests.get(f"{VM_API_BASE}/api/analytics?range={range}", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -362,10 +371,18 @@ if platform.system() == "Windows":
         combined = local_logs + remote_logs
         return JSONResponse(content=combined)
 
+    @app.post("/api/logs/clear")
+    def clear_local_logs():
+        try:
+            r = requests.post(f"{VM_API_BASE}/api/logs/clear", headers=get_proxy_headers(), timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
     @app.get("/api/notify/subscribers")
     def get_local_subscribers():
         try:
-            r = requests.get(f"{VM_API_BASE}/api/notify/subscribers", timeout=5.0)
+            r = requests.get(f"{VM_API_BASE}/api/notify/subscribers", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -373,7 +390,7 @@ if platform.system() == "Windows":
     @app.get("/api/public/suggestions")
     def get_local_suggestions():
         try:
-            r = requests.get(f"{VM_API_BASE}/api/public/suggestions", timeout=5.0)
+            r = requests.get(f"{VM_API_BASE}/api/public/suggestions", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -381,7 +398,7 @@ if platform.system() == "Windows":
     @app.post("/api/public/suggestions")
     def create_local_suggestion(sug: dict):
         try:
-            r = requests.post(f"{VM_API_BASE}/api/public/suggestions", json=sug, timeout=5.0)
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions", json=sug, headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -389,7 +406,7 @@ if platform.system() == "Windows":
     @app.post("/api/public/suggestions/{sug_id}/vote")
     def vote_local_suggestion(sug_id: str):
         try:
-            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/vote", timeout=5.0)
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/vote", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -397,7 +414,7 @@ if platform.system() == "Windows":
     @app.post("/api/public/suggestions/{sug_id}/unvote")
     def unvote_local_suggestion(sug_id: str):
         try:
-            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/unvote", timeout=5.0)
+            r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/unvote", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -407,7 +424,7 @@ if platform.system() == "Windows":
         try:
             import requests
             from fastapi.responses import StreamingResponse
-            req_headers = {}
+            req_headers = get_proxy_headers()
             range_header = request.headers.get("range")
             if range_header:
                 req_headers["range"] = range_header
@@ -430,7 +447,7 @@ if platform.system() == "Windows":
     @app.delete("/api/public/suggestions/{sug_id}")
     def delete_local_suggestion(sug_id: str):
         try:
-            r = requests.delete(f"{VM_API_BASE}/api/public/suggestions/{sug_id}", timeout=5.0)
+            r = requests.delete(f"{VM_API_BASE}/api/public/suggestions/{sug_id}", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -438,8 +455,49 @@ if platform.system() == "Windows":
     @app.get("/api/stripe/sales")
     def get_local_stripe_sales():
         try:
-            r = requests.get(f"{VM_API_BASE}/api/stripe/sales", timeout=5.0)
+            r = requests.get(f"{VM_API_BASE}/api/stripe/sales", headers=get_proxy_headers(), timeout=5.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @app.api_route("/api/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def proxy_admin_routes(path: str, request: Request):
+        try:
+            from fastapi import Response
+            method = request.method
+            headers = get_proxy_headers()
+            
+            # Forward admin passcode from client
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+                
+            # Forward content-type if present
+            if "content-type" in request.headers:
+                headers["content-type"] = request.headers["content-type"]
+
+            url = f"{VM_API_BASE}/api/admin/{path}"
+            
+            # Handle query parameters
+            params = dict(request.query_params)
+            
+            # Handle body
+            body = await request.body()
+            
+            r = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                data=body,
+                timeout=10.0
+            )
+            
+            # Return json if possible, otherwise raw content
+            try:
+                content = r.json()
+                return JSONResponse(content=content, status_code=r.status_code)
+            except Exception:
+                return Response(content=r.content, status_code=r.status_code, media_type=r.headers.get("content-type"))
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
@@ -452,6 +510,42 @@ if os.path.exists(public_dir):
 import collections
 from datetime import datetime
 
+import secrets
+
+def initialize_server_api_key():
+    try:
+        settings_path = Path(__file__).resolve().parent / "settings.json"
+        s = {}
+        if settings_path.exists():
+            with open(settings_path, "r", encoding="utf-8") as f:
+                s = json.load(f)
+        if not s.get("server_api_key"):
+            s["server_api_key"] = secrets.token_hex(16)
+            with open(settings_path, "w", encoding="utf-8") as f:
+                json.dump(s, f, indent=4)
+            print(f"[Security] Generated new server_api_key: {s['server_api_key']}")
+        else:
+            print(f"[Security] Loaded server_api_key")
+    except Exception as e:
+        print(f"[Security] Failed to initialize server_api_key: {e}")
+
+_cached_api_key = None
+def get_server_api_key():
+    global _cached_api_key
+    if _cached_api_key:
+        return _cached_api_key
+    try:
+        settings_path = Path(__file__).resolve().parent / "settings.json"
+        if settings_path.exists():
+            with open(settings_path, "r", encoding="utf-8") as f:
+                s = json.load(f)
+                _cached_api_key = s.get("server_api_key")
+    except Exception:
+        pass
+    return _cached_api_key
+
+_DB_PATH = Path(__file__).resolve().parent / "analytics.db"
+
 # Ring buffer for system logs
 SYSTEM_LOGS = collections.deque(maxlen=100)
 
@@ -460,13 +554,94 @@ def log_error(msg: str):
     SYSTEM_LOGS.appendleft({"time": timestamp, "msg": msg})
     print(f"[SYSTEM LOG] {msg}")
 
+def periodic_background_sync():
+    import time
+    import sqlite3
+    import importlib.util
+    # Wait 60 seconds after startup to settle
+    time.sleep(60)
+    while True:
+        log_error("[Background Sync] Periodic background sync cycle starting...")
+        
+        # 1. YouTube Sync
+        try:
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "yt_sync.py")
+            spec = importlib.util.spec_from_file_location("yt_sync", sync_path)
+            mod  = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.sync_youtube()
+            log_error("[Background Sync] YouTube metrics sync: SUCCESS")
+        except Exception as e:
+            log_error(f"[Background Sync] YouTube sync error: {e}")
+            
+        # 2. Instagram Sync
+        try:
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "ig_sync.py")
+            spec = importlib.util.spec_from_file_location("ig_sync", sync_path)
+            mod  = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.sync_instagram()
+            log_error("[Background Sync] Instagram metrics sync: SUCCESS")
+        except Exception as e:
+            log_error(f"[Background Sync] Instagram sync error: {e}")
+
+        # 3. TikTok Sync
+        try:
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_sync.py")
+            spec = importlib.util.spec_from_file_location("tiktok_sync", sync_path)
+            mod  = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.sync_tiktok()
+            log_error("[Background Sync] TikTok metrics sync: SUCCESS")
+        except Exception as e:
+            log_error(f"[Background Sync] TikTok sync error: {e}")
+
+        # 4. Demographics Sync
+        try:
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "demographics_sync.py")
+            spec = importlib.util.spec_from_file_location("demographics_sync", sync_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            mod.sync_all_demographics()
+            log_error("[Background Sync] Demographics sync: SUCCESS")
+        except Exception as e:
+            log_error(f"[Background Sync] Demographics sync error: {e}")
+
+        # 5. Competitor Sync
+        try:
+            import asyncio
+            try:
+                asyncio.run(sync_competitors())
+                log_error("[Background Sync] Competitor channels sync: SUCCESS")
+            except RuntimeError:
+                coro = sync_competitors()
+                asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+                log_error("[Background Sync] Competitor channels sync: SUCCESS (threadsafe)")
+        except Exception as e:
+            log_error(f"[Background Sync] Competitor sync error: {e}")
+
+        # 6. Action Triggers
+        try:
+            import sync_utils
+            conn = sqlite3.connect(_DB_PATH)
+            cursor = conn.cursor()
+            count = sync_utils.evaluate_action_triggers(cursor)
+            conn.commit()
+            conn.close()
+            log_error(f"[Background Sync] Evaluated action triggers. Created {count} to-dos.")
+        except Exception as e:
+            log_error(f"[Background Sync] Action triggers evaluation error: {e}")
+
+        log_error("[Background Sync] Periodic background sync cycle completed. Sleeping for 15 minutes...")
+        time.sleep(900)
+
 _sync_errors = []  # Collect errors from startup syncs (deferred until log_error is available)
 
 @app.on_event("startup")
 def startup_event():
     # --- Initialize Server API Key ---
     initialize_server_api_key()
-
+    
     # --- Database Initialization / Migration ---
     try:
         from db_setup import init_db
@@ -475,19 +650,20 @@ def startup_event():
     except Exception as e:
         print(f"[Startup] Database initialization failed: {e}")
 
-    # --- Desktop Shortcut Auto-Creation ---
+    # --- Reset stuck processing items in batch queue ---
     try:
-        ps_script = TOOLS_DIR / "meloscribe" / "create_shortcut.ps1"
-        if ps_script.exists():
-            subprocess.Popen(
-                ["powershell.exe", "-ExecutionPolicy", "Bypass", "-File", str(ps_script)],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=CREATION_FLAGS
-            )
-            print("[Startup] Verified/Updated Meloscribe Desktop Shortcut.")
-    except Exception as e:
-        print(f"[Startup] Failed to verify shortcut: {e}")
+        import sqlite3
+        conn = sqlite3.connect(str(_DB_PATH))
+        c = conn.cursor()
+        c.execute("UPDATE batch_ingest_queue SET status = 'initialized' WHERE status = 'processing'")
+        conn.commit()
+        conn.close()
+        print("[Startup] Reset stuck processing items in batch queue to initialized.")
+    except Exception as db_err:
+        print(f"[Startup] Failed to reset stuck batch items: {db_err}")
+
+    # --- Desktop Shortcut Auto-Creation (DISABLED) ---
+    # Shortcut already exists. No need to recreate on every launch.
 
     # --- ngrok Auto-Start (background) ---
     def run_ngrok():
@@ -597,6 +773,9 @@ def startup_event():
         except Exception as err:
             print(f"[Startup] Auto-sync credentials failed: {err}")
     threading.Thread(target=run_creds_sync, daemon=True).start()
+
+    # --- Start 15-minute Periodic Background Sync ---
+    threading.Thread(target=periodic_background_sync, daemon=True).start()
 
 # -------------------------------------------------------------------
 # Error Log System (in-memory ring buffer for UI display)
@@ -723,6 +902,16 @@ async def run_tool(cmd: list[str], label: str = ""):
                     )
                 except Exception:
                     pass
+            elif "[R2 Upload] Progress:" in line:
+                try:
+                    pct_str = line.split("Progress:")[1].split("%")[0].strip()
+                    pct = float(pct_str)
+                    asyncio.run_coroutine_threadsafe(
+                        manager.broadcast({"type": "progress", "value": pct / 100.0}),
+                        loop,
+                    )
+                except Exception:
+                    pass
             
             # Capture YouTube URL for Ko-Fi
             if "SUCCESS! Video uploaded at https://youtu.be/" in line:
@@ -749,6 +938,7 @@ class WorkflowRequest(BaseModel):
     price: str = "3.00"
     format: str = "viral_part"
     shutdown: bool = False
+    doR2: bool = True
     doKofi: bool = True
     doYoutube: bool = True
     doInstagram: bool = True
@@ -766,6 +956,7 @@ class WorkflowRequest(BaseModel):
     scheduleTime: str = "16:00"
     phase: int = 1
     resumeFromStep: int = 0  # 0 = start from beginning
+    paddle_product_id: str = ""
 
 @app.post("/api/workflow/start")
 async def start_workflow(req: WorkflowRequest):
@@ -901,9 +1092,25 @@ async def _run_workflow(req: WorkflowRequest):
 
             # Ko-Fi Packager
             steps.append((f"Ko-Fi Packager ({v_song})", [
-                python, "-u", str(TOOLS_DIR / "kofi_zipper.py"),
+                python, "-u", str(TOOLS_DIR / "legacy" / "kofi_zipper.py"),
                 "--song", v_song, "--author", author,
             ]))
+
+            # R2 Upload
+            if req.doR2:
+                steps.append((f"R2 Upload ({v_song})", [
+                    python, "-u", str(TOOLS_DIR / "upload_bot.py"),
+                    "--song", v_song, "--author", author,
+                    "--mode", "r2",
+                ]))
+                
+                # Website Catalog Sync
+                steps.append((f"Website Catalog Sync ({v_song})", [
+                    python, "-u", str(TOOLS_DIR / "upload_bot.py"),
+                    "--song", v_song, "--price", req.price,
+                    "--kofi_id", getattr(req, "paddle_product_id", "") or "prod_dummy123",
+                    "--mode", "website",
+                ]))
 
         # Collect enabled platforms
         enabled_platforms = []
@@ -1156,6 +1363,7 @@ class ModuleRequest(BaseModel):
     scheduleDate: str = ""
     scheduleTime: str = "16:00"
     kofi_id: str = ""
+    paddle_product_id: str = ""
 
 @app.post("/api/module/{module}")
 async def run_module(module: str, req: ModuleRequest):
@@ -1168,8 +1376,11 @@ async def run_module(module: str, req: ModuleRequest):
                   "--video", str(TOOLS_DIR.parent / "Keysight export" / f"{req.song}.mp4"),
                   "--title", req.song, "--author", req.author, "--type", "normal",
                   "--zoom", f"{req.zoom:.2f}", "--shift", str(int(req.shift)), "--theme", req.theme],
-        "kofi_zip": [python, "-u", str(TOOLS_DIR / "kofi_zipper.py"), "--song", req.song, "--author", req.author],
+        "kofi_zip": [python, "-u", str(TOOLS_DIR / "legacy" / "kofi_zipper.py"), "--song", req.song, "--author", req.author],
         "kofi_upload": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--price", req.price, "--mode", "kofi", "--format", req.format],
+        "r2_upload": [python, "-u", str(TOOLS_DIR / "legacy" / "r2_uploader.py"), "--song", req.song, "--upload_only"],
+        "r2_full": [python, "-u", str(TOOLS_DIR / "legacy" / "r2_uploader.py"), "--song", req.song, "--author", req.author, "--price", req.price, "--paddle_product_id", getattr(req, "paddle_product_id", "") or req.kofi_id or "", "--website_sync"],
+        "package_zip": [python, "-u", str(TOOLS_DIR / "legacy" / "r2_uploader.py"), "--song", req.song, "--author", req.author, "--price", req.price, "--editor_only"],
         "youtube": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--author", req.author,
                     "--mode", "youtube", "--datetime", f"{req.scheduleDate} {req.scheduleTime}"],
         "instagram": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--author", req.author,
@@ -1324,15 +1535,22 @@ def tiktok_status():
 @app.post("/api/tiktok/authorize")
 def tiktok_authorize():
     """Trigger the first-time OAuth flow (opens browser)."""
-    def _run():
-        import importlib.util
-        auth_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_auth.py")
-        spec = importlib.util.spec_from_file_location("tiktok_auth", auth_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mod.run_initial_auth()
-    threading.Thread(target=_run, daemon=True).start()
-    return {"status": "opening browser for TikTok authorization..."}
+    import importlib.util
+    auth_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_auth.py")
+    spec = importlib.util.spec_from_file_location("tiktok_auth", auth_path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    
+    threading.Thread(target=mod.run_initial_auth, daemon=True).start()
+    
+    import time
+    time.sleep(0.5)
+    
+    auth_url = getattr(mod, "LAST_AUTH_URL", None)
+    return {
+        "status": "opening browser for TikTok authorization...",
+        "url": auth_url
+    }
 
 @app.post("/api/tiktok/sync")
 async def tiktok_sync_now():
@@ -1597,6 +1815,12 @@ def suggest_workflow_date():
 @app.get("/api/logs")
 def get_system_logs():
     return list(SYSTEM_LOGS)
+
+@app.post("/api/logs/clear")
+def clear_system_logs():
+    SYSTEM_LOGS.clear()
+    _error_log.clear()
+    return {"status": "success"}
 
 # -------------------------------------------------------------------
 # Settings Endpoints
@@ -2597,8 +2821,8 @@ async def sync_competitors():
 async def get_todos():
     # Load published songs from songs.json to auto-complete matching todos
     published_titles = set()
-    songs_path = Path(__file__).resolve().parent / "songs.json"
-    if songs_path.exists():
+    songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+    if os.path.exists(songs_path):
         try:
             with open(songs_path, "r", encoding="utf-8") as f:
                 songs_list = json.load(f)
@@ -3260,15 +3484,15 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 },
                 "quantity": 1,
             }],
-            metadata={
-                "song_title": song.get("title"),
-                "download_hash": download_hash,
-                "locale": req.language
-            },
             invoice_creation={"enabled": True},
             billing_address_collection="required",
             success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{origin}/",
+            metadata={
+                "song_title": song.get("title"),
+                "download_hash": download_hash,
+                "locale": req.language
+            }
         )
         return {"url": session.url}
     except Exception as e:
@@ -3401,6 +3625,71 @@ async def stripe_webhook(request: Request):
         return JSONResponse(status_code=500, content={"error": str(e)})
 
     return {"status": "success"}
+
+def send_purchase_delivery_email(email: str, song_name: str, download_hash: str, locale: str = "en"):
+    """Send purchase delivery email via Resend containing the download link."""
+    api_key = load_settings().get("resend_api_key", "")
+    if not api_key:
+        print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping purchase email.")
+        return False
+        
+    download_url = f"https://meloscribe.dev/order/{download_hash}"
+    
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 32px;">
+    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0; font-weight: 800;">meloscribe</h1>
+    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  </div>
+  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
+    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">🎹 Your Sheets Are Ready!</h2>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
+    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
+      Thank you so much for your purchase and supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready.
+    </p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the button below to download your sheet music (PDF), MIDI files, and practice video tutorials:</p>
+    
+    <div style="text-align: center; margin: 28px 0;">
+      <a href="{download_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Download Learning Package</a>
+    </div>
+    
+    <p style="color: #888; font-size: 13px; text-align: center;">
+      This download link is permanent. You can access it anytime to download updates or get your files.
+    </p>
+    
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>The meloscribe team</p>
+  </div>
+  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
+    Need help? Reply directly to this email or visit <a href="https://meloscribe.dev" style="color: #00f5d4;">meloscribe.dev</a>
+  </p>
+</body>
+</html>
+"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "meloscribe <info@meloscribe.dev>",
+                "to": [email],
+                "subject": f"🎹 Your learning package for {song_name} is ready!",
+                "html": html_body
+            },
+            timeout=10.0
+        )
+        if resp.status_code in (200, 201):
+            print(f"[Notify] Purchase email sent successfully to {email}")
+            return True
+        else:
+            print(f"[Notify] Failed to send purchase email: {resp.status_code} - {resp.text}")
+            return False
+    except Exception as err:
+        print(f"[Notify] Resend exception: {err}")
+        return False
 
 @app.get("/api/order/hash-by-checkout")
 def get_hash_by_checkout(checkout_id: str):
@@ -3537,135 +3826,6 @@ def get_hash_by_checkout(checkout_id: str):
             
     return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
 
-def generate_watermark_page(text: str):
-    import io
-    from reportlab.pdfgen import canvas
-    from reportlab.lib.pagesizes import A4
-    packet = io.BytesIO()
-    can = canvas.Canvas(packet, pagesize=A4)
-    can.setFont("Helvetica", 8)
-    can.setFillColorRGB(0.4, 0.4, 0.4)  # dark gray
-    can.drawRightString(560, 20, text)
-    can.save()
-    packet.seek(0)
-    return packet
-
-def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id: str) -> bytes:
-    import io
-    from pypdf import PdfReader, PdfWriter
-    try:
-        if buyer_name and buyer_name.strip():
-            text = f"Licensed to: {buyer_name.strip()} ({email}) | Order #{transaction_id}"
-        else:
-            text = f"Licensed to: {email} | Order #{transaction_id}"
-        
-        watermark_pdf_stream = generate_watermark_page(text)
-        watermark_reader = PdfReader(watermark_pdf_stream)
-        watermark_page = watermark_reader.pages[0]
-        
-        reader = PdfReader(io.BytesIO(pdf_bytes))
-        writer = PdfWriter()
-        
-        for page in reader.pages:
-            page.merge_page(watermark_page)
-            writer.add_page(page)
-            
-        output_stream = io.BytesIO()
-        writer.write(output_stream)
-        return output_stream.getvalue()
-    except Exception as e:
-        print(f"[Watermark] Error watermarking PDF: {e}")
-        return pdf_bytes
-
-def send_purchase_delivery_email(email: str, song_name: str, download_hash: str, locale: str = "en"):
-    """Send purchase delivery email via Resend containing the download link."""
-    api_key = load_settings().get("resend_api_key", "")
-    if not api_key:
-        print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping purchase email.")
-        return False
-        
-    download_url = f"https://meloscribe.dev/order/{download_hash}"
-    
-    is_de = locale.lower().startswith("de")
-    if is_de:
-        subject = f"Dein Lernpaket für {song_name} ist bereit! 🎹"
-        header_title = "🎹 Dein Lernpaket ist bereit!"
-        greeting = "Hallo!"
-        thank_you = f"vielen Dank für deinen Kauf und die Unterstützung meiner Arrangements! Dein Lernpaket für <strong>{song_name}</strong> ist bereit."
-        instruction = "Klicke auf den Button unten, um deine Noten (PDF), MIDI-Dateien und Video-Tutorials herunterzuladen:"
-        button_text = "Lernpaket herunterladen"
-        permanent_note = "Dieser Download-Link ist dauerhaft. Du kannst jederzeit darauf zugreifen, um Updates herunterzuladen oder deine Dateien abzurufen."
-        signoff = "Viel Spaß beim Üben,<br>Tobias | meloscribe"
-        help_text = f'Brauchst du Hilfe? Antworte direkt auf diese E-Mail oder besuche <a href="https://meloscribe.dev" style="color: #00f5d4; text-decoration: none;">meloscribe.dev</a>'
-    else:
-        subject = f"Your learning package for {song_name} is ready! 🎹"
-        header_title = "🎹 Your Sheets Are Ready!"
-        greeting = "Hey!"
-        thank_you = f"Thank you so much for your purchase and supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready."
-        instruction = "Click the button below to download your sheet music (PDF), MIDI files, and practice video tutorials:"
-        button_text = "Download Learning Package"
-        permanent_note = "This download link is permanent. You can access it anytime to download updates or get your files."
-        signoff = "Happy practicing,<br>Tobias | meloscribe"
-        help_text = f'Need help? Reply directly to this email or visit <a href="https://meloscribe.dev" style="color: #00f5d4; text-decoration: none;">meloscribe.dev</a>'
-        
-    html_body = f"""
-<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"></head>
-<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 26px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
-    <p style="color: #888; font-size: 12px; margin-top: 4px;">Arranged by ear. Played by you.</p>
-  </div>
-  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
-    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">{header_title}</h2>
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">{greeting}</p>
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
-      {thank_you}
-    </p>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">{instruction}</p>
-    
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="{download_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">{button_text}</a>
-    </div>
-    
-    <p style="color: #888; font-size: 13px; text-align: center;">
-      {permanent_note}
-    </p>
-    
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">{signoff}</p>
-  </div>
-  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
-    {help_text}
-  </p>
-</body>
-</html>
-"""
-
-    try:
-        resp = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "from": "meloscribe <info@meloscribe.dev>",
-                "to": [email],
-                "subject": subject,
-                "html": html_body
-            },
-            timeout=10.0
-        )
-        if resp.status_code in (200, 201):
-            print(f"[Notify] Purchase email sent successfully to {email} (locale: {locale})")
-            return True
-        else:
-            print(f"[Notify] Failed to send purchase email: {resp.status_code} - {resp.text}")
-            return False
-    except Exception as err:
-        print(f"[Notify] Resend exception: {err}")
-        return False
-
-
-
 @app.get("/api/order/details")
 def get_order_details(hash: str):
     db_path = Path(__file__).resolve().parent / "analytics.db"
@@ -3680,7 +3840,7 @@ def get_order_details(hash: str):
             "song_name": "Sweetest Rain",
             "email": "demo_customer@example.com",
             "download_count": 0,
-            "created_at": "25.10.2025, 14:32 Uhr",
+            "created_at": "2026-07-01T12:00:00Z",
             "status": "completed"
         }
         
@@ -3698,396 +3858,40 @@ def get_order_details(hash: str):
         "created_at": row[3]
     }
 
-# -------------------------------------------------------------------
-# Admin / Package Management APIs
-# -------------------------------------------------------------------
-def verify_admin(request: Request):
-    passcode = request.headers.get("x-admin-passcode")
-    expected = load_settings().get("admin_passcode", "579110")
-    if passcode != expected:
-        raise HTTPException(status_code=401, detail="Unauthorized admin access")
-
-# -------------------------------------------------------------------
-# Dynamic Songs Catalog APIs
-# -------------------------------------------------------------------
-SONGS_JSON_PATH = Path(__file__).resolve().parent / "songs.json"
-
-def load_songs_list():
-    if not SONGS_JSON_PATH.exists():
-        return []
-    try:
-        with open(SONGS_JSON_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"Error loading songs.json: {e}")
-        return []
-
-def save_songs_list(songs_list):
-    try:
-        with open(SONGS_JSON_PATH, "w", encoding="utf-8") as f:
-            json.dump(songs_list, f, indent=2, ensure_ascii=False)
-        return True
-    except Exception as e:
-        print(f"Error saving songs.json: {e}")
-        return False
-
-@app.get("/api/public/songs")
-def get_public_songs():
-    return load_songs_list()
-
-@app.post("/api/admin/songs/add")
-def admin_add_song(request: Request, payload: dict):
-    verify_admin(request)
-    songs_list = load_songs_list()
-    
-    new_song = payload.get("song")
-    if not new_song or not new_song.get("title") or not new_song.get("artist"):
-        raise HTTPException(status_code=400, detail="Song title and artist are required")
-        
-    ids = []
-    for s in songs_list:
-        if s.get("id") and s["id"] != "global_settings":
-            try:
-                ids.append(int(s["id"]))
-            except ValueError:
-                pass
-    new_id = str(max(ids) + 1) if ids else "1"
-    
-    new_song["id"] = new_id
-    new_song["hidden"] = new_song.get("hidden", False)
-    new_song["difficulty"] = new_song.get("difficulty", "Easy")
-    new_song["format"] = new_song.get("format", "full_arrangement")
-    new_song["price"] = new_song.get("price", "6 €")
-    new_song["stripePriceId"] = new_song.get("stripePriceId", "")
-    new_song["youtubeUrl"] = new_song.get("youtubeUrl", "")
-    new_song["tags"] = new_song.get("tags", [])
-    
-    songs_list.append(new_song)
-    if save_songs_list(songs_list):
-        return {"success": True, "song": new_song}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
-
-@app.post("/api/admin/songs/edit")
-def admin_edit_song(request: Request, payload: dict):
-    verify_admin(request)
-    songs_list = load_songs_list()
-    
-    updated_song = payload.get("song")
-    if not updated_song or not updated_song.get("id"):
-        raise HTTPException(status_code=400, detail="Song data with ID is required")
-        
-    found = False
-    for i, s in enumerate(songs_list):
-        if s.get("id") == updated_song["id"]:
-            songs_list[i] = {**s, **updated_song}
-            found = True
-            break
-            
-    if not found:
-        raise HTTPException(status_code=404, detail="Song not found")
-        
-    if save_songs_list(songs_list):
-        return {"success": True}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
-
-@app.post("/api/admin/songs/delete")
-def admin_delete_song(request: Request, payload: dict):
-    verify_admin(request)
-    song_id = payload.get("id")
-    if not song_id:
-        raise HTTPException(status_code=400, detail="Song ID is required")
-        
-    songs_list = load_songs_list()
-    initial_len = len(songs_list)
-    songs_list = [s for s in songs_list if s.get("id") != song_id]
-    
-    if len(songs_list) == initial_len:
-        raise HTTPException(status_code=404, detail="Song not found")
-        
-    if save_songs_list(songs_list):
-        return {"success": True}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to write songs catalog")
-
-@app.get("/api/admin/packages")
-def admin_list_packages(request: Request):
-    verify_admin(request)
-    
-    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
-    
-    if not r2_account_id or not r2_access_key or not r2_secret_key:
-        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
-        
-    import boto3
-    from botocore.config import Config
-    s3 = boto3.client(
-        's3',
-        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-        aws_access_key_id=r2_access_key,
-        aws_secret_access_key=r2_secret_key,
-        config=Config(signature_version='s3v4')
-    )
-    
-    try:
-        res = s3.list_objects_v2(Bucket=r2_bucket)
-        files = []
-        if 'Contents' in res:
-            for obj in res['Contents']:
-                files.append({
-                    "key": obj['Key'],
-                    "size": obj['Size'],
-                    "last_modified": obj['LastModified'].isoformat()
-                })
-        return {"files": files}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list Cloudflare R2 files: {str(e)}")
-
-@app.post("/api/admin/upload")
-async def admin_upload_file(
-    request: Request,
-    song_name: str = Form(...),
-    type: str = Form(...),
-    file: UploadFile = File(...)
-):
-    verify_admin(request)
-    
-    filename = f"{song_name}.pdf" if type == "pdf" else \
-               f"{song_name}.mid" if type == "midi" else \
-               f"{song_name} slow.mid" if type == "midi_slow" else \
-               f"{song_name}.mp4" if type == "video" else \
-               f"{song_name} slow.mp4" if type == "video_slow" else \
-               f"{song_name} Full Package.zip" if type == "zip" else file.filename
-               
-    if type == "zip":
-        r2_key = filename
-    else:
-        r2_key = f"{song_name}/{filename}"
-        
-    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
-    
-    if not r2_account_id or not r2_access_key or not r2_secret_key:
-        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
-        
-    import boto3
-    from botocore.config import Config
-    s3 = boto3.client(
-        's3',
-        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-        aws_access_key_id=r2_access_key,
-        aws_secret_access_key=r2_secret_key,
-        config=Config(signature_version='s3v4')
-    )
-    
-    try:
-        content = await file.read()
-        content_type = "application/pdf" if type == "pdf" else \
-                       "audio/midi" if "midi" in type else \
-                       "video/mp4" if "video" in type else \
-                       "application/zip" if type == "zip" else "application/octet-stream"
-                       
-        s3.put_object(
-            Bucket=r2_bucket,
-            Key=r2_key,
-            Body=content,
-            ContentType=content_type
-        )
-        print(f"[Admin Upload] Successfully uploaded {r2_key} to R2")
-        return {"success": True, "key": r2_key}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to upload file to Cloudflare R2: {str(e)}")
-
-@app.post("/api/admin/delete")
-def admin_delete_file(request: Request, payload: dict):
-    verify_admin(request)
-    r2_key = payload.get("key")
-    if not r2_key:
-        raise HTTPException(status_code=400, detail="R2 Key is required")
-        
-    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
-    
-    if not r2_account_id or not r2_access_key or not r2_secret_key:
-        raise HTTPException(status_code=500, detail="Cloudflare R2 credentials are not configured in settings.json")
-        
-    import boto3
-    from botocore.config import Config
-    s3 = boto3.client(
-        's3',
-        endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-        aws_access_key_id=r2_access_key,
-        aws_secret_access_key=r2_secret_key,
-        config=Config(signature_version='s3v4')
-    )
-    
-    try:
-        s3.delete_object(Bucket=r2_bucket, Key=r2_key)
-        print(f"[Admin Delete] Deleted {r2_key} from R2")
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file from Cloudflare R2: {str(e)}")
-
-@app.get("/api/admin/orders")
-def admin_list_orders(request: Request):
-    verify_admin(request)
-    
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-    c.execute("SELECT transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, download_count, created_at FROM purchases ORDER BY created_at DESC")
-    rows = c.fetchall()
-    conn.close()
-    
-    orders = []
-    for row in rows:
-        orders.append({
-            "transaction_id": row[0],
-            "email": row[1],
-            "song_name": row[2],
-            "amount": row[3],
-            "currency": row[4],
-            "status": row[5],
-            "download_hash": row[6],
-            "locale": row[7],
-            "buyer_name": row[8],
-            "download_count": row[9],
-            "created_at": row[10]
-        })
-    return {"orders": orders}
-
-@app.post("/api/admin/orders/reset")
-def admin_reset_order_downloads(request: Request, payload: dict):
-    verify_admin(request)
-    transaction_id = payload.get("transaction_id")
-    if not transaction_id:
-        raise HTTPException(status_code=400, detail="Transaction ID required")
-        
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-    c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
-    conn.commit()
-    conn.close()
-    return {"success": True}
-
-@app.post("/api/admin/orders/toggle-status")
-def admin_toggle_order_status(request: Request, payload: dict):
-    verify_admin(request)
-    transaction_id = payload.get("transaction_id")
-    new_status = payload.get("status")
-    if not transaction_id or not new_status:
-        raise HTTPException(status_code=400, detail="Transaction ID and status required")
-        
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-    c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
-    conn.commit()
-    conn.close()
-    return {"success": True, "status": new_status}
-
 @app.get("/api/download/request")
-def request_download(hash: str, type: str, request: Request):
+def request_download(hash: str, type: str):
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
         return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
         
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count, downloaded_types, status FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
-    downloaded_types = ""
-    status = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
-        downloaded_types = row[2] or ""
-        status = row[3] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
-        status = "completed"
         print(f"[Download Request] Sandbox hash '{hash}' resolved to '{song_name}'")
         
     if not song_name:
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    if status in ("inactive", "refunded", "deactivated"):
+    if download_count >= 20:
         conn.close()
-        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
-        
-    # IP limits removed as requested
-    if download_count >= 50:
-        conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 20 downloads allowed)"}, status_code=403)
         
     if row:
-        types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
-        if type not in types_list:
-            types_list.append(type)
-        new_types_str = ",".join(types_list)
-        download_count = download_count + 1
-        c.execute("UPDATE purchases SET download_count = ?, downloaded_types = ? WHERE download_hash = ?", (download_count, new_types_str, hash))
+        new_count = download_count + 1
+        c.execute("UPDATE purchases SET download_count = ? WHERE download_hash = ?", (new_count, hash))
         conn.commit()
-    conn.close()
-    
-    # Return absolute URL pointing to our dynamic file downloader/redirector
-    download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
-    return {"download_url": download_file_url, "download_count": download_count}
-
-@app.get("/api/download/file")
-def download_file(hash: str, type: str, request: Request):
-    if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
-        return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
-        
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path), timeout=30.0)
-    c = conn.cursor()
-    c.execute("SELECT song_name, email, transaction_id, buyer_name, status FROM purchases WHERE download_hash = ?", (hash,))
-    row = c.fetchone()
-    
-    song_name = None
-    email = None
-    txn_id = None
-    buyer_name = ""
-    status = ""
-    
-    if row:
-        song_name = row[0]
-        email = row[1]
-        txn_id = row[2]
-        buyer_name = row[3] or ""
-        status = row[4] or ""
-    elif hash.startswith("demo_hash_"):
-        song_name = "Sweetest Rain"
-        email = "demo_customer@example.com"
-        txn_id = "demo_12345"
-        buyer_name = "Jane Doe"
-        status = "completed"
-        
-    if not song_name:
-        conn.close()
-        return JSONResponse(content={"error": "Order not found"}, status_code=404)
-        
-    if status in ("inactive", "refunded", "deactivated"):
-        conn.close()
-        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
-        
-    # IP limits removed as requested
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
@@ -4096,7 +3900,7 @@ def download_file(hash: str, type: str, request: Request):
     r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
-        print("[Download File] R2 credentials missing, using demo redirect fallback.")
+        print("[Download Request] R2 credentials missing, using demo redirect fallback.")
         if type == "pdf":
             suffix = f"/{song_name}.pdf"
         elif type == "midi":
@@ -4109,8 +3913,10 @@ def download_file(hash: str, type: str, request: Request):
             suffix = f"/{song_name} slow.mp4"
         else:
             suffix = " Full Package.zip"
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"https://example.com/demo-packages/{song_name}{suffix}")
+        return {
+            "download_url": f"https://example.com/demo-packages/{song_name}{suffix}",
+            "message": "Demo mode: R2 credentials are not configured in settings.json"
+        }
         
     try:
         import boto3
@@ -4128,7 +3934,7 @@ def download_file(hash: str, type: str, request: Request):
             file_key = f"{song_name}/{song_name} slow.mp4"
         else:
             file_key = f"{song_name} Full Package.zip"
-            
+        
         s3 = boto3.client(
             's3',
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
@@ -4137,32 +3943,16 @@ def download_file(hash: str, type: str, request: Request):
             config=Config(signature_version='s3v4')
         )
         
-        if type == "pdf":
-            print(f"[Download File] Fetching '{file_key}' from R2 for watermarking...")
-            pdf_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
-            original_pdf_bytes = pdf_obj['Body'].read()
-            
-            # Apply watermark dynamically
-            watermarked_bytes = watermark_pdf(original_pdf_bytes, buyer_name, email, txn_id)
-            
-            from fastapi.responses import Response
-            headers = {
-                "Content-Disposition": f'attachment; filename="{song_name}.pdf"'
-            }
-            return Response(content=watermarked_bytes, media_type="application/pdf", headers=headers)
-        else:
-            # Presigned R2 redirect for ZIP, MIDI, and Video files
-            presigned_url = s3.generate_presigned_url(
-                ClientMethod='get_object',
-                Params={'Bucket': r2_bucket, 'Key': file_key},
-                ExpiresIn=900
-            )
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(url=presigned_url)
-            
+        presigned_url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={'Bucket': r2_bucket, 'Key': file_key},
+            ExpiresIn=900
+        )
+        
+        return {"download_url": presigned_url}
     except Exception as e:
-        print(f"[Download File] Error serving file: {e}")
-        return JSONResponse(content={"error": f"Failed to serve file: {str(e)}"}, status_code=500)
+        print(f"Failed to generate presigned R2 URL: {e}")
+        return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)
 
 @app.get("/api/download/verify")
 def verify_download(checkout_id: str):
@@ -4268,7 +4058,7 @@ def _send_confirmation_email(email: str, token: str):
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
+    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
@@ -4804,8 +4594,8 @@ def delete_suggestion(sug_id: str):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.get("/api/stripe/sales")
-def get_stripe_sales():
+@app.get("/api/paddle/sales")
+def get_paddle_sales():
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -4906,7 +4696,8 @@ def stream_preview_video(song_name: str, request: Request):
     def get_local_fallback():
         # Determine local path depending on environment
         if os.name == 'nt':
-            local_path = r"C:\Dev\meloscribe-app\ShopVideos\Mary On A Cross.mp4"
+            shop_videos_dir = settings.get("shop_videos_dir", r"C:\Dev\meloscribe\ShopVideos")
+            local_path = os.path.join(shop_videos_dir, "Mary On A Cross.mp4")
         else:
             local_path = "/home/ubuntu/meloscribe/Scores/fallback.mp4"
         if os.path.exists(local_path):
@@ -4975,6 +4766,104 @@ def stream_preview_video(song_name: str, request: Request):
         return JSONResponse(content={"error": f"Failed to stream video: {str(e)}"}, status_code=500)
 
 
+@app.get("/api/public/audio-stream")
+def stream_preview_audio(song_name: str, request: Request):
+    from fastapi.responses import StreamingResponse, FileResponse
+    import requests
+
+    def get_local_fallback():
+        dest_mp3 = Path(r"C:\Dev\meloscribe-frontend\website\public\audio-previews") / f"{song_name}.mp3"
+        if dest_mp3.exists():
+            print(f"[Preview Audio] Serving local fallback: {dest_mp3}")
+            return FileResponse(dest_mp3, media_type="audio/mpeg")
+        return None
+
+    # Resolve R2 preview audio
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        fb = get_local_fallback()
+        if fb:
+            return fb
+        return JSONResponse(content={"error": "R2 credentials missing"}, status_code=500)
+
+    try:
+        import boto3
+        from botocore.config import Config
+        s3 = boto3.client(
+            's3',
+            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+            aws_access_key_id=r2_access_key,
+            aws_secret_access_key=r2_secret_key,
+            config=Config(signature_version='s3v4')
+        )
+        # Try to check {clean_name}/{clean_name}.mp3
+        clean_name = song_name
+        for suffix in (" (Easy Version)", " (Easy)", "(Easy Version)", "(Easy)"):
+            if clean_name.endswith(suffix):
+                clean_name = clean_name[:-len(suffix)].strip()
+        file_key = f"{clean_name}/{clean_name}.mp3"
+        
+        try:
+            s3.head_object(Bucket=r2_bucket, Key=file_key)
+        except Exception:
+            fb = get_local_fallback()
+            if fb:
+                return fb
+            return JSONResponse(content={"error": "Audio preview not found in R2"}, status_code=404)
+
+        download_url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={'Bucket': r2_bucket, 'Key': file_key},
+            ExpiresIn=900
+        )
+    except Exception as e:
+        print(f"Failed to generate presigned R2 audio preview URL: {e}")
+        fb = get_local_fallback()
+        if fb:
+            return fb
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    req_headers = {}
+    range_header = request.headers.get("range")
+    if range_header:
+        req_headers["range"] = range_header
+
+    try:
+        r2_resp = requests.get(download_url, headers=req_headers, stream=True, timeout=15)
+        if r2_resp.status_code >= 400:
+            fb = get_local_fallback()
+            if fb:
+                return fb
+            return JSONResponse(content={"error": "R2 stream failed"}, status_code=r2_resp.status_code)
+
+        def chunk_generator():
+            try:
+                for chunk in r2_resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                r2_resp.close()
+
+        resp_headers = {}
+        for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
+            if h in r2_resp.headers:
+                resp_headers[h] = r2_resp.headers[h]
+
+        if "content-type" not in resp_headers:
+            resp_headers["content-type"] = "audio/mpeg"
+
+        return StreamingResponse(chunk_generator(), status_code=r2_resp.status_code, headers=resp_headers)
+    except Exception as e:
+        fb = get_local_fallback()
+        if fb:
+            return fb
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
 # -------------------------------------------------------------------
 # Broadcast Newsletter for new product Drops
 # -------------------------------------------------------------------
@@ -5004,7 +4893,7 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 28px; font-weight: 800; letter-spacing: 2px; margin: 0; font-family: 'Helvetica Neue', Arial, sans-serif; text-align: center;"><span style="color: #ff2d92;">m</span><span style="color: #eb3ca2;">e</span><span style="color: #d64bb2;">l</span><span style="color: #c25ac2;">o</span><span style="color: #ad69d2;">s</span><span style="color: #9978e2;">c</span><span style="color: #8487f2;">r</span><span style="color: #7096ff;">i</span><span style="color: #3caaff;">b</span><span style="color: #00f5ff;">e</span></h1>
+    <h1 style="font-size: 28px; font-weight: 800; background: linear-gradient(to right, #00f5d4, #ff007f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
     <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
@@ -5056,22 +4945,6 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
         print(f"[Notify] Email send failed: {e}")
         return False
 
-@app.post("/api/notify/broadcast")
-async def notify_broadcast(req: BroadcastRequest):
-    """Send new song notification to all active subscribers."""
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    try:
-        conn = sqlite3.connect(str(db_path), timeout=30.0)
-        c = conn.cursor()
-        c.execute("SELECT email, token FROM notify_subscribers WHERE status = 'active'")
-        subscribers = c.fetchall()
-        conn.close()
-    except Exception as e:
-        return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
-    
-    if not subscribers:
-        return {"status": "success", "sent_count": 0, "message": "No active subscribers found."}
-        
     sent_count = 0
     for email, token in subscribers:
         success = _send_new_song_notification(email, token, req.title, req.artist, req.difficulty, req.format, req.price)
@@ -5251,10 +5124,11 @@ def batch_processor_worker():
                 zoom_val = "1.50"
                 shift_val = "0"
                 
+                keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
                 for suffix, folder_name in versions:
                     v_song = f"{song_name}{suffix}"
                     for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
-                        vid_in = str(TOOLS_DIR.parent / "Keysight export" / f"{v_song}{prefix}.mp4")
+                        vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
                         midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
                         
                         cmd_portrait = [
@@ -5276,23 +5150,77 @@ def batch_processor_worker():
                             
                     # Cover Generator
                     steps.append([python, "-u", str(TOOLS_DIR / "cover_generator.py"), "--song", v_song, "--author", author, "--theme", theme])
-                    # Ko-Fi Packager
-                    steps.append([python, "-u", str(TOOLS_DIR / "legacy" / "kofi_zipper.py"), "--song", v_song, "--author", author])
-                    # R2 Upload
-                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2"])
+                    # MuseScore: open MIDI + meloscribe template, wait for PDF export
+                    steps.append([python, "-u", str(TOOLS_DIR / "musescore_launcher.py"), "--song", v_song, "--author", author])
+                    # R2 Upload (individual assets: PDF, MIDI, videos, preview+MP3 generated inline)
+                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2", "--format", fmt])
                     # Website Catalog Add
                     steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website"])
                 
                 # Execute all steps sequentially
                 success = True
                 err_msg = ""
-                for cmd in steps:
+                total_steps = len(steps)
+                for step_idx, cmd in enumerate(steps):
+                    # Set base progress for this step
+                    base_progress = int((step_idx / total_steps) * 100)
+                    
+                    conn = sqlite3.connect(str(db_path), timeout=30.0)
+                    c = conn.cursor()
+                    c.execute("UPDATE batch_ingest_queue SET progress = ? WHERE song_name = ?", (base_progress, song_name))
+                    conn.commit()
+                    conn.close()
+
                     log_error(f"[Batch Worker] Running sub-task: {' '.join(cmd[:4])}...")
-                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
-                    rc = res.returncode
+                    cmd_str = " ".join(cmd)
+                    is_interactive = "keysight_bot.py" in cmd_str or "musescore_launcher.py" in cmd_str
+                    if sys.platform == "win32":
+                        creation_flags = subprocess.CREATE_NEW_CONSOLE if is_interactive else subprocess.CREATE_NO_WINDOW
+                    else:
+                        creation_flags = 0
+                        
+                    if is_interactive:
+                        res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=creation_flags)
+                        rc = res.returncode
+                        stdout_str = res.stdout or ""
+                        stderr_str = res.stderr or ""
+                    else:
+                        p = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            creationflags=creation_flags
+                        )
+                        
+                        stdout_lines = []
+                        for line in iter(p.stdout.readline, ""):
+                            # Forward output to logs
+                            stdout_lines.append(line)
+                            
+                            # Parse PROGRESS from subprocess (e.g. video_generator.py outputting 'PROGRESS:25%')
+                            if line.startswith("PROGRESS:"):
+                                try:
+                                    pct = int(line.split(":")[1].replace("%", "").strip())
+                                    # Interpolate current step progress
+                                    sub_progress = min(base_progress + int(pct / total_steps), 100)
+                                    conn = sqlite3.connect(str(db_path), timeout=30.0)
+                                    c = conn.cursor()
+                                    c.execute("UPDATE batch_ingest_queue SET progress = ? WHERE song_name = ?", (sub_progress, song_name))
+                                    conn.commit()
+                                    conn.close()
+                                except Exception:
+                                    pass
+                        p.wait()
+                        rc = p.returncode
+                        stdout_str = "".join(stdout_lines)
+                        stderr_str = ""
+                        
                     if rc != 0:
                         success = False
-                        sub_err = (res.stderr or res.stdout or "").strip()
+                        sub_err = (stderr_str or stdout_str or "").strip() if not is_interactive else "(check the open console window for error traceback)"
                         err_msg = f"Step failed: {' '.join(cmd[:4])}... Details: {sub_err}"
                         log_error(f"[Batch Worker] Error during step: {err_msg}")
                         break
@@ -5412,7 +5340,7 @@ def get_batch_queue():
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute("SELECT song_name, author, theme, price, format, difficulty, status, error_message, created_at, processed_at FROM batch_ingest_queue ORDER BY id DESC")
+        c.execute("SELECT song_name, author, theme, price, format, difficulty, status, error_message, created_at, processed_at, hook_start, hook_end, progress FROM batch_ingest_queue ORDER BY id DESC")
         rows = c.fetchall()
         conn.close()
     except Exception as e:
@@ -5430,7 +5358,10 @@ def get_batch_queue():
             "status": r[6],
             "errorMessage": r[7],
             "createdAt": r[8],
-            "processedAt": r[9]
+            "processedAt": r[9],
+            "hookStart": r[10],
+            "hookEnd": r[11],
+            "progress": r[12] or 0,
         })
     return queue
 
@@ -5474,6 +5405,227 @@ def trigger_batch_process():
         
     threading.Thread(target=batch_processor_worker, daemon=True).start()
     return {"status": "started"}
+
+@app.post("/api/batch/set-hook")
+async def set_hook(req: dict):
+    """Save hook_start / hook_end timestamps for a queued song."""
+    song_name = req.get("song_name")
+    hook_start = req.get("hook_start")
+    hook_end = req.get("hook_end")
+    if not song_name:
+        raise HTTPException(status_code=400, detail="song_name is required")
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn.execute(
+            "UPDATE batch_ingest_queue SET hook_start=?, hook_end=? WHERE song_name=?",
+            (hook_start, hook_end, song_name)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/batch/stream-keysight")
+def stream_keysight_video(song_name: str, request: Request):
+    """Stream the local Keysight RAW or compressed MP4 for the hook editor preview player."""
+    from fastapi.responses import FileResponse, StreamingResponse
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+    raw_path = keysight_dir / "RAW" / f"{song_name}_RAW.mp4"
+    compressed_path = keysight_dir / f"{song_name}.mp4"
+    video_path = raw_path if raw_path.exists() else compressed_path
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail=f"No Keysight video found for '{song_name}'")
+    
+    file_size = video_path.stat().st_size
+    range_header = request.headers.get("range")
+    
+    if range_header:
+        # Handle range requests for HTML5 video seeking
+        range_val = range_header.replace("bytes=", "").split("-")
+        start = int(range_val[0])
+        end = int(range_val[1]) if range_val[1] else file_size - 1
+        chunk_size = end - start + 1
+        
+        def iter_file():
+            with open(video_path, "rb") as f:
+                f.seek(start)
+                remaining = chunk_size
+                while remaining > 0:
+                    data = f.read(min(65536, remaining))
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+        
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+            "Content-Type": "video/mp4",
+        }
+        return StreamingResponse(iter_file(), status_code=206, headers=headers)
+    
+    return FileResponse(str(video_path), media_type="video/mp4", headers={"Accept-Ranges": "bytes"})
+
+@app.post("/api/batch/regenerate-preview")
+async def regenerate_preview(req: dict):
+    """
+    Re-cut the _preview.mp4 from local Keysight file using saved hook timestamps,
+    then re-upload to R2, overwriting the existing preview.
+    """
+    song_name = req.get("song_name")
+    hook_start = req.get("hook_start")
+    hook_end = req.get("hook_end")
+    if not song_name:
+        raise HTTPException(status_code=400, detail="song_name is required")
+    
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    
+    # Persist timestamps
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn.execute(
+            "UPDATE batch_ingest_queue SET hook_start=?, hook_end=? WHERE song_name=?",
+            (hook_start, hook_end, song_name)
+        )
+        conn.commit()
+        # Also fetch format for this song
+        row = conn.execute(
+            "SELECT format FROM batch_ingest_queue WHERE song_name=?", (song_name,)
+        ).fetchone()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+    
+    format_mode = row[0] if row else "full_arrangement"
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+    raw_path = keysight_dir / "RAW" / f"{song_name}_RAW.mp4"
+    compressed_path = keysight_dir / f"{song_name}.mp4"
+    source = raw_path if raw_path.exists() else compressed_path
+    if not source.exists():
+        raise HTTPException(status_code=404, detail=f"Source video not found for '{song_name}'")
+    
+    dest_preview = keysight_dir / f"{song_name}_preview.mp4"
+    
+    # Build ffmpeg command
+    import subprocess as _sp
+    cmd = ["ffmpeg", "-y"]
+    if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and hook_end > hook_start:
+        cmd += ["-ss", str(hook_start), "-t", str(hook_end - hook_start)]
+    elif format_mode == "full_arrangement":
+        cmd += ["-ss", "0", "-t", "60"]
+    cmd += [
+        "-i", str(source),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "28",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+faststart",
+        str(dest_preview)
+    ]
+    creation_flags = 0x08000000 if sys.platform == "win32" else 0
+    rc = _sp.run(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=creation_flags).returncode
+    if rc != 0:
+        raise HTTPException(status_code=500, detail="FFmpeg failed to generate preview clip")
+    
+    # Regenerate audio hover preview MP3 from WAV if WAV exists
+    wav_path = None
+    paths_to_try = [
+        f"C:\\Cakewalk Projects\\{song_name}\\Audio Export\\{song_name}.wav",
+        f"C:\\Cakewalk Projects\\{song_name}\\Audio Export\\.Audacity\\{song_name}.wav",
+        f"C:\\Cakewalk Projects\\.Audacity\\{song_name}.wav",
+    ]
+    for p in paths_to_try:
+        p_path = Path(p)
+        if p_path.exists():
+            wav_path = p_path
+            break
+            
+    if not wav_path:
+        # Case-insensitive scan fallback
+        cakewalk_base = Path(r"C:\Cakewalk Projects")
+        if cakewalk_base.exists():
+            for folder in os.listdir(cakewalk_base):
+                if folder.lower() == song_name.lower():
+                    export_dir = cakewalk_base / folder / "Audio Export"
+                    if export_dir.exists():
+                        for f_name in os.listdir(export_dir):
+                            if f_name.lower() == f"{song_name}.wav".lower():
+                                wav_path = export_dir / f_name
+                                break
+                    if wav_path:
+                        break
+
+    dest_mp3 = Path(r"C:\Dev\meloscribe-frontend\website\public\audio-previews") / f"{song_name}.mp3"
+    mp3_generated = False
+    if wav_path:
+        try:
+            dest_mp3.parent.mkdir(parents=True, exist_ok=True)
+            cmd_mp3 = ["ffmpeg", "-y"]
+            if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and hook_end > hook_start:
+                cmd_mp3 += ["-ss", str(hook_start), "-t", str(hook_end - hook_start)]
+            elif format_mode == "full_arrangement":
+                cmd_mp3 += ["-ss", "0", "-t", "60"]
+            cmd_mp3 += [
+                "-i", str(wav_path),
+                "-c:a", "libmp3lame", "-b:a", "128k",
+                str(dest_mp3)
+            ]
+            rc_mp3 = _sp.run(cmd_mp3, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=creation_flags).returncode
+            if rc_mp3 == 0:
+                log_error(f"[Preview Regen] Success: Audio hover MP3 cropped to hook.")
+                mp3_generated = True
+            else:
+                log_error(f"[Preview Regen] Error: FFmpeg failed to crop audio hover.")
+        except Exception as e:
+            log_error(f"[Preview Regen] Audio crop error: {e}")
+            
+    # Re-upload to R2 if credentials are configured
+    r2_account_id = settings.get("r2_account_id")
+    r2_access_key = settings.get("r2_access_key_id")
+    r2_secret_key = settings.get("r2_secret_access_key")
+    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets")
+    uploaded = False
+    if r2_account_id and r2_access_key and r2_secret_key:
+        try:
+            import boto3
+            from botocore.config import Config as _Cfg
+            s3 = boto3.client(
+                's3',
+                endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+                aws_access_key_id=r2_access_key,
+                aws_secret_access_key=r2_secret_key,
+                config=_Cfg(signature_version='s3v4')
+            )
+            
+            # Upload Video Preview
+            vid_key = f"{song_name}/{song_name}_preview.mp4"
+            s3.upload_file(
+                str(dest_preview), r2_bucket, vid_key,
+                ExtraArgs={"ContentType": "video/mp4"}
+            )
+            log_error(f"[Preview Regen] Uploaded {vid_key} to R2 bucket '{r2_bucket}'.")
+            
+            # Upload Audio Preview
+            if mp3_generated:
+                mp3_key = f"{song_name}/{song_name}.mp3"
+                s3.upload_file(
+                    str(dest_mp3), r2_bucket, mp3_key,
+                    ExtraArgs={"ContentType": "audio/mpeg"}
+                )
+                log_error(f"[Preview Regen] Uploaded {mp3_key} to R2 bucket '{r2_bucket}'.")
+                
+            uploaded = True
+        except Exception as e:
+            log_error(f"[Preview Regen] R2 upload failed: {e}")
+    
+    return {
+        "status": "success",
+        "local_path": str(dest_preview),
+        "uploaded_to_r2": uploaded,
+        "hook_start": hook_start,
+        "hook_end": hook_end
+    }
 
 
 # -------------------------------------------------------------------

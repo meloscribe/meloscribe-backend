@@ -17,10 +17,11 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Mary On A Cross_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
     "hidden": false,
     "stripePriceId": "pri_01kwap7nmbmfnwewwx2npgxd2m",
-    "paymentsDisabled": false
+    "paymentsDisabled": false,
+    "theme": "warm"
   },
   {
     "id": "2",
@@ -29,8 +30,9 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/Sonne_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap7psqhq1kadfgm1zvt17n"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap7psqhq1kadfgm1zvt17n",
+    "theme": "warm"
   },
   {
     "id": "3",
@@ -39,8 +41,9 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/Je te laisserai des mots_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap7r150vgfbnxjjekmr06j"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap7r150vgfbnxjjekmr06j",
+    "theme": "cold"
   },
   {
     "id": "4",
@@ -49,8 +52,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Closed Doors_clean.jpg",
-    "gradient": "from-dark-800 via-neon-pink/20 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap7s76726nsbccp4eydq3d"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap7s76726nsbccp4eydq3d",
+    "theme": "cold"
   },
   {
     "id": "5",
@@ -59,8 +63,9 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/Sweetest Rain_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap7tcvw6s23pq44pbv60aq"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap7tcvw6s23pq44pbv60aq",
+    "theme": "warm"
   },
   {
     "id": "6",
@@ -69,8 +74,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/We wish you a merry Christmas_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap7vmg93500mvg8e0rj82a"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap7vmg93500mvg8e0rj82a",
+    "theme": "warm"
   },
   {
     "id": "9",
@@ -79,8 +85,9 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/In This Shirt_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3",
+    "theme": "cold"
   },
   {
     "id": "10",
@@ -89,8 +96,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Wet Hands_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap7y0k3qfssyqvca8tgqfk"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap7y0k3qfssyqvca8tgqfk",
+    "theme": "cold"
   },
   {
     "id": "11",
@@ -99,8 +107,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/The Scientist_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap7zb0qn5jy0xmygr2mf72"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap7zb0qn5jy0xmygr2mf72",
+    "theme": "cold"
   },
   {
     "id": "13",
@@ -109,8 +118,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Mockingbird_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap80gg2604xhkqvmnqfab6"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap80gg2604xhkqvmnqfab6",
+    "theme": "cold"
   },
   {
     "id": "14",
@@ -119,8 +129,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Succession theme_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap81spjgzydv97804x48fm"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap81spjgzydv97804x48fm",
+    "theme": "cold"
   },
   {
     "id": "15",
@@ -129,8 +140,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Past Lives_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap82yvjpa4xdvp2n65j081"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap82yvjpa4xdvp2n65j081",
+    "theme": "cold"
   },
   {
     "id": "16",
@@ -139,8 +151,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/No Surprises_clean.jpg",
-    "gradient": "from-dark-800 via-neon-pink/20 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap84e2t898qcpccpx32xbr"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap84e2t898qcpccpx32xbr",
+    "theme": "cold"
   },
   {
     "id": "17",
@@ -149,8 +162,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Greensleeves_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap85kbhf0zpdd77p0d1fwv"
+    "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
+    "stripePriceId": "pri_01kwap85kbhf0zpdd77p0d1fwv",
+    "theme": "green"
   },
   {
     "id": "18",
@@ -159,8 +173,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/God Rest Ye Merry, Gentlemen_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap86sgh9wg86me8sek8xxa"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap86sgh9wg86me8sek8xxa",
+    "theme": "cold"
   },
   {
     "id": "19",
@@ -169,8 +184,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Carol of the Bells_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap87zrswysf4vqcaasvm89"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap87zrswysf4vqcaasvm89",
+    "theme": "cold"
   },
   {
     "id": "21",
@@ -179,8 +195,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Silent Night_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap894yy7rsz375k3h3sdp9"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "pri_01kwap894yy7rsz375k3h3sdp9",
+    "theme": "cold"
   },
   {
     "id": "22",
@@ -189,8 +206,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Hallelujah_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap8afx26p78hem1c2hz3n9"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap8afx26p78hem1c2hz3n9",
+    "theme": "warm"
   },
   {
     "id": "23",
@@ -199,18 +217,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Cornfield Chase_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap8bnmvvdjkx3g7zwkq1vz"
-  },
-  {
-    "id": "29",
-    "title": "My singing Monsters Plant Island",
-    "artist": "Unknown",
-    "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/My singing Monsters Plant Island_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-pink/20",
-    "stripePriceId": "pri_01kwap8czqz877v5q6fcnafk11"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap8bnmvvdjkx3g7zwkq1vz",
+    "theme": "warm"
   },
   {
     "id": "30",
@@ -219,18 +228,9 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Your love is my drug_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-cyan/20",
-    "stripePriceId": "pri_01kwap8e5vbzsrjxrtj8mjs2xm"
-  },
-  {
-    "id": "31",
-    "title": "Golden Brown x Love Story",
-    "artist": "Unknown",
-    "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/Golden Brown x Love Story_clean.jpg",
-    "gradient": "from-neon-cyan/30 via-dark-600 to-dark-800",
-    "stripePriceId": "pri_01kwap8fk89mqmbxkdj71dktrd"
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "stripePriceId": "pri_01kwap8e5vbzsrjxrtj8mjs2xm",
+    "theme": "warm"
   },
   {
     "id": "32",
@@ -239,10 +239,76 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/River Flows in You_clean.jpg",
-    "gradient": "from-dark-800 via-neon-pink/20 to-neon-cyan/20",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "audioPreviewUrl": "/audio/river_flows_in_you.ogg",
     "paymentsDisabled": false,
     "hidden": false,
-    "stripePriceId": "pri_01kwap8gs5btjdcesxb7k3acz4"
+    "stripePriceId": "pri_01kwap8gs5btjdcesxb7k3acz4",
+    "theme": "cold"
+  },
+  {
+    "id": "33",
+    "title": "God Rest Ye Merry",
+    "artist": "Dave Kerr",
+    "difficulty": "Original",
+    "price": "4 €",
+    "kofiId": "prod_dummy123",
+    "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "theme": "cold",
+    "stripePriceId": "prod_dummy123"
+  },
+  {
+    "id": "34",
+    "title": "Greensleeves",
+    "artist": "Dave Kerr",
+    "difficulty": "Original",
+    "price": "4 €",
+    "kofiId": "prod_dummy123",
+    "coverImage": "/covers/Greensleeves_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Greensleeves.mp3",
+    "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
+    "theme": "green",
+    "stripePriceId": "prod_dummy123"
+  },
+  {
+    "id": "35",
+    "title": "Hallelujah",
+    "artist": "Dave Kerr",
+    "difficulty": "Original",
+    "price": "4 €",
+    "kofiId": "prod_dummy123",
+    "coverImage": "/covers/Hallelujah_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
+    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "theme": "warm",
+    "stripePriceId": "prod_dummy123"
+  },
+  {
+    "id": "36",
+    "title": "In This Shirt",
+    "artist": "Dave Kerr",
+    "difficulty": "Original",
+    "price": "4 €",
+    "kofiId": "prod_dummy123",
+    "coverImage": "/covers/In This Shirt_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "theme": "cold",
+    "stripePriceId": "prod_dummy123"
+  },
+  {
+    "id": "37",
+    "title": "Icarus",
+    "artist": "Dave Kerr",
+    "difficulty": "Original",
+    "price": "6 €",
+    "kofiId": "prod_dummy123",
+    "coverImage": "/covers/Icarus_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Icarus.mp3",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "theme": "cold",
+    "stripePriceId": "prod_dummy123"
   }
 ]
