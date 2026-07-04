@@ -3940,6 +3940,7 @@ def request_download(hash: str, type: str):
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
             aws_access_key_id=r2_access_key,
             aws_secret_access_key=r2_secret_key,
+            region_name='auto',
             config=Config(signature_version='s3v4')
         )
         
@@ -3994,6 +3995,7 @@ def verify_download(checkout_id: str):
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
             aws_access_key_id=r2_access_key,
             aws_secret_access_key=r2_secret_key,
+            region_name='auto',
             config=Config(signature_version='s3v4')
         )
 
@@ -4662,6 +4664,7 @@ def get_preview_video(song_name: str):
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
             aws_access_key_id=r2_access_key,
             aws_secret_access_key=r2_secret_key,
+            region_name='auto',
             config=Config(signature_version='s3v4')
         )
 
@@ -4798,6 +4801,7 @@ def stream_preview_audio(song_name: str, request: Request):
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
             aws_access_key_id=r2_access_key,
             aws_secret_access_key=r2_secret_key,
+            region_name='auto',
             config=Config(signature_version='s3v4')
         )
         # Try to check {clean_name}/{clean_name}.mp3
@@ -5026,6 +5030,7 @@ def public_free_download(song_id: str, type: str, request: Request):
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
             aws_access_key_id=r2_access_key,
             aws_secret_access_key=r2_secret_key,
+            region_name='auto',
             config=Config(signature_version='s3v4')
         )
 

@@ -85,9 +85,11 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/In This Shirt_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3",
-    "theme": "cold"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "10",
@@ -164,7 +166,9 @@
     "coverImage": "/covers/Greensleeves_clean.jpg",
     "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
     "stripePriceId": "pri_01kwap85kbhf0zpdd77p0d1fwv",
-    "theme": "green"
+    "theme": "green",
+    "audioPreviewUrl": "/audio-previews/Greensleeves.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "18",
@@ -175,7 +179,9 @@
     "coverImage": "/covers/God Rest Ye Merry, Gentlemen_clean.jpg",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap86sgh9wg86me8sek8xxa",
-    "theme": "cold"
+    "theme": "cold",
+    "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "19",
@@ -208,7 +214,9 @@
     "coverImage": "/covers/Hallelujah_clean.jpg",
     "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
     "stripePriceId": "pri_01kwap8afx26p78hem1c2hz3n9",
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "23",
@@ -245,58 +253,6 @@
     "hidden": false,
     "stripePriceId": "pri_01kwap8gs5btjdcesxb7k3acz4",
     "theme": "cold"
-  },
-  {
-    "id": "33",
-    "title": "God Rest Ye Merry",
-    "artist": "Dave Kerr",
-    "difficulty": "Original",
-    "price": "4 €",
-    "kofiId": "prod_dummy123",
-    "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "theme": "cold",
-    "stripePriceId": "prod_dummy123"
-  },
-  {
-    "id": "34",
-    "title": "Greensleeves",
-    "artist": "Dave Kerr",
-    "difficulty": "Original",
-    "price": "4 €",
-    "kofiId": "prod_dummy123",
-    "coverImage": "/covers/Greensleeves_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/Greensleeves.mp3",
-    "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
-    "theme": "green",
-    "stripePriceId": "prod_dummy123"
-  },
-  {
-    "id": "35",
-    "title": "Hallelujah",
-    "artist": "Dave Kerr",
-    "difficulty": "Original",
-    "price": "4 €",
-    "kofiId": "prod_dummy123",
-    "coverImage": "/covers/Hallelujah_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
-    "theme": "warm",
-    "stripePriceId": "prod_dummy123"
-  },
-  {
-    "id": "36",
-    "title": "In This Shirt",
-    "artist": "Dave Kerr",
-    "difficulty": "Original",
-    "price": "4 €",
-    "kofiId": "prod_dummy123",
-    "coverImage": "/covers/In This Shirt_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "theme": "cold",
-    "stripePriceId": "prod_dummy123"
   },
   {
     "id": "37",
