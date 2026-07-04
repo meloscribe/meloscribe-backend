@@ -278,8 +278,8 @@ async def security_middleware(request: Request, call_next):
     if method == "OPTIONS":
         return await call_next(request)
         
-    # Bypass for static preview files & video streams
-    if path.startswith("/public") or path.startswith("/api/public/video-stream"):
+    # Bypass for static preview files & video/audio streams
+    if path.startswith("/public") or path.startswith("/api/public/video-stream") or path.startswith("/api/public/audio-stream"):
         return await call_next(request)
         
     is_public = False
