@@ -4837,7 +4837,7 @@ def stream_preview_video(song_name: str, request: Request):
             local_path = f"/home/ubuntu/meloscribe/Scores/{name}_preview.mp4"
         if os.path.exists(local_path):
             print(f"[Preview Video] Serving local file: {local_path}")
-            return FileResponse(local_path, media_type="video/mp4")
+            return FileResponse(local_path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
         return None
 
     res = get_preview_video(song_name)
@@ -4884,6 +4884,9 @@ def stream_preview_video(song_name: str, request: Request):
         for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
             if h in r2_resp.headers:
                 resp_headers[h] = r2_resp.headers[h]
+        
+        # Add Cache-Control so the browser caches the video stream
+        resp_headers["Cache-Control"] = "public, max-age=86400"
 
         if "content-type" not in resp_headers:
             resp_headers["content-type"] = "video/mp4"
@@ -4910,7 +4913,7 @@ def stream_preview_audio(song_name: str, request: Request):
         dest_mp3 = Path(r"C:\Dev\meloscribe-frontend\website\public\audio-previews") / f"{song_name}.mp3"
         if dest_mp3.exists():
             print(f"[Preview Audio] Serving local fallback: {dest_mp3}")
-            return FileResponse(dest_mp3, media_type="audio/mpeg")
+            return FileResponse(dest_mp3, media_type="audio/mpeg", headers={"Cache-Control": "public, max-age=86400"})
         return None
 
     # Resolve R2 preview audio
@@ -4988,6 +4991,9 @@ def stream_preview_audio(song_name: str, request: Request):
         for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
             if h in r2_resp.headers:
                 resp_headers[h] = r2_resp.headers[h]
+        
+        # Add Cache-Control so the browser caches the audio stream
+        resp_headers["Cache-Control"] = "public, max-age=86400"
 
         if "content-type" not in resp_headers:
             resp_headers["content-type"] = "audio/mpeg"
