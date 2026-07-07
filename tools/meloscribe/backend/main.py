@@ -529,20 +529,16 @@ def initialize_server_api_key():
     except Exception as e:
         print(f"[Security] Failed to initialize server_api_key: {e}")
 
-_cached_api_key = None
 def get_server_api_key():
-    global _cached_api_key
-    if _cached_api_key:
-        return _cached_api_key
     try:
         settings_path = Path(__file__).resolve().parent / "settings.json"
         if settings_path.exists():
             with open(settings_path, "r", encoding="utf-8") as f:
                 s = json.load(f)
-                _cached_api_key = s.get("server_api_key")
+                return s.get("server_api_key")
     except Exception:
         pass
-    return _cached_api_key
+    return None
 
 _DB_PATH = Path(__file__).resolve().parent / "analytics.db"
 
@@ -1390,7 +1386,7 @@ async def run_module(module: str, req: ModuleRequest):
         "tiktok": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--author", req.author,
                    "--mode", "tiktok", "--profile", "normal"],
         "website_add": [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", req.song, "--price", req.price,
-                        "--kofi_id", req.kofi_id, "--mode", "website"],
+                        "--kofi_id", req.kofi_id, "--mode", "website", "--author", req.author],
     }
     cmd = cmd_map.get(module)
     if not cmd:
@@ -1541,12 +1537,13 @@ def tiktok_authorize():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     
-    threading.Thread(target=mod.run_initial_auth, daemon=True).start()
+    threading.Thread(target=mod.run_initial_auth, args=(False,), daemon=True).start()
     
     import time
     time.sleep(0.5)
     
     auth_url = getattr(mod, "LAST_AUTH_URL", None)
+    print(f"[TikTok Auth] Generated URL: {auth_url}")
     return {
         "status": "opening browser for TikTok authorization...",
         "url": auth_url
@@ -2027,16 +2024,37 @@ def delete_song_assets(song_name: str):
     except Exception as e:
         print(f"[Delete] Local Cakewalk folders cleanup skipped or failed: {e}")
 
-    # 2. Local packages
+    # 2. Local packages and Keysight exports (including RAW files)
     try:
         settings = load_settings()
+        
+        # Delete packages
         packages_dir = settings.get("packages_dir", r"C:\Dev\meloscribe\packages")
         zip_path = Path(packages_dir) / f"{song_name} Full Package.zip"
         if zip_path.exists():
             os.remove(str(zip_path))
             print(f"[Delete] Removed local package: {zip_path}")
+            
+        # Delete rendered videos from Keysight export
+        keysight_dir = settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")
+        for suffix in ["", " slow", "_preview", " Easy", " Easy slow", " Easy_preview"]:
+            vid_path = Path(keysight_dir) / f"{song_name}{suffix}.mp4"
+            if vid_path.exists():
+                os.remove(str(vid_path))
+                print(f"[Delete] Removed rendered video: {vid_path}")
+                
+        # Delete raw intermediate videos
+        raw_dir = Path(keysight_dir) / "RAW"
+        if raw_dir.exists() and raw_dir.is_dir():
+            for filename in os.listdir(raw_dir):
+                if filename.lower().startswith(song_name.lower()) and filename.lower().endswith(".mp4"):
+                    file_path = raw_dir / filename
+                    if file_path.exists():
+                        os.remove(str(file_path))
+                        print(f"[Delete] Removed local raw video: {file_path}")
+                        
     except Exception as e:
-        print(f"[Delete] Local package cleanup skipped or failed: {e}")
+        print(f"[Delete] Local packages and Keysight videos cleanup skipped or failed: {e}")
 
     # 3. Cloudflare R2 assets
     try:
@@ -2134,7 +2152,10 @@ async def update_website_songs(request: Request, background_tasks: BackgroundTas
         # Fallback to credentials backup file if not in settings
         if not api_key:
             try:
-                with open(r"C:\Dev\meloscribe_credentials_backup.json", "r", encoding="utf-8") as cred_f:
+                backup_path = r"C:\Dev\credentials.json"
+                if not os.path.exists(backup_path):
+                    backup_path = r"C:\Dev\meloscribe_credentials_backup.json"
+                with open(backup_path, "r", encoding="utf-8") as cred_f:
                     creds = json.load(cred_f)
                     api_key = creds.get("paddle", {}).get("api_key")
             except Exception as cred_err:
@@ -2472,11 +2493,32 @@ def get_analytics(range: str = "30d"):
         songs.sort(key=lambda x: x["latest_publish"] or "", reverse=True)
         
         # 4. Correlations
+        formats_data = {r["format"].strip(): dict(r) for r in cursor.execute("SELECT format, AVG(views) as avgViews, COUNT(id) as count FROM videos GROUP BY format").fetchall() if r["format"]}
+        all_possible_formats = ["Standard", "Tutorial", "Easy", "Easy Tutorial", "Hook/Teaser"]
+        byFormat = []
+        for fmt in all_possible_formats:
+            found = False
+            for db_fmt, db_data in formats_data.items():
+                if db_fmt.lower() == fmt.lower() or (fmt == "Hook/Teaser" and db_fmt.lower() in ["hook", "teaser"]):
+                    byFormat.append({
+                        "format": fmt,
+                        "avgViews": db_data["avgViews"] or 0,
+                        "count": db_data["count"] or 0
+                    })
+                    found = True
+                    break
+            if not found:
+                byFormat.append({
+                    "format": fmt,
+                    "avgViews": 0.0,
+                    "count": 0
+                })
+
         correlations = {
             "byLanguage": [dict(r) for r in cursor.execute("SELECT language, AVG(views) as avgViews, COUNT(id) as count FROM videos GROUP BY language").fetchall()],
             "byAuthor": [dict(r) for r in cursor.execute("SELECT author, AVG(views) as avgViews, SUM(views) as totalViews FROM videos GROUP BY author").fetchall()],
             "byBpm": [dict(r) for r in cursor.execute("SELECT t.bpm, AVG(v.views) as avgViews FROM videos v JOIN tracks t ON v.song_name = t.song_name GROUP BY t.bpm").fetchall()],
-            "byFormat": [dict(r) for r in cursor.execute("SELECT format, AVG(views) as avgViews, COUNT(id) as count FROM videos GROUP BY format").fetchall()],
+            "byFormat": byFormat,
             "byVideoType": [dict(r) for r in cursor.execute("SELECT CASE WHEN duration_sec < 61 AND duration_sec > 0 THEN 'Short (<60s)' ELSE 'Long-form' END as videoType, AVG(views) as avgViews, COUNT(id) as count FROM videos WHERE duration_sec > 0 GROUP BY videoType").fetchall()]
         }
         
@@ -2680,6 +2722,87 @@ def get_analytics(range: str = "30d"):
         
     except Exception as e:
         return {"error": f"Database read error: {e}"}
+
+
+@app.post("/api/demographics/sync")
+def sync_demographics():
+    import subprocess
+    import platform as pf
+    
+    python_exe = str(TOOLS_DIR / "meloscribe" / "backend" / ".venv" / "Scripts" / "python.exe")
+    if pf.system() != "Windows":
+        python_exe = str(TOOLS_DIR / "meloscribe" / "backend" / ".venv" / "bin" / "python")
+        
+    script_path = str(TOOLS_DIR / "scrape_demographics.py")
+    
+    try:
+        print(f"Running demographics sync script: {script_path}")
+        res = subprocess.run([python_exe, script_path], capture_output=True, text=True, timeout=180)
+        
+        try:
+            db_path = TOOLS_DIR / "meloscribe" / "backend" / "analytics.db"
+            if db_path.exists():
+                import sqlite3
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT platform, metric_type, metric_key, metric_value, snapshot_date FROM audience_demographics WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM audience_demographics)")
+                rows = [dict(r) for r in cursor.fetchall()]
+                conn.close()
+                
+                if rows:
+                    import requests
+                    requests.post("https://api.meloscribe.dev/api/demographics/sync-raw", json={"demographics": rows}, timeout=10.0)
+                    print("[Demographics Sync] Successfully pushed demographic data to Oracle VM.")
+        except Exception as push_err:
+            print(f"[Demographics Sync] Warning: Failed to push demographics to Oracle: {push_err}")
+            
+        if res.returncode == 0:
+            return {"status": "ok", "output": res.stdout}
+        else:
+            return {"status": "error", "message": res.stderr or res.stdout}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/demographics/sync-raw")
+def sync_raw_demographics(payload: dict):
+    rows = payload.get("demographics", [])
+    if not rows:
+        return {"status": "error", "message": "No demographic data in payload."}
+        
+    db_path = TOOLS_DIR / "meloscribe" / "backend" / "analytics.db"
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS audience_demographics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform TEXT,
+                metric_type TEXT,
+                metric_key TEXT,
+                metric_value REAL,
+                snapshot_date TEXT
+            )
+        ''')
+        
+        for r in rows:
+            cursor.execute('''
+                DELETE FROM audience_demographics 
+                WHERE platform = ? AND metric_type = ? AND metric_key = ? AND snapshot_date = ?
+            ''', (r["platform"], r["metric_type"], r["metric_key"], r["snapshot_date"]))
+            
+            cursor.execute('''
+                INSERT INTO audience_demographics (platform, metric_type, metric_key, metric_value, snapshot_date)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (r["platform"], r["metric_type"], r["metric_key"], r["metric_value"], r["snapshot_date"]))
+            
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": f"Successfully imported {len(rows)} demographic records."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # -------------------------------------------------------------------
 # WebSocket endpoint
@@ -3526,7 +3649,8 @@ async def stripe_webhook(request: Request):
         return JSONResponse(status_code=400, content={"error": str(e)})
 
     event_type = event.type
-    data_object = event.data.object
+    data_object_raw = event.data.object
+    data_object = data_object_raw.to_dict() if hasattr(data_object_raw, "to_dict") else data_object_raw
 
     try:
         db_path = Path(__file__).resolve().parent / "analytics.db"
@@ -3640,9 +3764,10 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0; font-weight: 800;">meloscribe</h1>
-    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
+    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">🎹 Your Sheets Are Ready!</h2>
@@ -3660,7 +3785,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
       This download link is permanent. You can access it anytime to download updates or get your files.
     </p>
     
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>The meloscribe team</p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>meloscribe</p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
     Need help? Reply directly to this email or visit <a href="https://meloscribe.dev" style="color: #00f5d4;">meloscribe.dev</a>
@@ -3710,9 +3835,10 @@ def get_hash_by_checkout(checkout_id: str):
         try:
             stripe.api_key = get_stripe_api_key()
             if stripe.api_key:
-                session = stripe.checkout.Session.retrieve(checkout_id)
-                if session.payment_status == "paid":
-                    metadata = session.metadata or {}
+                session_raw = stripe.checkout.Session.retrieve(checkout_id)
+                session = session_raw.to_dict() if hasattr(session_raw, "to_dict") else session_raw
+                if session.get("payment_status") == "paid":
+                    metadata = session.get("metadata") or {}
                     song_title = metadata.get("song_title") or "Unknown Song"
                     download_hash = metadata.get("download_hash")
                     locale = metadata.get("locale") or "en"
@@ -3721,12 +3847,12 @@ def get_hash_by_checkout(checkout_id: str):
                         import uuid
                         download_hash = uuid.uuid4().hex
                     
-                    customer_details = session.customer_details or {}
+                    customer_details = session.get("customer_details") or {}
                     email = customer_details.get("email") or "customer@example.com"
                     buyer_name = customer_details.get("name") or ""
                     
-                    amount_total = float(session.amount_total or 0) / 100.0
-                    currency = (session.currency or "eur").upper()
+                    amount_total = float(session.get("amount_total") or 0) / 100.0
+                    currency = (session.get("currency") or "eur").upper()
                     
                     conn = sqlite3.connect(str(db_path), timeout=30.0)
                     c = conn.cursor()
@@ -3944,9 +4070,14 @@ def request_download(hash: str, type: str):
             config=Config(signature_version='s3v4')
         )
         
+        filename = file_key.split('/')[-1]
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',
-            Params={'Bucket': r2_bucket, 'Key': file_key},
+            Params={
+                'Bucket': r2_bucket,
+                'Key': file_key,
+                'ResponseContentDisposition': f'attachment; filename="{filename}"'
+            },
             ExpiresIn=900
         )
         
@@ -4059,9 +4190,10 @@ def _send_confirmation_email(email: str, token: str):
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 24px; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
-    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
+    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
@@ -4076,7 +4208,7 @@ def _send_confirmation_email(email: str, token: str):
     <p style="color: #888; font-size: 13px; text-align: center;">
       If you didn&apos;t request this, you can safely ignore this email. You won&apos;t be subscribed unless you click the link above.
     </p>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Best,<br>The meloscribe team</p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Best,<br>meloscribe</p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
     Unsubscribe anytime: <a href="{unsubscribe_url}" style="color: #555;">click here</a>
@@ -4896,21 +5028,22 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px;">
-    <h1 style="font-size: 28px; font-weight: 800; background: linear-gradient(to right, #00f5d4, #ff007f); -webkit-background-clip: text; -webkit-text-fill-color: transparent; color: #00f5d4; letter-spacing: 2px; margin: 0;">meloscribe</h1>
-    <p style="color: #888; font-size: 12px; margin-top: 4px;">piano &amp; sheet music</p>
+  <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
+    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; text-align: center; font-weight: 700;">🎵 New Sheet Music Released!</h2>
     <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
       Hey! A new piano arrangement has just been dropped on meloscribe.dev:
     </p>
-    <div style="background: #0a0a0f; border-left: 4px solid #ff007f; padding: 16px; border-radius: 4px; margin: 24px 0;">
+    <div style="background: #0a0a0f; border-left: 4px solid #ff2d92; padding: 16px; border-radius: 4px; margin: 24px 0;">
       <h3 style="color: #ffffff; margin: 0 0 8px 0; font-size: 18px;">{song_title}</h3>
       <p style="color: #888; margin: 0 0 12px 0; font-size: 14px;">by {artist}</p>
       <div style="margin-top: 12px;">
         <span style="display: inline-block; background: rgba(0, 245, 212, 0.1); border: 1px solid rgba(0, 245, 212, 0.4); color: #00f5d4; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin-right: 8px;">{difficulty}</span>
-        <span style="display: inline-block; background: rgba(255, 0, 127, 0.1); border: 1px solid rgba(255, 0, 127, 0.4); color: #ff007f; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin-right: 8px;">{format_text}</span>
+        <span style="display: inline-block; background: rgba(255, 45, 146, 0.1); border: 1px solid rgba(255, 45, 146, 0.4); color: #ff2d92; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px; margin-right: 8px;">{format_text}</span>
         <span style="display: inline-block; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #ffffff; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 12px;">{price}</span>
       </div>
     </div>
@@ -4918,7 +5051,7 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
     <div style="text-align: center; margin: 28px 0;">
       <a href="{sheets_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Get Sheet Music</a>
     </div>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>The meloscribe team</p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>meloscribe</p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
     Want to stop receiving these alerts? <a href="{unsubscribe_url}" style="color: #555;">Unsubscribe here</a>
@@ -4966,7 +5099,16 @@ def public_free_download(song_id: str, type: str, request: Request):
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
         return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
 
-    songs_list = load_songs_list()
+    # Load songs list from frontend or local fallback
+    songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+    if not os.path.exists(songs_path):
+        songs_path = Path(__file__).resolve().parent / "songs.json"
+    
+    songs_list = []
+    if os.path.exists(songs_path):
+        with open(songs_path, "r", encoding="utf-8") as f:
+            songs_list = json.load(f)
+
     target_song = None
     for song in songs_list:
         if str(song.get("id")) == str(song_id):
@@ -5034,9 +5176,14 @@ def public_free_download(song_id: str, type: str, request: Request):
             config=Config(signature_version='s3v4')
         )
 
+        filename = file_key.split('/')[-1]
         presigned_url = s3.generate_presigned_url(
-            'get_object',
-            Params={'Bucket': r2_bucket, 'Key': file_key},
+            ClientMethod='get_object',
+            Params={
+                'Bucket': r2_bucket,
+                'Key': file_key,
+                'ResponseContentDisposition': f'attachment; filename="{filename}"'
+            },
             ExpiresIn=3600
         )
         return {"download_url": presigned_url}
@@ -5159,8 +5306,7 @@ def batch_processor_worker():
                     steps.append([python, "-u", str(TOOLS_DIR / "musescore_launcher.py"), "--song", v_song, "--author", author])
                     # R2 Upload (individual assets: PDF, MIDI, videos, preview+MP3 generated inline)
                     steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2", "--format", fmt])
-                    # Website Catalog Add
-                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website"])
+                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website", "--author", author])
                 
                 # Execute all steps sequentially
                 success = True
@@ -5225,7 +5371,7 @@ def batch_processor_worker():
                         
                     if rc != 0:
                         success = False
-                        sub_err = (stderr_str or stdout_str or "").strip() if not is_interactive else "(check the open console window for error traceback)"
+                        sub_err = (stderr_str or stdout_str or f"Process exited with code {rc}").strip()
                         err_msg = f"Step failed: {' '.join(cmd[:4])}... Details: {sub_err}"
                         log_error(f"[Batch Worker] Error during step: {err_msg}")
                         break
@@ -5379,10 +5525,16 @@ async def retry_batch_item(req: dict):
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute("UPDATE batch_ingest_queue SET status = 'initialized', error_message = NULL WHERE song_name = ?", (song_name,))
+        c.execute("UPDATE batch_ingest_queue SET status = 'initialized', error_message = NULL, progress = 0 WHERE song_name = ?", (song_name,))
         conn.commit()
         conn.close()
-        return {"status": "success", "message": f"Reset status of '{song_name}' to initialized"}
+
+        # Automatically kick off batch worker if not already running
+        global is_batch_processing
+        if not is_batch_processing:
+            threading.Thread(target=batch_processor_worker, daemon=True).start()
+
+        return {"status": "success", "message": f"Reset status of '{song_name}' to initialized and started queue worker"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -5496,33 +5648,92 @@ async def regenerate_preview(req: dict):
             (hook_start, hook_end, song_name)
         )
         conn.commit()
-        # Also fetch format for this song
+        # Also fetch format and author for this song
         row = conn.execute(
-            "SELECT format FROM batch_ingest_queue WHERE song_name=?", (song_name,)
+            "SELECT format, author FROM batch_ingest_queue WHERE song_name=?", (song_name,)
         ).fetchone()
         conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
     
     format_mode = row[0] if row else "full_arrangement"
+    author = row[1] if row and len(row) > 1 and row[1] else "Traditional"
+    
     keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
     raw_path = keysight_dir / "RAW" / f"{song_name}_RAW.mp4"
     compressed_path = keysight_dir / f"{song_name}.mp4"
     source = raw_path if raw_path.exists() else compressed_path
+        
     if not source.exists():
         raise HTTPException(status_code=404, detail=f"Source video not found for '{song_name}'")
     
     dest_preview = keysight_dir / f"{song_name}_preview.mp4"
     
-    # Build ffmpeg command
+    # Escape paths for FFmpeg
+    def escape_path_for_ffmpeg(p: str) -> str:
+        p = p.replace('\\', '/')
+        p = p.replace(':', '\\:')
+        return p
+
+    def get_video_dimensions(video_path):
+        import subprocess as _sp
+        import re
+        try:
+            cmd = ["ffmpeg", "-i", str(video_path)]
+            creation_flags = 0x08000000 if sys.platform == "win32" else 0
+            res = _sp.run(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True, creationflags=creation_flags)
+            match = re.search(r'Video:.*?\b(\d{3,4})x(\d{3,4})\b', res.stderr)
+            if match:
+                return int(match.group(1)), int(match.group(2))
+        except Exception:
+            pass
+        return 2560, 1440
+
+    width, height = get_video_dimensions(source)
+    title_size = int(width * 0.05)
+    artist_size = int(width * 0.024)
+    
+    tools_dir = Path(__file__).resolve().parent.parent.parent
+    font_title = tools_dir / "fonts" / "arno_pro.ttf"
+    font_artist = tools_dir / "fonts" / "montserrat.ttf"
+    
+    font_title_esc = escape_path_for_ffmpeg(str(font_title))
+    font_artist_esc = escape_path_for_ffmpeg(str(font_artist))
+    
+    # Write temp text files to avoid ffmpeg escaping issues
+    import tempfile
+    import uuid
+    uid = uuid.uuid4().hex[:8]
+    temp_dir = tempfile.gettempdir()
+    
+    title_txt = os.path.join(temp_dir, f"_title_{uid}.txt")
+    artist_txt = os.path.join(temp_dir, f"_artist_{uid}.txt")
+    
+    with open(title_txt, "w", encoding="utf-8") as f:
+        f.write(song_name)
+    with open(artist_txt, "w", encoding="utf-8") as f:
+        f.write(author)
+        
+    title_txt_esc = escape_path_for_ffmpeg(title_txt)
+    artist_txt_esc = escape_path_for_ffmpeg(artist_txt)
+    
+    # Drawtext filter complex
+    filter_complex = (
+        f"[0:v]drawtext=fontfile='{font_title_esc}':textfile='{title_txt_esc}':fontcolor=white:fontsize={title_size}"
+        f":x=(w-text_w)/2:y=(h/2)-{int(height*0.06)}:shadowcolor=black@0.6:shadowx=4:shadowy=4"
+        f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'[v1]; "
+        
+        f"[v1]drawtext=fontfile='{font_artist_esc}':textfile='{artist_txt_esc}':fontcolor=white:fontsize={artist_size}"
+        f":x=(w-text_w)/2:y=(h/2)+{int(height*0.05)}:shadowcolor=black@0.6:shadowx=3:shadowy=3"
+        f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'"
+    )
+    
+    # Build ffmpeg command (always full length, no slicing)
     import subprocess as _sp
-    cmd = ["ffmpeg", "-y"]
-    if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and hook_end > hook_start:
-        cmd += ["-ss", str(hook_start), "-t", str(hook_end - hook_start)]
-    elif format_mode == "full_arrangement":
-        cmd += ["-ss", "0", "-t", "60"]
-    cmd += [
+    cmd = [
+        "ffmpeg", "-y",
         "-i", str(source),
+        "-filter_complex", filter_complex,
         "-c:v", "libx264", "-preset", "fast", "-crf", "28",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
@@ -5530,6 +5741,14 @@ async def regenerate_preview(req: dict):
     ]
     creation_flags = 0x08000000 if sys.platform == "win32" else 0
     rc = _sp.run(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=creation_flags).returncode
+    
+    # Clean up files
+    try:
+        os.remove(title_txt)
+        os.remove(artist_txt)
+    except Exception:
+        pass
+    
     if rc != 0:
         raise HTTPException(status_code=500, detail="FFmpeg failed to generate preview clip")
     
@@ -5566,12 +5785,9 @@ async def regenerate_preview(req: dict):
     if wav_path:
         try:
             dest_mp3.parent.mkdir(parents=True, exist_ok=True)
-            cmd_mp3 = ["ffmpeg", "-y"]
-            if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and hook_end > hook_start:
-                cmd_mp3 += ["-ss", str(hook_start), "-t", str(hook_end - hook_start)]
-            elif format_mode == "full_arrangement":
-                cmd_mp3 += ["-ss", "0", "-t", "60"]
-            cmd_mp3 += [
+            # Always full length, no slicing
+            cmd_mp3 = [
+                "ffmpeg", "-y",
                 "-i", str(wav_path),
                 "-c:a", "libmp3lame", "-b:a", "128k",
                 str(dest_mp3)
