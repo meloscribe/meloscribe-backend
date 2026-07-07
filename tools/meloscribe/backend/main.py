@@ -4561,6 +4561,15 @@ def notify_list_subscribers():
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS notify_subscribers (
+                email TEXT PRIMARY KEY,
+                status TEXT,
+                created_at TEXT,
+                confirmed_at TEXT
+            )
+        """)
+        conn.commit()
         c.execute("SELECT email, status, created_at, confirmed_at FROM notify_subscribers ORDER BY created_at DESC")
         rows = [{"email": r[0], "status": r[1], "created_at": r[2], "confirmed_at": r[3]} for r in c.fetchall()]
         conn.close()
@@ -4580,6 +4589,16 @@ def get_suggestions():
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                artist TEXT,
+                votes INTEGER DEFAULT 0,
+                created_at TEXT
+            )
+        """)
+        conn.commit()
         c.execute("SELECT id, title, artist, votes, created_at FROM suggestions ORDER BY votes DESC, created_at DESC")
         rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4]} for r in c.fetchall()]
         conn.close()
