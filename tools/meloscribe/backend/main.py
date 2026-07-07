@@ -2053,9 +2053,9 @@ def delete_song_assets(song_name: str):
     try:
         settings = load_settings()
         r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-        r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-        r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-        r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+        r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+        r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
 
         if r2_account_id and r2_access_key and r2_secret_key:
             import boto3
@@ -4014,9 +4014,9 @@ def request_download(hash: str, type: str):
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download Request] R2 credentials missing, using demo redirect fallback.")
@@ -4099,9 +4099,9 @@ def verify_download(checkout_id: str):
         return JSONResponse(content={"error": "Purchase not found or not completed"}, status_code=403)
         
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download Verify] R2 credentials missing, using demo redirect fallback.")
@@ -4788,9 +4788,9 @@ def get_preview_video(song_name: str):
             clean_name = clean_name[:-len(suffix)].strip()
             
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
 
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Preview Request] R2 credentials missing, using demo redirect fallback.")
@@ -4930,9 +4930,9 @@ def stream_preview_audio(song_name: str, request: Request):
 
     # Resolve R2 preview audio
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
 
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         fb = get_local_fallback()
@@ -5149,9 +5149,9 @@ def public_free_download(song_id: str, type: str, request: Request):
 
     # Generate public Cloudflare R2 download URL
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
 
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         if type == "pdf":
@@ -5821,9 +5821,9 @@ async def regenerate_preview(req: dict):
             
     # Re-upload to R2 if credentials are configured
     r2_account_id = settings.get("r2_account_id")
-    r2_access_key = settings.get("r2_access_key_id")
-    r2_secret_key = settings.get("r2_secret_access_key")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-assets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets")
     uploaded = False
     if r2_account_id and r2_access_key and r2_secret_key:
         try:
