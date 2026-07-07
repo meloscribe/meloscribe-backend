@@ -5,7 +5,7 @@ import os
 SETTINGS_FILE = Path(__file__).parent / "settings.json"
 
 DEFAULT_SETTINGS = {
-    "musescore_dir": str(Path(__file__).resolve().parent.parent.parent.parent / "Scores"),
+    "musescore_dir": r"C:\Dev\meloscribe\Scores",
     "musescore_exe": r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe",
     "cakewalk_dir": r"C:\Cakewalk Projects",
     "keysight_dir": r"C:\Dev\meloscribe\Keysight export",
@@ -15,36 +15,50 @@ DEFAULT_SETTINGS = {
     "keysight_exe": r"C:\Program Files (x86)\Steam\steamapps\common\Keysight\Keysight\Binaries\Win64\Keysight-Win64-Shipping.exe",
     "browser_exec": r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     "browser_user_data": os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\User Data"),
-    "pushbullet_token": "",
+    "ntfy_topic": "",
+    "gemini_api_key": "",
     "ig_app_id": "26975285422066567",
     "ig_app_secret": "",
-    "tiktok_client_key": "sbawwonaqqe71vhfgd",
+    "tiktok_client_key": "awe54p8mg3xasm1l",
     "tiktok_client_secret": "",
     "threads_app_id": "26975285422066567",
     "threads_app_secret": "",
     "schedule_interval_days": 3,
     "localUpload": False,
     "desc_template_youtube": (
-        "Enjoy this piano arrangement of {song} by {author}! "
-        "Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "🎹 Sheet Music (PDF) & MIDI files available here: https://ko-fi.com/meloscribe?utm_source=youtube&utm_medium={medium}\n\n"
+        "🎹 {song}{label} - {author}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #keysight"
     ),
     "desc_template_instagram": (
         "🎹 {song}{label} - {author}\n\n"
-        "Sheet Music & MIDI -> Link in Bio (Ko-Fi)\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
+        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #synthesia #music #pianomusic"
     ),
     "desc_template_facebook": (
-        "🎹 {song}{label} - {author} | Piano Cover\n\n"
-        "Sheet Music & MIDI: https://ko-fi.com/meloscribe?utm_source=facebook&utm_medium={medium}\n\n"
+        "🎹 {song}{label} - {author}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
+        "Check out my page for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #synthesia #music"
     ),
     "desc_template_threads": (
         "🎹 {song}{label} - {author}\n\n"
-        "Sheet Music & MIDI -> Ko-Fi (link in bio)\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
+        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #synthesia #music"
+    ),
+    "desc_template_tiktok": (
+        "🎹 {song}{label} - {author}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
+        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
+        "#piano #pianocover #pianotutorial #music #synthesia #cover"
     ),
     "desc_template_kofi": (
         "Get the learning package for my '{song}' tutorial! This download includes:\n\n"
@@ -104,6 +118,42 @@ def load_settings():
         except Exception:
             settings = DEFAULT_SETTINGS
 
+    # Fallback to .env in workspace root if R2 credentials are missing
+    if not settings.get("r2_account_id") or not settings.get("r2_access_key") or not settings.get("r2_secret_key"):
+        dotenv_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+        if dotenv_path.exists():
+            try:
+                r2_access_key = None
+                r2_secret_key = None
+                r2_account_id = None
+                r2_bucket = None
+                with open(dotenv_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip()
+                            if k == "CLOUDFLARE_R2_ACCESS_KEY_ID":
+                                r2_access_key = v
+                            elif k == "CLOUDFLARE_R2_SECRET_ACCESS_KEY":
+                                r2_secret_key = v
+                            elif k == "CLOUDFLARE_R2_ENDPOINT_URL":
+                                import re
+                                match = re.search(r"https://([^.]+)\.r2", v)
+                                if match:
+                                    r2_account_id = match.group(1)
+                            elif k == "CLOUDFLARE_R2_BUCKET_NAME":
+                                r2_bucket = v
+                if r2_account_id and r2_access_key and r2_secret_key:
+                    settings["r2_account_id"] = r2_account_id
+                    settings["r2_access_key"] = r2_access_key
+                    settings["r2_secret_key"] = r2_secret_key
+                    settings["r2_bucket"] = "meloscribe-assets"
+                    save_settings(settings)
+                    print("[Settings] Restored R2 credentials from workspace .env file.")
+            except Exception as e:
+                print(f"[Settings] Error parsing fallback .env: {e}")
+
     # Add local FFmpeg to PATH for subprocesses (ffmpeg, ffprobe, etc.)
     ffmpeg_bin = str(Path(__file__).resolve().parent.parent.parent / "ffmpeg" / "bin")
     if os.path.exists(ffmpeg_bin) and ffmpeg_bin not in os.environ.get("PATH", ""):
@@ -118,6 +168,14 @@ def load_settings():
                 os.makedirs(val, exist_ok=True)
             except Exception as e:
                 print(f"Failed to create directory {val}: {e}")
+
+    # Map R2 key names so they match both custom and standard boto3 naming conventions
+    if settings.get("r2_access_key"):
+        settings["r2_access_key_id"] = settings["r2_access_key"]
+    if settings.get("r2_secret_key"):
+        settings["r2_secret_access_key"] = settings["r2_secret_key"]
+    if settings.get("r2_bucket"):
+        settings["r2_bucket_name"] = settings["r2_bucket"]
 
     return settings
 
