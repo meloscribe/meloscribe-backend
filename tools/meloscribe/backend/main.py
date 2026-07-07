@@ -514,28 +514,21 @@ import secrets
 
 def initialize_server_api_key():
     try:
-        settings_path = Path(__file__).resolve().parent / "settings.json"
-        s = {}
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                s = json.load(f)
-        if not s.get("server_api_key"):
-            s["server_api_key"] = secrets.token_hex(16)
-            with open(settings_path, "w", encoding="utf-8") as f:
-                json.dump(s, f, indent=4)
-            print(f"[Security] Generated new server_api_key: {s['server_api_key']}")
+        key_path = Path(__file__).resolve().parent / "api_key.txt"
+        if not key_path.exists():
+            new_key = secrets.token_hex(16)
+            key_path.write_text(new_key, encoding="utf-8")
+            print(f"[Security] Generated new server_api_key file: {new_key}")
         else:
             print(f"[Security] Loaded server_api_key")
     except Exception as e:
-        print(f"[Security] Failed to initialize server_api_key: {e}")
+        print(f"[Security] Failed to initialize server_api_key file: {e}")
 
 def get_server_api_key():
     try:
-        settings_path = Path(__file__).resolve().parent / "settings.json"
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                s = json.load(f)
-                return s.get("server_api_key")
+        key_path = Path(__file__).resolve().parent / "api_key.txt"
+        if key_path.exists():
+            return key_path.read_text(encoding="utf-8").strip()
     except Exception:
         pass
     return None
