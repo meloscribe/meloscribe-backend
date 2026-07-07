@@ -4810,7 +4810,7 @@ def get_preview_video(song_name: str):
                 s3.head_object(Bucket=r2_bucket, Key=file_key)
             except Exception as head_err:
                 print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}'.")
-                return JSONResponse(content={"error": "Preview video not found in R2"}, status_code=404)
+                return JSONResponse(content={"error": f"Preview video '{file_key}' not found in R2"}, status_code=404)
 
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',
@@ -4828,14 +4828,35 @@ def stream_preview_video(song_name: str, request: Request):
     from fastapi.responses import StreamingResponse, FileResponse
     import requests
 
+    def get_local_video(name):
+        """Try to serve the exact requested song's local video file (no fallback to other songs)."""
+        if os.name == 'nt':
+            shop_videos_dir = settings.get("shop_videos_dir", r"C:\Dev\meloscribe\ShopVideos")
+            local_path = os.path.join(shop_videos_dir, f"{name}.mp4")
+        else:
+            local_path = f"/home/ubuntu/meloscribe/Scores/{name}_preview.mp4"
+        if os.path.exists(local_path):
+            print(f"[Preview Video] Serving local file: {local_path}")
+            return FileResponse(local_path, media_type="video/mp4")
+        return None
+
     res = get_preview_video(song_name)
     if isinstance(res, JSONResponse):
-        return res
+        fb = get_local_video(song_name)
+        if fb:
+            return fb
+        return JSONResponse(content={"error": f"Preview video not available for '{song_name}'"}, status_code=404)
     if not isinstance(res, dict):
+        fb = get_local_video(song_name)
+        if fb:
+            return fb
         return JSONResponse(content={"error": "Invalid preview video response"}, status_code=500)
     download_url = res.get("download_url")
     if not download_url or "example.com" in download_url:
-        return JSONResponse(content={"error": "Video URL not found"}, status_code=404)
+        fb = get_local_video(song_name)
+        if fb:
+            return fb
+        return JSONResponse(content={"error": f"Preview video not available for '{song_name}'"}, status_code=404)
 
     req_headers = {}
     range_header = request.headers.get("range")
@@ -4845,8 +4866,11 @@ def stream_preview_video(song_name: str, request: Request):
     try:
         r2_resp = requests.get(download_url, headers=req_headers, stream=True, timeout=15)
         if r2_resp.status_code >= 400:
-            print(f"[Preview Video] R2 returned {r2_resp.status_code} for {download_url}.")
-            return JSONResponse(content={"error": "Video not found in R2"}, status_code=404)
+            print(f"[Preview Video] R2 returned {r2_resp.status_code} for {download_url}. Trying local video.")
+            fb = get_local_video(song_name)
+            if fb:
+                return fb
+            return JSONResponse(content={"error": f"Preview video not available for '{song_name}'"}, status_code=404)
 
         def chunk_generator():
             try:
@@ -4870,8 +4894,8 @@ def stream_preview_video(song_name: str, request: Request):
             headers=resp_headers
         )
     except Exception as e:
-        print(f"[Preview Video] Failed streaming from R2: {e}. Trying local fallback.")
-        fb = get_local_fallback()
+        print(f"[Preview Video] Failed streaming from R2: {e}. Trying local video.")
+        fb = get_local_video(song_name)
         if fb:
             return fb
         return JSONResponse(content={"error": f"Failed to stream video: {str(e)}"}, status_code=500)
