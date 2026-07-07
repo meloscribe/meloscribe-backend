@@ -154,6 +154,26 @@ def load_settings():
             except Exception as e:
                 print(f"[Settings] Error parsing fallback .env: {e}")
 
+    # Fallback to C:/Dev/credentials.json if Stripe credentials are missing
+    if not settings.get("stripe_sandbox_secret_key") or not settings.get("stripe_live_secret_key"):
+        backup_path = Path("C:/Dev/credentials.json")
+        if backup_path.exists():
+            try:
+                with open(backup_path, "r", encoding="utf-8") as f:
+                    backup_data = json.load(f)
+                    stripe_data = backup_data.get("stripe", {})
+                    if stripe_data:
+                        settings["stripe_sandbox_secret_key"] = stripe_data.get("stripe_sandbox_secret_key", "")
+                        settings["stripe_sandbox_publishable_key"] = stripe_data.get("stripe_sandbox_publishable_key", "")
+                        settings["stripe_live_secret_key"] = stripe_data.get("stripe_live_secret_key", "")
+                        settings["stripe_live_publishable_key"] = stripe_data.get("stripe_live_publishable_key", "")
+                        settings["stripe_sandbox_webhook_secret"] = stripe_data.get("stripe_sandbox_webhook_secret", "")
+                        settings["stripe_live_webhook_secret"] = stripe_data.get("stripe_live_webhook_secret", "")
+                        save_settings(settings)
+                        print("[Settings] Restored Stripe credentials from C:\\Dev\\credentials.json")
+            except Exception as e:
+                print(f"[Settings] Error parsing backup credentials.json: {e}")
+
     # Add local FFmpeg to PATH for subprocesses (ffmpeg, ffprobe, etc.)
     ffmpeg_bin = str(Path(__file__).resolve().parent.parent.parent / "ffmpeg" / "bin")
     if os.path.exists(ffmpeg_bin) and ffmpeg_bin not in os.environ.get("PATH", ""):
@@ -168,14 +188,6 @@ def load_settings():
                 os.makedirs(val, exist_ok=True)
             except Exception as e:
                 print(f"Failed to create directory {val}: {e}")
-
-    # Map R2 key names so they match both custom and standard boto3 naming conventions
-    if settings.get("r2_access_key"):
-        settings["r2_access_key_id"] = settings["r2_access_key"]
-    if settings.get("r2_secret_key"):
-        settings["r2_secret_access_key"] = settings["r2_secret_key"]
-    if settings.get("r2_bucket"):
-        settings["r2_bucket_name"] = settings["r2_bucket"]
 
     return settings
 
