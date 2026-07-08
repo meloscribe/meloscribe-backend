@@ -3743,6 +3743,101 @@ async def stripe_webhook(request: Request):
 
     return {"status": "success"}
 
+def generate_watermark_page(text: str):
+    import io
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=A4)
+    can.setFont("Helvetica", 8)
+    can.setFillColorRGB(0.4, 0.4, 0.4)  # dark gray
+    can.drawRightString(560, 20, text)
+    can.save()
+    packet.seek(0)
+    return packet
+
+def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id: str) -> bytes:
+    import io
+    from pypdf import PdfReader, PdfWriter
+    try:
+        name_part = f"{buyer_name} " if buyer_name else ""
+        text = f"Licensed to: {name_part}({email}) | Order #{transaction_id}"
+        
+        watermark_pdf_stream = generate_watermark_page(text)
+        watermark_reader = PdfReader(watermark_pdf_stream)
+        watermark_page = watermark_reader.pages[0]
+        
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        writer = PdfWriter()
+        
+        for page in reader.pages:
+            page.merge_page(watermark_page)
+            writer.add_page(page)
+            
+        output_stream = io.BytesIO()
+        writer.write(output_stream)
+        return output_stream.getvalue()
+    except Exception as e:
+        print(f"[Watermark] Error watermarking PDF: {e}")
+        return pdf_bytes
+
+def watermark_video(original_video_bytes: bytes, song_name: str, type: str) -> bytes:
+    import subprocess
+    import tempfile
+    import os
+    
+    # Check if ffmpeg exists in PATH
+    ffmpeg_executable = "ffmpeg"
+    if os.name == 'nt':
+        # Local Windows fallback check
+        ffmpeg_executable = "ffmpeg.exe"
+        
+    temp_dir = tempfile.gettempdir()
+    input_path = os.path.join(temp_dir, f"input_{song_name}_{type}.mp4")
+    output_path = os.path.join(temp_dir, f"output_{song_name}_{type}.mp4")
+    
+    try:
+        with open(input_path, "wb") as f:
+            f.write(original_video_bytes)
+            
+        # Select font based on OS
+        font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        if os.name == 'nt' or not os.path.exists(font_path):
+            font_path = "Arial"  # System fallback
+            
+        # Draw text watermark
+        filter_str = f"drawtext=text='meloscribe.dev':fontfile='{font_path}':fontcolor=white@0.25:fontsize=24:x=w-tw-30:y=h-th-30"
+        
+        cmd = [
+            ffmpeg_executable, "-y",
+            "-i", input_path,
+            "-vf", filter_str,
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+            "-c:a", "copy",
+            output_path
+        ]
+        
+        print(f"[Watermark Video] Running: {' '.join(cmd)}")
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if res.returncode != 0:
+            print(f"[Watermark Video] FFmpeg error: {res.stderr.decode('utf-8', errors='ignore')}")
+            return original_video_bytes
+            
+        with open(output_path, "rb") as f:
+            watermarked_bytes = f.read()
+            
+        return watermarked_bytes
+    except Exception as e:
+        print(f"[Watermark Video] Error watermarking video: {e}")
+        return original_video_bytes
+    finally:
+        for path in (input_path, output_path):
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
+
 def send_purchase_delivery_email(email: str, song_name: str, download_hash: str, locale: str = "en"):
     """Send purchase delivery email via Resend containing the download link."""
     api_key = load_settings().get("resend_api_key", "")
@@ -3758,9 +3853,9 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
-    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
-    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
-    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
+    <span style="font-size: 32px; font-weight: 900; color: #00f5ff; letter-spacing: 3px; text-transform: lowercase;">meloscribe</span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #ff2d92; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 12px; margin: 8px 0 0 0; letter-spacing: 1px; font-style: italic;">Arranged by ear. Played by you.</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">🎹 Your Sheets Are Ready!</h2>
@@ -4168,22 +4263,26 @@ def admin_toggle_order_status(request: Request, payload: dict):
     return {"success": True, "status": new_status}
 
 @app.get("/api/download/request")
-def request_download(hash: str, type: str):
+def request_download(hash: str, type: str, request: Request):
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
         return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
         
     db_path = Path(__file__).resolve().parent / "analytics.db"
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count, downloaded_types, ip_addresses FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
+    downloaded_types = ""
+    ip_addresses = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
+        downloaded_types = row[2] or ""
+        ip_addresses = row[3] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
@@ -4193,14 +4292,84 @@ def request_download(hash: str, type: str):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    if download_count >= 20:
+    # Check IP limits (Max 3 unique IPs)
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+    if row and not hash.startswith("demo_hash_"):
+        ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
+        if client_ip not in ip_list:
+            if len(ip_list) >= 3:
+                conn.close()
+                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
+            ip_list.append(client_ip)
+            new_ip_str = ",".join(ip_list)
+            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
+            conn.commit()
+            
+    if download_count >= 100:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 20 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
         
     if row:
         new_count = download_count + 1
-        c.execute("UPDATE purchases SET download_count = ? WHERE download_hash = ?", (new_count, hash))
+        # Append type to downloaded_types
+        types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
+        if type not in types_list:
+            types_list.append(type)
+        new_types_str = ",".join(types_list)
+        
+        c.execute("UPDATE purchases SET download_count = ?, downloaded_types = ? WHERE download_hash = ?", (new_count, new_types_str, hash))
         conn.commit()
+    conn.close()
+    
+    # Return absolute URL pointing to our dynamic file downloader/redirector
+    download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
+    return {"download_url": download_file_url, "download_count": download_count}
+
+@app.get("/api/download/file")
+def download_file(hash: str, type: str, request: Request):
+    if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
+        return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
+        
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    c = conn.cursor()
+    c.execute("SELECT song_name, email, transaction_id, ip_addresses, buyer_name FROM purchases WHERE download_hash = ?", (hash,))
+    row = c.fetchone()
+    
+    song_name = None
+    email = None
+    txn_id = None
+    ip_addresses = ""
+    buyer_name = ""
+    
+    if row:
+        song_name = row[0]
+        email = row[1]
+        txn_id = row[2]
+        ip_addresses = row[3] or ""
+        buyer_name = row[4] or ""
+    elif hash.startswith("demo_hash_"):
+        song_name = "Sweetest Rain"
+        email = "demo_customer@example.com"
+        txn_id = "demo_12345"
+        buyer_name = "Jane Doe"
+        
+    if not song_name:
+        conn.close()
+        return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    # Check IP limits again
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+    if row and not hash.startswith("demo_hash_"):
+        ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
+        if client_ip not in ip_list:
+            if len(ip_list) >= 3:
+                conn.close()
+                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
+            ip_list.append(client_ip)
+            new_ip_str = ",".join(ip_list)
+            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
+            conn.commit()
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
@@ -4209,7 +4378,7 @@ def request_download(hash: str, type: str):
     r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
-        print("[Download Request] R2 credentials missing, using demo redirect fallback.")
+        print("[Download File] R2 credentials missing, using demo redirect fallback.")
         if type == "pdf":
             suffix = f"/{song_name}.pdf"
         elif type == "midi":
@@ -4222,10 +4391,8 @@ def request_download(hash: str, type: str):
             suffix = f"/{song_name} slow.mp4"
         else:
             suffix = " Full Package.zip"
-        return {
-            "download_url": f"https://example.com/demo-packages/{song_name}{suffix}",
-            "message": "Demo mode: R2 credentials are not configured in settings.json"
-        }
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=f"https://example.com/demo-packages/{song_name}{suffix}")
         
     try:
         import boto3
@@ -4243,7 +4410,7 @@ def request_download(hash: str, type: str):
             file_key = f"{song_name}/{song_name} slow.mp4"
         else:
             file_key = f"{song_name} Full Package.zip"
-        
+            
         s3 = boto3.client(
             's3',
             endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
@@ -4253,21 +4420,69 @@ def request_download(hash: str, type: str):
             config=Config(signature_version='s3v4')
         )
         
-        filename = file_key.split('/')[-1]
-        presigned_url = s3.generate_presigned_url(
-            ClientMethod='get_object',
-            Params={
-                'Bucket': r2_bucket,
-                'Key': file_key,
-                'ResponseContentDisposition': f'attachment; filename="{filename}"'
-            },
-            ExpiresIn=900
-        )
-        
-        return {"download_url": presigned_url}
+        if type == "pdf":
+            print(f"[Download File] Fetching '{file_key}' from R2 for watermarking...")
+            pdf_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
+            original_pdf_bytes = pdf_obj['Body'].read()
+            
+            # Apply watermark dynamically
+            watermarked_bytes = watermark_pdf(original_pdf_bytes, buyer_name, email, txn_id)
+            
+            from fastapi.responses import Response
+            headers = {
+                "Content-Disposition": f'attachment; filename="{song_name}.pdf"'
+            }
+            return Response(content=watermarked_bytes, media_type="application/pdf", headers=headers)
+        elif type in ("video", "video_slow"):
+            cache_dir = Path(__file__).resolve().parent / "watermarked_videos_cache"
+            cache_dir.mkdir(exist_ok=True)
+            cache_file = cache_dir / f"{song_name}_{type}.mp4"
+            
+            if cache_file.exists():
+                print(f"[Download File] Serving video '{song_name} ({type})' from local cache...")
+                with open(cache_file, "rb") as f:
+                    watermarked_video_bytes = f.read()
+            else:
+                print(f"[Download File] Cache miss! Fetching '{file_key}' from R2 for watermarking...")
+                video_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
+                original_video_bytes = video_obj['Body'].read()
+                
+                # Apply watermark dynamically
+                watermarked_video_bytes = watermark_video(original_video_bytes, song_name, type)
+                
+                # Save to cache if watermarked successfully
+                if watermarked_video_bytes and len(watermarked_video_bytes) > 0:
+                    try:
+                        with open(cache_file, "wb") as f:
+                            f.write(watermarked_video_bytes)
+                        print(f"[Download File] Cached watermarked video to {cache_file}")
+                    except Exception as cache_err:
+                        print(f"[Download File] Failed to write cache: {cache_err}")
+            
+            from fastapi.responses import Response
+            filename = file_key.split('/')[-1]
+            headers = {
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+            return Response(content=watermarked_video_bytes, media_type="video/mp4", headers=headers)
+        else:
+            # Presigned R2 redirect for ZIP and MIDI files
+            filename = file_key.split('/')[-1]
+            presigned_url = s3.generate_presigned_url(
+                ClientMethod='get_object',
+                Params={
+                    'Bucket': r2_bucket, 
+                    'Key': file_key,
+                    'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                },
+                ExpiresIn=900
+            )
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url=presigned_url)
+            
     except Exception as e:
-        print(f"Failed to generate presigned R2 URL: {e}")
-        return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)
+        print(f"[Download File] Error serving file: {e}")
+        return JSONResponse(content={"error": f"Failed to serve file: {str(e)}"}, status_code=500)
 
 @app.get("/api/download/verify")
 def verify_download(checkout_id: str):
@@ -4374,9 +4589,9 @@ def _send_confirmation_email(email: str, token: str):
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
-    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
-    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
-    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
+    <span style="font-size: 32px; font-weight: 900; color: #00f5ff; letter-spacing: 3px; text-transform: lowercase;">meloscribe</span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #ff2d92; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 12px; margin: 8px 0 0 0; letter-spacing: 1px; font-style: italic;">Arranged by ear. Played by you.</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
@@ -5237,9 +5452,9 @@ def _send_new_song_notification(email: str, token: str, song_title: str, artist:
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
   <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
-    <span style="font-size: 32px; font-weight: 900; color: #ffffff; letter-spacing: 3px; text-transform: lowercase;">melo<span style="color: #ff2d92;">scribe</span></span>
-    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #00f5ff; border-radius: 2px;"></div>
-    <p style="color: #888899; font-size: 11px; margin: 8px 0 0 0; text-transform: uppercase; letter-spacing: 1.5px;">piano &amp; sheet music</p>
+    <span style="font-size: 32px; font-weight: 900; color: #00f5ff; letter-spacing: 3px; text-transform: lowercase;">meloscribe</span>
+    <div style="height: 2px; width: 60px; margin: 8px auto 0 auto; background: #ff2d92; border-radius: 2px;"></div>
+    <p style="color: #888899; font-size: 12px; margin: 8px 0 0 0; letter-spacing: 1px; font-style: italic;">Arranged by ear. Played by you.</p>
   </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
     <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; text-align: center; font-weight: 700;">🎵 New Sheet Music Released!</h2>
