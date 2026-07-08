@@ -260,6 +260,7 @@ PUBLIC_ROUTES = [
     ("/api/order/hash-by-checkout", "GET"),
     ("/api/order/details", "GET"),
     ("/api/download/request", "GET"),
+    ("/api/download/file", "GET"),         # Dynamically watermarked customer downloads
     ("/api/download/verify", "GET"),
     ("/api/notify/subscribe", "POST"),
     ("/api/notify/confirm", "GET"),
