@@ -3616,8 +3616,61 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         print(f"[Stripe Checkout] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def prewarm_cache(song_title: str):
+    print(f"[Prewarm Cache] Starting cache warming for song '{song_title}' in background...")
+    
+    settings = load_settings()
+    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    
+    if not r2_account_id or not r2_access_key or not r2_secret_key:
+        print("[Prewarm Cache] Missing R2 credentials, skipping cache prewarm.")
+        return
+        
+    try:
+        import boto3
+        from botocore.config import Config
+        s3 = boto3.client(
+            's3',
+            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+            aws_access_key_id=r2_access_key,
+            aws_secret_access_key=r2_secret_key,
+            region_name='auto',
+            config=Config(signature_version='s3v4')
+        )
+        
+        cache_dir = Path(__file__).resolve().parent / "watermarked_videos_cache"
+        cache_dir.mkdir(exist_ok=True)
+        
+        for video_type in ("video", "video_slow"):
+            cache_file = cache_dir / f"{song_title}_{video_type}.mp4"
+            if cache_file.exists():
+                print(f"[Prewarm Cache] Video '{song_title} ({video_type})' already cached. Skipping.")
+                continue
+                
+            file_key = f"{song_title}/{song_title}.mp4" if video_type == "video" else f"{song_title}/{song_title} slow.mp4"
+            print(f"[Prewarm Cache] Fetching '{file_key}' from R2...")
+            try:
+                video_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
+                original_bytes = video_obj['Body'].read()
+                
+                print(f"[Prewarm Cache] Rendering watermark for '{song_title} ({video_type})'...")
+                watermarked_bytes = watermark_video(original_bytes, song_title, video_type)
+                
+                if watermarked_bytes and len(watermarked_bytes) > 0:
+                    with open(cache_file, "wb") as f:
+                        f.write(watermarked_bytes)
+                    print(f"[Prewarm Cache] Successfully pre-warmed and cached video to {cache_file}")
+            except Exception as item_err:
+                print(f"[Prewarm Cache] Error prewarming '{video_type}' for '{song_title}': {item_err}")
+                
+    except Exception as e:
+        print(f"[Prewarm Cache] General error prewarming cache for '{song_title}': {e}")
+
 @app.post("/api/webhooks/stripe")
-async def stripe_webhook(request: Request):
+async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     payload = await request.body()
     sig_header = request.headers.get("Stripe-Signature")
     
@@ -3709,6 +3762,8 @@ async def stripe_webhook(request: Request):
                 
                 if is_new:
                     send_purchase_delivery_email(email, song_title, download_hash, locale)
+                    # Trigger background cache prewarming for the purchased song videos
+                    background_tasks.add_task(prewarm_cache, song_title)
                     
         elif event_type == "charge.refunded":
             charge_id = data_object.get("id")
