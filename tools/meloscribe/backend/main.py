@@ -3762,8 +3762,6 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 
                 if is_new:
                     send_purchase_delivery_email(email, song_title, download_hash, locale)
-                    # Trigger background cache prewarming for the purchased song videos
-                    background_tasks.add_task(prewarm_cache, song_title)
                     
         elif event_type == "charge.refunded":
             charge_id = data_object.get("id")
@@ -4489,40 +4487,8 @@ def download_file(hash: str, type: str, request: Request):
                 "Content-Disposition": f'attachment; filename="{song_name}.pdf"'
             }
             return Response(content=watermarked_bytes, media_type="application/pdf", headers=headers)
-        elif type in ("video", "video_slow"):
-            cache_dir = Path(__file__).resolve().parent / "watermarked_videos_cache"
-            cache_dir.mkdir(exist_ok=True)
-            cache_file = cache_dir / f"{song_name}_{type}.mp4"
-            
-            if cache_file.exists():
-                print(f"[Download File] Serving video '{song_name} ({type})' from local cache...")
-                with open(cache_file, "rb") as f:
-                    watermarked_video_bytes = f.read()
-            else:
-                print(f"[Download File] Cache miss! Fetching '{file_key}' from R2 for watermarking...")
-                video_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
-                original_video_bytes = video_obj['Body'].read()
-                
-                # Apply watermark dynamically
-                watermarked_video_bytes = watermark_video(original_video_bytes, song_name, type)
-                
-                # Save to cache if watermarked successfully
-                if watermarked_video_bytes and len(watermarked_video_bytes) > 0:
-                    try:
-                        with open(cache_file, "wb") as f:
-                            f.write(watermarked_video_bytes)
-                        print(f"[Download File] Cached watermarked video to {cache_file}")
-                    except Exception as cache_err:
-                        print(f"[Download File] Failed to write cache: {cache_err}")
-            
-            from fastapi.responses import Response
-            filename = file_key.split('/')[-1]
-            headers = {
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
-            return Response(content=watermarked_video_bytes, media_type="video/mp4", headers=headers)
         else:
-            # Presigned R2 redirect for ZIP and MIDI files
+            # Presigned R2 redirect for ZIP, MIDI, and Video files
             filename = file_key.split('/')[-1]
             presigned_url = s3.generate_presigned_url(
                 ClientMethod='get_object',
