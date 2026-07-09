@@ -1151,8 +1151,9 @@ else:
         return {"orders": orders}
 
     @router.post("/api/admin/orders/reset")
-    def admin_reset_order_downloads(request: Request, payload: dict):
+    async def admin_reset_order_downloads(request: Request):
         verify_admin(request)
+        payload = await request.json()
         transaction_id = payload.get("transaction_id")
         if not transaction_id:
             raise HTTPException(status_code=400, detail="Transaction ID required")
@@ -1165,8 +1166,9 @@ else:
         return {"success": True}
 
     @router.post("/api/admin/orders/toggle-status")
-    def admin_toggle_order_status(request: Request, payload: dict):
+    async def admin_toggle_order_status(request: Request):
         verify_admin(request)
+        payload = await request.json()
         transaction_id = payload.get("transaction_id")
         new_status = payload.get("status")
         if not transaction_id or not new_status:
