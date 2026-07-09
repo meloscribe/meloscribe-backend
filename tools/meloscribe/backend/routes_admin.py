@@ -1052,7 +1052,9 @@ else:
                    f"{song_name}.mid" if type == "midi" else \
                    f"{song_name} slow.mid" if type == "midi_slow" else \
                    f"{song_name}.mp4" if type == "video" else \
-                   f"{song_name} slow.mp4" if type == "video_slow" else file.filename
+                   f"{song_name} slow.mp4" if type == "video_slow" else \
+                   f"{song_name}.mp3" if type == "audio_preview" else \
+                   f"{song_name}_preview.mp4" if type == "video_preview" else file.filename
                    
         r2_key = f"{song_name}/{filename}"
             
@@ -1078,7 +1080,8 @@ else:
             content = await file.read()
             content_type = "application/pdf" if type == "pdf" else \
                            "audio/midi" if "midi" in type else \
-                           "video/mp4" if "video" in type else "application/octet-stream"
+                           "video/mp4" if "video" in type or "preview" in type else \
+                           "audio/mpeg" if type == "audio_preview" else "application/octet-stream"
                            
             s3.put_object(
                 Bucket=r2_bucket,
