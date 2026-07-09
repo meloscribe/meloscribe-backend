@@ -222,22 +222,26 @@ if platform.system() == "Windows":
 
     @router.post("/api/admin/upload")
     async def proxy_admin_upload(request: Request):
-        """Dedicated proxy for file uploads - needs high timeout and correct multipart passthrough."""
+        """Dedicated streaming proxy for file uploads - avoids loading large files into RAM."""
+        import httpx
+
+        headers = get_proxy_headers()
+        if "x-admin-passcode" in request.headers:
+            headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+        # Pass content-type including multipart boundary exactly as received
+        if "content-type" in request.headers:
+            headers["content-type"] = request.headers["content-type"]
+
         try:
-            headers = get_proxy_headers()
-            if "x-admin-passcode" in request.headers:
-                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
-            # Pass content-type including boundary exactly as received
-            if "content-type" in request.headers:
-                headers["content-type"] = request.headers["content-type"]
-            
-            body = await request.body()
-            r = requests.post(
-                f"{VM_API_BASE}/api/admin/upload",
-                headers=headers,
-                data=body,
-                timeout=600.0  # 10 minutes for large video uploads
-            )
+            # Stream the body directly without buffering the whole file in memory
+            async with httpx.AsyncClient(timeout=600.0) as client:
+                # Collect body in chunks and stream to VM
+                body = await request.body()
+                r = await client.post(
+                    f"{VM_API_BASE}/api/admin/upload",
+                    headers=headers,
+                    content=body,
+                )
             try:
                 return JSONResponse(content=r.json(), status_code=r.status_code)
             except Exception:
@@ -1220,6 +1224,39 @@ else:
         conn.commit()
         conn.close()
         return {"success": True}
+
+# -------------------------------------------------------------------
+# Order Management Endpoints (Global - runs on all platforms including VM)
+# -------------------------------------------------------------------
+@router.post("/api/admin/orders/toggle-status")
+async def global_toggle_order_status(request: Request):
+    verify_admin(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    transaction_id = payload.get("transaction_id")
+    new_status = payload.get("status")
+    if not transaction_id or not new_status:
+        raise HTTPException(status_code=400, detail="Transaction ID and status required")
+    conn = sqlite3.connect(str(db_path))
+    c = conn.cursor()
+    c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "status": new_status}
+
+@router.delete("/api/admin/orders/{transaction_id}")
+def global_delete_order(transaction_id: str, request: Request):
+    verify_admin(request)
+    conn = sqlite3.connect(str(db_path))
+    c = conn.cursor()
+    c.execute("DELETE FROM purchases WHERE transaction_id = ?", (transaction_id,))
+    c.execute("DELETE FROM revenue WHERE message = ? OR message = ?",
+              (f"Stripe txn {transaction_id}", f"Paddle txn {transaction_id}"))
+    conn.commit()
+    conn.close()
+    return {"success": True}
 
 # -------------------------------------------------------------------
 # Competitor Tracker Endpoints (Global)
