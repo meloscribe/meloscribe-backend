@@ -17,11 +17,13 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Mary On A Cross_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "hidden": false,
     "stripePriceId": "pri_01kwap7nmbmfnwewwx2npgxd2m",
     "paymentsDisabled": false,
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Mary On A Cross.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "2",
@@ -30,9 +32,11 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/Sonne_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7psqhq1kadfgm1zvt17n",
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Sonne.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "3",
@@ -41,9 +45,11 @@
     "difficulty": "Original",
     "price": "6 €",
     "coverImage": "/covers/Je te laisserai des mots_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7r150vgfbnxjjekmr06j",
-    "theme": "cold"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Je te laisserai des mots.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "4",
@@ -51,43 +57,49 @@
     "artist": "Ismail",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Closed Doors_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap7s76726nsbccp4eydq3d",
-    "theme": "cold"
+    "coverImage": "/covers/Closed Doors_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Closed Doors.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "5",
     "title": "Sweetest Rain",
     "artist": "Abilene",
     "difficulty": "Original",
-    "price": "6 €",
+    "price": "4 €",
     "coverImage": "/covers/Sweetest Rain_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7tcvw6s23pq44pbv60aq",
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Sweetest Rain.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "6",
-    "title": "We wish you a merry Christmas",
+    "title": "We Wish You a Merry Xmas",
     "artist": "Traditional",
     "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/We wish you a merry Christmas_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "price": "Free",
+    "coverImage": "/covers/We Wish You a Merry Xmas_clean.jpg",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap7vmg93500mvg8e0rj82a",
-    "theme": "warm"
+    "theme": "cold",
+    "format": "viral_part"
   },
   {
     "id": "9",
     "title": "In This Shirt",
     "artist": "The Irrepressibles",
     "difficulty": "Original",
-    "price": "6 €",
+    "price": "4 €",
     "coverImage": "/covers/In This Shirt_clean.jpg",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3",
     "theme": "warm",
+    "format": "viral_part",
     "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
     "kofiId": "prod_dummy123"
   },
@@ -97,10 +109,12 @@
     "artist": "C418",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Wet Hands_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap7y0k3qfssyqvca8tgqfk",
-    "theme": "cold"
+    "coverImage": "/covers/Wet Hands_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Wet Hands.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "11",
@@ -108,10 +122,12 @@
     "artist": "Coldplay",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/The Scientist_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap7zb0qn5jy0xmygr2mf72",
-    "theme": "cold"
+    "coverImage": "/covers/The Scientist_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/The Scientist.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "13",
@@ -119,21 +135,25 @@
     "artist": "Eminem",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Mockingbird_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap80gg2604xhkqvmnqfab6",
-    "theme": "cold"
+    "coverImage": "/covers/Mockingbird_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Mockingbird.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "14",
-    "title": "Succession theme",
+    "title": "Succession Theme",
     "artist": "Nicholas Britell",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Succession theme_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap81spjgzydv97804x48fm",
-    "theme": "cold"
+    "coverImage": "/covers/Succession Theme_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Succession Theme.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "15",
@@ -141,10 +161,12 @@
     "artist": "BØRNS",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Past Lives_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap82yvjpa4xdvp2n65j081",
-    "theme": "cold"
+    "coverImage": "/covers/Past Lives_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Past Lives.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "16",
@@ -152,10 +174,12 @@
     "artist": "Radiohead",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/No Surprises_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap84e2t898qcpccpx32xbr",
-    "theme": "cold"
+    "coverImage": "/covers/No Surprises_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/No Surprises.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   },
   {
     "id": "17",
@@ -163,20 +187,20 @@
     "artist": "Traditional",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/Greensleeves_clean.jpg",
-    "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap85kbhf0zpdd77p0d1fwv",
-    "theme": "green",
+    "coverImage": "/covers/Greensleeves_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Greensleeves.mp3",
-    "kofiId": "prod_dummy123"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "theme": "cold"
   },
   {
     "id": "18",
-    "title": "God Rest Ye Merry, Gentlemen",
+    "title": "God Rest Ye Merry",
     "artist": "Traditional",
     "difficulty": "Original",
     "price": "4 €",
-    "coverImage": "/covers/God Rest Ye Merry, Gentlemen_clean.jpg",
+    "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap86sgh9wg86me8sek8xxa",
     "theme": "cold",
@@ -186,24 +210,29 @@
   {
     "id": "19",
     "title": "Carol of the Bells",
-    "artist": "Mykola Leontovych",
+    "artist": "Traditional",
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Carol of the Bells_clean.jpg",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap87zrswysf4vqcaasvm89",
-    "theme": "cold"
+    "theme": "cold",
+    "audioPreviewUrl": "/audio-previews/Carol of the Bells.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "21",
     "title": "Silent Night",
-    "artist": "F. X. Gruber",
+    "artist": "Traditional",
     "difficulty": "Original",
-    "price": "4 €",
+    "price": "Free",
     "coverImage": "/covers/Silent Night_clean.jpg",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap894yy7rsz375k3h3sdp9",
-    "theme": "cold"
+    "theme": "cold",
+    "audioPreviewUrl": "/audio-previews/Silent Night.mp3",
+    "kofiId": "prod_dummy123",
+    "format": "viral_part"
   },
   {
     "id": "22",
@@ -212,7 +241,7 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Hallelujah_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap8afx26p78hem1c2hz3n9",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
@@ -225,9 +254,11 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Cornfield Chase_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap8bnmvvdjkx3g7zwkq1vz",
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Cornfield Chase.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "30",
@@ -236,35 +267,64 @@
     "difficulty": "Original",
     "price": "4 €",
     "coverImage": "/covers/Your love is my drug_clean.jpg",
-    "gradient": "from-neon-pink/20 via-dark-700 to-neon-pink/5",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap8e5vbzsrjxrtj8mjs2xm",
-    "theme": "warm"
+    "theme": "warm",
+    "audioPreviewUrl": "/audio-previews/Your love is my drug.mp3",
+    "kofiId": "prod_dummy123"
   },
   {
     "id": "32",
     "title": "River Flows in You",
     "artist": "Yiruma",
     "difficulty": "Original",
-    "price": "6 €",
-    "coverImage": "/covers/River Flows in You_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "audioPreviewUrl": "/audio/river_flows_in_you.ogg",
-    "paymentsDisabled": false,
-    "hidden": false,
+    "price": "4 €",
+    "kofiId": "prod_dummy123",
     "stripePriceId": "pri_01kwap8gs5btjdcesxb7k3acz4",
-    "theme": "cold"
+    "coverImage": "/covers/River Flows in You_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/River Flows in You.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm",
+    "hidden": false,
+    "paymentsDisabled": false
   },
   {
     "id": "37",
     "title": "Icarus",
-    "artist": "Dave Kerr",
+    "artist": "Tony Ann",
     "difficulty": "Original",
     "price": "6 €",
-    "kofiId": "prod_dummy123",
+    "kofiId": "price_1TrEOQL8a9dEAmWszvGILxUe",
+    "stripePriceId": "price_1TrEOQL8a9dEAmWszvGILxUe",
     "coverImage": "/covers/Icarus_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Icarus.mp3",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "theme": "cold",
-    "stripePriceId": "prod_dummy123"
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
+  },
+  {
+    "id": "41",
+    "title": "My Singing Monsters",
+    "artist": "Big Blue Bubble",
+    "difficulty": "Original",
+    "price": "4 €",
+    "kofiId": "price_1TrEP5L8a9dEAmWsrAfJaMb5",
+    "stripePriceId": "price_1TrEP5L8a9dEAmWsrAfJaMb5",
+    "coverImage": "/covers/My Singing Monsters_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/My Singing Monsters.mp3",
+    "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
+    "theme": "green"
+  },
+  {
+    "id": "53",
+    "title": "Believer",
+    "artist": "Imagine Dragons",
+    "difficulty": "Original",
+    "price": "6 €",
+    "kofiId": "price_1TrEPxL8a9dEAmWsjGdpkUkY",
+    "stripePriceId": "price_1TrEPxL8a9dEAmWsjGdpkUkY",
+    "coverImage": "/covers/Believer_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Believer.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm"
   }
 ]
