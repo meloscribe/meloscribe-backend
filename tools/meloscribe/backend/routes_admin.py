@@ -220,6 +220,31 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
+    @router.post("/api/admin/upload")
+    async def proxy_admin_upload(request: Request):
+        """Dedicated proxy for file uploads - needs high timeout and correct multipart passthrough."""
+        try:
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            # Pass content-type including boundary exactly as received
+            if "content-type" in request.headers:
+                headers["content-type"] = request.headers["content-type"]
+            
+            body = await request.body()
+            r = requests.post(
+                f"{VM_API_BASE}/api/admin/upload",
+                headers=headers,
+                data=body,
+                timeout=600.0  # 10 minutes for large video uploads
+            )
+            try:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+            except Exception:
+                return Response(content=r.content, status_code=r.status_code, media_type=r.headers.get("content-type"))
+        except Exception as e:
+            return JSONResponse(content={"error": f"Upload proxy error: {e}"}, status_code=500)
+
     @router.api_route("/api/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
     async def proxy_admin_routes(path: str, request: Request):
         try:
