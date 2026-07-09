@@ -1238,8 +1238,9 @@ else:
         if not transaction_id:
             raise HTTPException(status_code=400, detail="Transaction ID required")
             
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        c.execute("PRAGMA journal_mode=WAL")
         c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
         conn.commit()
         conn.close()
@@ -1259,8 +1260,9 @@ async def global_toggle_order_status(request: Request):
     new_status = payload.get("status")
     if not transaction_id or not new_status:
         raise HTTPException(status_code=400, detail="Transaction ID and status required")
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
     c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
     conn.commit()
     conn.close()
@@ -1269,8 +1271,9 @@ async def global_toggle_order_status(request: Request):
 @router.delete("/api/admin/orders/{transaction_id}")
 def global_delete_order(transaction_id: str, request: Request):
     verify_admin(request)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
     c.execute("DELETE FROM purchases WHERE transaction_id = ?", (transaction_id,))
     c.execute("DELETE FROM revenue WHERE message = ? OR message = ?",
               (f"Stripe txn {transaction_id}", f"Paddle txn {transaction_id}"))
