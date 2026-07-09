@@ -63,6 +63,7 @@ PUBLIC_ROUTES = [
     "/api/kofi/webhook",
     "/api/webhooks/stripe",
     "/callback",
+    "/pinterest-callback",
     "/public",
     "/ws/logs"
 ]

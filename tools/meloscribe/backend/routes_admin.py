@@ -1057,12 +1057,26 @@ else:
         try:
             res = s3.list_objects_v2(Bucket=r2_bucket)
             files = []
+            
+            # Load metadata to map R2 keys to original filenames
+            metadata_path = Path(__file__).resolve().parent / "r2_metadata.json"
+            metadata = {}
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+                except Exception:
+                    pass
+
             if 'Contents' in res:
                 for obj in res['Contents']:
+                    key = obj['Key']
+                    orig = metadata.get(key, {}).get("original_filename")
                     files.append({
-                        "key": obj['Key'],
+                        "key": key,
                         "size": obj['Size'],
-                        "last_modified": obj['LastModified'].isoformat()
+                        "last_modified": obj['LastModified'].isoformat(),
+                        "original_filename": orig
                     })
             return {"files": files}
         except Exception as e:
@@ -1118,6 +1132,26 @@ else:
                 Body=content,
                 ContentType=content_type
             )
+            
+            # Save original filename metadata
+            metadata_path = Path(__file__).resolve().parent / "r2_metadata.json"
+            metadata = {}
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+                except Exception:
+                    pass
+            metadata[r2_key] = {
+                "original_filename": file.filename,
+                "uploaded_at": datetime.datetime.utcnow().isoformat()
+            }
+            try:
+                with open(metadata_path, "w", encoding="utf-8") as f:
+                    json.dump(metadata, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Admin Upload] Failed to write metadata: {e}")
+
             print(f"[Admin Upload] Successfully uploaded {r2_key} to R2")
             return {"success": True, "key": r2_key}
         except Exception as e:
@@ -1150,6 +1184,20 @@ else:
         
         try:
             s3.delete_object(Bucket=r2_bucket, Key=r2_key)
+            
+            # Delete original filename metadata
+            metadata_path = Path(__file__).resolve().parent / "r2_metadata.json"
+            if metadata_path.exists():
+                try:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
+                        metadata = json.load(f)
+                    if r2_key in metadata:
+                        del metadata[r2_key]
+                        with open(metadata_path, "w", encoding="utf-8") as f:
+                            json.dump(metadata, f, indent=2, ensure_ascii=False)
+                except Exception as e:
+                    print(f"[Admin Delete] Failed to update metadata: {e}")
+
             print(f"[Admin Delete] Deleted {r2_key} from R2")
             return {"success": True}
         except Exception as e:
@@ -1193,34 +1241,6 @@ else:
         conn = sqlite3.connect(str(db_path))
         c = conn.cursor()
         c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
-        conn.commit()
-        conn.close()
-        return {"success": True}
-
-    @router.post("/api/admin/orders/toggle-status")
-    async def admin_toggle_order_status(request: Request):
-        verify_admin(request)
-        payload = await request.json()
-        transaction_id = payload.get("transaction_id")
-        new_status = payload.get("status")
-        if not transaction_id or not new_status:
-            raise HTTPException(status_code=400, detail="Transaction ID and status required")
-            
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
-        c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
-        conn.commit()
-        conn.close()
-        return {"success": True, "status": new_status}
-
-    @router.delete("/api/admin/orders/{transaction_id}")
-    def admin_delete_order(transaction_id: str, request: Request):
-        verify_admin(request)
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
-        c.execute("DELETE FROM purchases WHERE transaction_id = ?", (transaction_id,))
-        c.execute("DELETE FROM revenue WHERE message = ? OR message = ?", 
-                  (f"Stripe txn {transaction_id}", f"Paddle txn {transaction_id}"))
         conn.commit()
         conn.close()
         return {"success": True}
