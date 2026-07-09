@@ -452,6 +452,96 @@ def threads_authorize(req: Optional[ThreadsAuthRequest] = None):
 # -------------------------------------------------------------------
 # Pinterest Settings & Auth
 # -------------------------------------------------------------------
+@router.post("/api/pinterest/oauth-url")
+async def pinterest_oauth_url(request: Request):
+    """Generate a Pinterest OAuth authorization URL for getting a permanent token with refresh capability."""
+    try:
+        payload = await request.json()
+        app_id = payload.get("app_id", "")
+        tokens_path = TOOLS_DIR / "pinterest_tokens.json"
+        if not tokens_path.exists():
+            tokens_path = Path(__file__).resolve().parent / "pinterest_tokens.json"
+        if not app_id and tokens_path.exists():
+            with open(tokens_path) as f:
+                app_id = json.load(f).get("pinterest_app_id", "")
+        if not app_id:
+            raise HTTPException(status_code=400, detail="Pinterest App ID is required. Save it first.")
+        # offline_access scope provides a refresh_token for permanent access
+        redirect_uri = "https://meloscribe.com/pinterest-callback"
+        scope = "boards:read,pins:read,pins:write,boards:write,user_accounts:read"
+        auth_url = (
+            f"https://www.pinterest.com/oauth/"
+            f"?client_id={app_id}"
+            f"&redirect_uri={redirect_uri}"
+            f"&response_type=code"
+            f"&scope={scope}"
+            f"&app_type=3"
+        )
+        return {"url": auth_url, "redirect_uri": redirect_uri}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/api/pinterest/exchange-code")
+async def pinterest_exchange_code(request: Request):
+    """Exchange a Pinterest OAuth authorization code for access + refresh tokens."""
+    try:
+        payload = await request.json()
+        code = payload.get("code", "").strip()
+        if not code:
+            raise HTTPException(status_code=400, detail="Authorization code is required")
+        tokens_path = TOOLS_DIR / "pinterest_tokens.json"
+        if not tokens_path.exists():
+            tokens_path = Path(__file__).resolve().parent / "pinterest_tokens.json"
+        with open(tokens_path) as f:
+            tokens = json.load(f)
+        app_id = tokens.get("pinterest_app_id", "")
+        app_secret = tokens.get("pinterest_app_secret", "")
+        if not app_id or not app_secret:
+            raise HTTPException(status_code=400, detail="App ID and App Secret must be saved first")
+        import base64
+        credentials = base64.b64encode(f"{app_id}:{app_secret}".encode()).decode()
+        redirect_uri = "https://meloscribe.com/pinterest-callback"
+        resp = requests.post(
+            "https://api.pinterest.com/v5/oauth/token",
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": redirect_uri
+            },
+            timeout=15
+        )
+        if resp.status_code != 200:
+            return {"success": False, "error": f"Pinterest returned {resp.status_code}: {resp.text[:300]}"}
+        token_data = resp.json()
+        tokens["pinterest_access_token"] = token_data.get("access_token", tokens["pinterest_access_token"])
+        if "refresh_token" in token_data:
+            tokens["pinterest_refresh_token"] = token_data["refresh_token"]
+            refresh_info = "Refresh token saved — token will auto-renew!"
+        else:
+            refresh_info = "No refresh token returned (check app has offline_access scope)"
+        with open(tokens_path, "w", encoding="utf-8") as f:
+            json.dump(tokens, f, indent=2, ensure_ascii=False)
+        # Sync to VM
+        if platform.system() == "Windows":
+            key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+            server_ip = "152.70.23.171"
+            if os.path.exists(key_path):
+                cmd = ["scp", "-i", key_path, "-o", "StrictHostKeyChecking=accept-new",
+                       str(tokens_path),
+                       f"ubuntu@{server_ip}:/home/ubuntu/meloscribe/tools/meloscribe/backend/pinterest_tokens.json"]
+                subprocess.run(cmd, capture_output=True, timeout=10, creationflags=CREATION_FLAGS)
+        return {"success": True, "message": f"Tokens saved! {refresh_info}"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/api/pinterest/status")
 def pinterest_status():
     tokens_path = TOOLS_DIR / "pinterest_tokens.json"
