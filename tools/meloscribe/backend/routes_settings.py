@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import platform
 import requests
 import threading
 import subprocess
@@ -452,6 +453,70 @@ def threads_authorize(req: Optional[ThreadsAuthRequest] = None):
 # -------------------------------------------------------------------
 # Pinterest Settings & Auth
 # -------------------------------------------------------------------
+@router.get("/pinterest-callback")
+async def pinterest_oauth_callback(request: Request):
+    """Auto-receives Pinterest OAuth code and exchanges it for tokens. Browser lands here after Pinterest auth."""
+    code = request.query_params.get("code", "").strip()
+    error = request.query_params.get("error", "")
+    if error:
+        return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Pinterest Auth Failed</title>
+<style>body{{font-family:sans-serif;background:#0a0a0f;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
+.box{{background:rgba(255,45,60,0.1);border:1px solid rgba(255,60,60,0.3);border-radius:16px;padding:40px;max-width:460px;text-align:center}}
+h1{{color:#ff4040}}p{{color:#94a3b8}}</style></head>
+<body><div class="box"><h1>&#10060; Authorization Failed</h1><p>Pinterest returned: <code>{error}</code></p>
+<p>Close this tab and try again in the Meloscribe app.</p></div></body></html>""", status_code=400)
+    if not code:
+        return HTMLResponse("No code received.", status_code=400)
+    # Auto-exchange the code
+    try:
+        tokens_path = TOOLS_DIR / "pinterest_tokens.json"
+        if not tokens_path.exists():
+            tokens_path = Path(__file__).resolve().parent / "pinterest_tokens.json"
+        with open(tokens_path) as f:
+            tokens = json.load(f)
+        app_id = tokens.get("pinterest_app_id", "")
+        app_secret = tokens.get("pinterest_app_secret", "")
+        import base64
+        credentials = base64.b64encode(f"{app_id}:{app_secret}".encode()).decode()
+        resp = requests.post(
+            "https://api.pinterest.com/v5/oauth/token",
+            headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"},
+            data={"grant_type": "authorization_code", "code": code, "redirect_uri": "http://localhost:8787/pinterest-callback"},
+            timeout=15
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"Pinterest returned {resp.status_code}: {resp.text[:200]}")
+        token_data = resp.json()
+        tokens["pinterest_access_token"] = token_data.get("access_token", tokens.get("pinterest_access_token", ""))
+        refresh_msg = ""
+        if "refresh_token" in token_data:
+            tokens["pinterest_refresh_token"] = token_data["refresh_token"]
+            refresh_msg = " Refresh token saved — token will auto-renew permanently!"
+        with open(tokens_path, "w", encoding="utf-8") as f:
+            json.dump(tokens, f, indent=2, ensure_ascii=False)
+        # Sync to VM
+        if platform.system() == "Windows":
+            key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+            server_ip = "152.70.23.171"
+            if os.path.exists(key_path):
+                cmd = ["scp", "-i", key_path, "-o", "StrictHostKeyChecking=accept-new",
+                       str(tokens_path), f"ubuntu@{server_ip}:/home/ubuntu/meloscribe/tools/meloscribe/backend/pinterest_tokens.json"]
+                subprocess.run(cmd, capture_output=True, timeout=10, creationflags=CREATION_FLAGS)
+        return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Pinterest Connected!</title>
+<style>body{{font-family:sans-serif;background:#0a0a0f;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
+.box{{background:rgba(0,200,100,0.08);border:1px solid rgba(0,200,100,0.3);border-radius:16px;padding:40px;max-width:480px;text-align:center}}
+h1{{color:#00c864;font-size:22px}}p{{color:#94a3b8;line-height:1.6}}code{{background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:6px;font-size:13px}}</style></head>
+<body><div class="box"><h1>&#10003; Pinterest Connected!</h1>
+<p>Access token saved successfully.{refresh_msg}</p>
+<p>You can close this tab and return to Meloscribe.</p></div></body></html>""")
+    except Exception as e:
+        return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Pinterest Auth Error</title>
+<style>body{{font-family:sans-serif;background:#0a0a0f;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
+.box{{background:rgba(255,45,60,0.1);border:1px solid rgba(255,60,60,0.3);border-radius:16px;padding:40px;max-width:460px;text-align:center}}
+h1{{color:#ff4040}}p{{color:#94a3b8}}code{{background:rgba(255,255,255,0.08);padding:2px 8px;border-radius:6px;font-size:12px}}</style></head>
+<body><div class="box"><h1>&#10060; Token Exchange Failed</h1><p>Error: <code>{e}</code></p>
+<p>Make sure App ID and Secret are saved in settings first.</p></div></body></html>""", status_code=500)
+
 @router.post("/api/pinterest/oauth-url")
 async def pinterest_oauth_url(request: Request):
     """Generate a Pinterest OAuth authorization URL for getting a permanent token with refresh capability."""
@@ -466,8 +531,9 @@ async def pinterest_oauth_url(request: Request):
                 app_id = json.load(f).get("pinterest_app_id", "")
         if not app_id:
             raise HTTPException(status_code=400, detail="Pinterest App ID is required. Save it first.")
-        # offline_access scope provides a refresh_token for permanent access
-        redirect_uri = "https://meloscribe.com/pinterest-callback"
+        # Use localhost redirect so the Electron app auto-captures the code
+        # This must match EXACTLY what's registered in your Pinterest Developer App settings
+        redirect_uri = "http://localhost:8787/pinterest-callback"
         scope = "boards:read,pins:read,pins:write,boards:write,user_accounts:read"
         auth_url = (
             f"https://www.pinterest.com/oauth/"
@@ -475,7 +541,6 @@ async def pinterest_oauth_url(request: Request):
             f"&redirect_uri={redirect_uri}"
             f"&response_type=code"
             f"&scope={scope}"
-            f"&app_type=3"
         )
         return {"url": auth_url, "redirect_uri": redirect_uri}
     except HTTPException:
@@ -502,7 +567,7 @@ async def pinterest_exchange_code(request: Request):
             raise HTTPException(status_code=400, detail="App ID and App Secret must be saved first")
         import base64
         credentials = base64.b64encode(f"{app_id}:{app_secret}".encode()).decode()
-        redirect_uri = "https://meloscribe.com/pinterest-callback"
+        redirect_uri = "http://localhost:8787/pinterest-callback"
         resp = requests.post(
             "https://api.pinterest.com/v5/oauth/token",
             headers={
