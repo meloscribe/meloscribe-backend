@@ -105,7 +105,8 @@ git add . && git commit -m "..." && git push
 |---|---|---|
 | `/api/paddle/webhook` | POST | Receive Paddle purchase events, create `purchases` row, generate `download_hash` |
 | `/order/{hash}` | GET | Serve success page — validates hash, returns presigned R2 download URLs (15 min, max 20 downloads) |
-| `/api/songs` | GET | Return `songs.json` catalog |
+| `/api/public/songs` | GET | Return dynamically localized `songs.json` catalog (replaces € price symbol with $ or £ based on IP location) |
+| `/api/checkout/create-session` | POST | Generate a Stripe Checkout Session mapped to user's local IP currency (EUR/USD/GBP) |
 | `/api/songs/sync` | POST | Sync song from desktop app upload pipeline |
 | `/api/kofi/webhook` | POST | Ko-Fi donation/purchase → `analytics.db` revenue |
 | `/api/server/status` | GET | Service health check |
@@ -164,6 +165,9 @@ git add . && git commit -m "..." && git push
 - [x] Upgraded batch processor loop to automatically abort queue execution on step failures to prevent cascaded errors
 - [x] Enriched logs proxying to merge local and remote log streams, and added subprocess execution details capture for precise failure diagnostics
 - [x] Swapped `pythonw.exe` for standard `python.exe` in Electron's `main.js` to ensure the backend spawns inside an interactive Windows session with screen capture privileges
+- [x] Implemented dynamic IP-based checkout currency routing on Stripe (`routes_public.py`), preserving round numeric values (e.g. `4 €` -> `4 $` for US or `4 £` for UK) using Cloudflare `CF-IPCountry` and `ip-api.com` fallback with in-memory caching.
+- [x] Added public catalog endpoint `/api/public/songs` to dynamically convert the `price` field currency symbols (`€` to `$` or `£`) based on client IP, allowing the website catalog to automatically display the correct currency to international users.
+- [x] Synchronized and deployed changes to local and remote production OCI VM servers, restarted FastAPI services, and verified dynamic routing with custom test cases.
 
 ## Active Blockers / Next Steps
 
