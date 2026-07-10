@@ -687,20 +687,26 @@ async def add_website_song(request: Request):
         raise HTTPException(status_code=404, detail="songs.json not found")
         
     try:
-        with open(songs_path, "r", encoding="utf-8") as f:
-            songs = json.load(f)
-            
-        # Check if updating existing
-        existing_idx = next((i for i, s in enumerate(songs) if s.get("id") == payload.get("id")), -1)
-        if existing_idx != -1:
-            songs[existing_idx] = payload
-            print(f"[Catalog Update] Updated existing song '{payload.get('title')}'")
+        if isinstance(payload, list):
+            # Frontend sent the entire songs array
+            with open(songs_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, ensure_ascii=False)
+            print(f"[Catalog Update] Overwrote entire catalog list ({len(payload)} songs)")
         else:
-            songs.append(payload)
-            print(f"[Catalog Add] Added new song '{payload.get('title')}'")
-            
-        with open(songs_path, "w", encoding="utf-8") as f:
-            json.dump(songs, f, indent=2, ensure_ascii=False)
+            # Frontend sent a single song object
+            with open(songs_path, "r", encoding="utf-8") as f:
+                songs = json.load(f)
+                
+            existing_idx = next((i for i, s in enumerate(songs) if s.get("id") == payload.get("id")), -1)
+            if existing_idx != -1:
+                songs[existing_idx] = payload
+                print(f"[Catalog Update] Updated existing song '{payload.get('title')}'")
+            else:
+                songs.append(payload)
+                print(f"[Catalog Add] Added new song '{payload.get('title')}'")
+                
+            with open(songs_path, "w", encoding="utf-8") as f:
+                json.dump(songs, f, indent=2, ensure_ascii=False)
             
         threading.Thread(target=run_git_push, daemon=True).start()
         return {"status": "success"}
