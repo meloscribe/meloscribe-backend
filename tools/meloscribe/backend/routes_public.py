@@ -295,7 +295,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         with open(songs_path, "r", encoding="utf-8") as f:
             songs_list = json.load(f)
             
-        song = next((s for s in songs_list if s.get("id") == req.songId), None)
+        song = next((s for s in songs_list if str(s.get("id")) == str(req.songId)), None)
         if not song:
             raise HTTPException(status_code=404, detail="Song not found")
             
