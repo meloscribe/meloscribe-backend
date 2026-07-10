@@ -1335,6 +1335,36 @@ def downvote_suggestion(sug_id: str):
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
+@router.get("/api/public/songs")
+def get_public_songs(request: Request):
+    if platform.system() == "Windows":
+        try:
+            r = requests.get(f"{VM_API_BASE}/api/public/songs", headers=get_proxy_headers(), timeout=5.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+    else:
+        try:
+            songs_path = Path(__file__).resolve().parent / "songs.json"
+            with open(songs_path, "r", encoding="utf-8") as f:
+                songs_list = json.load(f)
+                
+            filtered_songs = [s for s in songs_list if s.get("id") != "global_settings"]
+            currency = get_currency_from_request(request)
+            
+            for song in filtered_songs:
+                price = song.get("price", "")
+                if price and "€" in price:
+                    if currency == "usd":
+                        song["price"] = price.replace("€", "$")
+                    elif currency == "gbp":
+                        song["price"] = price.replace("€", "£")
+                        
+            return JSONResponse(content=filtered_songs)
+        except Exception as e:
+            print(f"[Public Songs] Error: {e}")
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
 # -------------------------------------------------------------------
 # Public Stats (Windows Proxy vs direct SQLite Server handlers)
 # -------------------------------------------------------------------
