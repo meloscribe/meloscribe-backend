@@ -282,6 +282,57 @@ def _send_confirmation_email(email: str, token: str):
         print(f"[Notify] Email send failed: {e}")
         return False
 
+# In-memory cache for IP to currency mappings
+ip_currency_cache = {}
+
+def get_currency_from_country(country: str) -> str:
+    eurozone = {"AT", "BE", "CY", "EE", "FI", "FR", "DE", "GR", "HR", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES"}
+    if country in eurozone:
+        return "eur"
+    elif country == "GB":
+        return "gbp"
+    else:
+        return "usd"
+
+def get_currency_from_request(request: Request) -> str:
+    # 1. Check Cloudflare country header first
+    country = request.headers.get("cf-ipcountry")
+    if country:
+        country = country.upper().strip()
+        print(f"[GeoIP] Resolved country via CF-IPCountry: {country}")
+        return get_currency_from_country(country)
+
+    # 2. Extract real client IP
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    if client_ip:
+        if "," in client_ip:
+            client_ip = client_ip.split(",")[0].strip()
+        
+        # Avoid local/internal IPs
+        if client_ip in ("127.0.0.1", "localhost", "::1") or client_ip.startswith("192.168.") or client_ip.startswith("10."):
+            return "eur"
+
+        # Check in-memory cache
+        global ip_currency_cache
+        if client_ip in ip_currency_cache:
+            return ip_currency_cache[client_ip]
+
+        # Query high-speed GeoIP API
+        try:
+            r = requests.get(f"http://ip-api.com/json/{client_ip}", timeout=1.5)
+            if r.status_code == 200:
+                data = r.json()
+                country = data.get("countryCode", "").upper()
+                if country:
+                    currency = get_currency_from_country(country)
+                    ip_currency_cache[client_ip] = currency
+                    print(f"[GeoIP] Resolved country via API for IP {client_ip}: {country} -> {currency}")
+                    return currency
+        except Exception as e:
+            print(f"[GeoIP] Error resolving IP {client_ip}: {e}")
+
+    return "eur"
+
 # -------------------------------------------------------------------
 # Checkout session & Webhooks
 # -------------------------------------------------------------------
@@ -303,17 +354,12 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             raise HTTPException(status_code=403, detail="Product is no longer available")
             
         price_str = song.get("price", "6 €")
-        currency = "eur"
         if "$" in price_str:
             currency = "usd"
         elif "£" in price_str:
             currency = "gbp"
         else:
-            # Fallback to language-based currency selection
-            if req.language and req.language.lower().startswith("en"):
-                currency = "usd"
-            else:
-                currency = "eur"
+            currency = get_currency_from_request(request)
             
         try:
             digits = re.findall(r"\d+", price_str)
