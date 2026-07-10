@@ -722,8 +722,20 @@ def run_git_push():
             subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
             subprocess.run(["git", "push"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
             print("[Git push] Catalog songs.json successfully pushed to remote repository.")
+            
+            # Synchronize songs.json to production VM via SCP so pricing matches checkouts instantly
+            ssh_key = r"C:\Dev\ssh-key-2026-05-07.key"
+            local_songs = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+            if os.path.exists(ssh_key) and os.path.exists(local_songs):
+                print("[VM Sync] Copying songs.json to production VM backend...")
+                subprocess.run([
+                    "scp", "-i", ssh_key, "-o", "StrictHostKeyChecking=accept-new",
+                    local_songs,
+                    "ubuntu@152.70.23.171:/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json"
+                ], check=True, creationflags=CREATION_FLAGS)
+                print("[VM Sync] Successfully uploaded songs.json to production VM!")
     except Exception as e:
-        print(f"[Git push] Error: {e}")
+        print(f"[Git push / VM Sync] Error: {e}")
 
 def run_deep_asset_cleanup(song_name: str):
     log_error("Deep Cleanup", f"Starting deep cleanup for '{song_name}' assets...")
