@@ -335,7 +335,6 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             quoted_path = urllib.parse.quote(cover_image_path)
             product_image = f"https://meloscribe.dev{quoted_path}"
             
-        import re
         def to_slug(text):
             s = text.lower()
             s = re.sub(r'[^a-z0-9]+', '-', s)
