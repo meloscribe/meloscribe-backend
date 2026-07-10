@@ -687,27 +687,34 @@ def request_download(hash: str, type: str, request: Request):
         
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, download_count, downloaded_types, ip_addresses FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, download_count, downloaded_types, ip_addresses, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
     download_count = 0
     downloaded_types = ""
     ip_addresses = ""
+    status = ""
     
     if row:
         song_name = row[0]
         download_count = row[1]
         downloaded_types = row[2] or ""
         ip_addresses = row[3] or ""
+        status = row[4] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         download_count = 0
+        status = "completed"
         print(f"[Download Request] Sandbox hash '{hash}' resolved to '{song_name}'")
         
     if not song_name:
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    if status in ("inactive", "refunded", "deactivated"):
+        conn.close()
+        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
     if row and not hash.startswith("demo_hash_"):
@@ -725,6 +732,7 @@ def request_download(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
         
+    new_count = download_count
     if row:
         new_count = download_count + 1
         types_list = [t.strip() for t in downloaded_types.split(",") if t.strip()]
@@ -737,7 +745,7 @@ def request_download(hash: str, type: str, request: Request):
     conn.close()
     
     download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
-    return {"download_url": download_file_url, "download_count": download_count}
+    return {"download_url": download_file_url, "download_count": new_count}
 
 @router.get("/api/download/file")
 def download_file(hash: str, type: str, request: Request):
@@ -746,7 +754,7 @@ def download_file(hash: str, type: str, request: Request):
         
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, transaction_id, ip_addresses, buyer_name FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, transaction_id, ip_addresses, buyer_name, status FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     
     song_name = None
@@ -754,6 +762,7 @@ def download_file(hash: str, type: str, request: Request):
     txn_id = None
     ip_addresses = ""
     buyer_name = ""
+    status = ""
     
     if row:
         song_name = row[0]
@@ -761,15 +770,21 @@ def download_file(hash: str, type: str, request: Request):
         txn_id = row[2]
         ip_addresses = row[3] or ""
         buyer_name = row[4] or ""
+        status = row[5] or ""
     elif hash.startswith("demo_hash_"):
         song_name = "Sweetest Rain"
         email = "demo_customer@example.com"
         txn_id = "demo_12345"
         buyer_name = "Jane Doe"
+        status = "completed"
         
     if not song_name:
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
+        
+    if status in ("inactive", "refunded", "deactivated"):
+        conn.close()
+        return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
     if row and not hash.startswith("demo_hash_"):
