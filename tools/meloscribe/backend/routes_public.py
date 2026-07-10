@@ -308,6 +308,12 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             currency = "usd"
         elif "£" in price_str:
             currency = "gbp"
+        else:
+            # Fallback to language-based currency selection
+            if req.language and req.language.lower().startswith("en"):
+                currency = "usd"
+            else:
+                currency = "eur"
             
         try:
             digits = re.findall(r"\d+", price_str)
