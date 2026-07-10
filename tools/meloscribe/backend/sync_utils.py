@@ -21,10 +21,20 @@ def detect_language(title: str) -> str:
     return 'en'
 
 def detect_format(title: str, description: str = "") -> str:
-    """Detect if this is a standard or tutorial video."""
+    """Detect if this is Standard, Tutorial, Easy, Easy Tutorial, or Hook/Teaser."""
     text = f"{title} {description}".lower()
-    if 'slow' in text or 'tutorial' in text or 'synthesia' in text:
+    is_easy = 'easy' in text
+    is_tutorial = 'slow' in text or 'tutorial' in text or 'synthesia' in text
+    is_hook = 'hook' in text or 'teaser' in text or 'preview' in text
+    
+    if is_easy and is_tutorial:
+        return 'Easy Tutorial'
+    elif is_easy:
+        return 'Easy'
+    elif is_tutorial:
         return 'Tutorial'
+    elif is_hook:
+        return 'Hook/Teaser'
     return 'Standard'
 
 def extract_author(title: str, description: str = "") -> str:
