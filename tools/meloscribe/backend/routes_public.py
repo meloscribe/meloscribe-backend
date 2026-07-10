@@ -666,8 +666,8 @@ def get_order_details(hash: str):
     if not row:
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    status = row[4] or ""
-    if status in ("inactive", "refunded", "deactivated"):
+    status_val = (row[4] or "").strip().lower()
+    if "inactive" in status_val or "deactivate" in status_val or "refund" in status_val:
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
     return {
@@ -712,7 +712,8 @@ def request_download(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    if status in ("inactive", "refunded", "deactivated"):
+    status_val = status.strip().lower()
+    if "inactive" in status_val or "deactivate" in status_val or "refund" in status_val:
         conn.close()
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
@@ -782,7 +783,8 @@ def download_file(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "Order not found"}, status_code=404)
         
-    if status in ("inactive", "refunded", "deactivated"):
+    status_val = status.strip().lower()
+    if "inactive" in status_val or "deactivate" in status_val or "refund" in status_val:
         conn.close()
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
