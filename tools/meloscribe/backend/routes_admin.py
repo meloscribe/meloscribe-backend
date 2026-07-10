@@ -1043,6 +1043,7 @@ else:
     def sync_demographics(request: Request):
         verify_admin(request)
         import platform as pf
+        import subprocess
         
         python_exe = str(TOOLS_DIR / "meloscribe" / "backend" / ".venv" / "Scripts" / "python.exe")
         if pf.system() != "Windows":
