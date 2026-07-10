@@ -25,6 +25,9 @@ from shared import (
 
 router = APIRouter()
 
+# In-memory store for tracking unique website visitors per day
+unique_visitors_today = set()
+
 # -------------------------------------------------------------------
 # Pydantic Request Models
 # -------------------------------------------------------------------
@@ -1285,7 +1288,7 @@ def downvote_suggestion(sug_id: str):
 # Public Stats (Windows Proxy vs direct SQLite Server handlers)
 # -------------------------------------------------------------------
 @router.get("/api/public/stats")
-def get_public_stats():
+def get_public_stats(request: Request):
     if platform.system() == "Windows":
         try:
             r = requests.get(f"{VM_API_BASE}/api/public/stats", headers=get_proxy_headers(), timeout=5.0)
@@ -1293,20 +1296,31 @@ def get_public_stats():
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
-        # Increment website views
+        # Increment website views (only for unique daily IP hits)
         try:
-            conn = sqlite3.connect(str(db_path), timeout=30.0)
-            c = conn.cursor()
+            client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
             from datetime import date
             today_str = date.today().isoformat()
-            c.execute("SELECT profile_views FROM channel_insights WHERE platform = ? AND date = ?", ("website", today_str))
-            row = c.fetchone()
-            if row:
-                c.execute("UPDATE channel_insights SET profile_views = profile_views + 1 WHERE platform = ? AND date = ?", ("website", today_str))
-            else:
-                c.execute("INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks) VALUES (?, ?, 0, 1, 0)", ("website", today_str))
-            conn.commit()
-            conn.close()
+            
+            # Housekeep old dates from memory
+            for k in list(unique_visitors_today):
+                if k[1] != today_str:
+                    unique_visitors_today.discard(k)
+            
+            visitor_key = (client_ip, today_str)
+            if visitor_key not in unique_visitors_today:
+                unique_visitors_today.add(visitor_key)
+                
+                conn = sqlite3.connect(str(db_path), timeout=30.0)
+                c = conn.cursor()
+                c.execute("SELECT profile_views FROM channel_insights WHERE platform = ? AND date = ?", ("website", today_str))
+                row = c.fetchone()
+                if row:
+                    c.execute("UPDATE channel_insights SET profile_views = profile_views + 1 WHERE platform = ? AND date = ?", ("website", today_str))
+                else:
+                    c.execute("INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks) VALUES (?, ?, 0, 1, 0)", ("website", today_str))
+                conn.commit()
+                conn.close()
         except Exception as e:
             print(f"[Stats Track] Error logging website visitor views: {e}")
             
