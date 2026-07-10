@@ -673,6 +673,46 @@ else:
             
             cursor.execute("SELECT platform, SUM(views) as views, SUM(likes) as likes, SUM(comments) as comments, SUM(shares) as shares, SUM(saves) as saves FROM videos GROUP BY platform")
             platforms = [dict(r) for r in cursor.fetchall()]
+
+            # Parse time range
+            days_limit = 30
+            if range == "7d":
+                days_limit = 7
+            elif range == "90d":
+                days_limit = 90
+            elif range == "all":
+                days_limit = 9999
+            
+            # Query website views
+            cursor.execute("""
+                SELECT SUM(profile_views) FROM channel_insights 
+                WHERE platform = 'website' AND date >= date('now', ?)
+            """, (f"-{days_limit} days",))
+            row_web = cursor.fetchone()
+            website_views = row_web[0] if (row_web and row_web[0] is not None) else 0
+
+            # Query website conversions / purchases
+            cursor.execute("""
+                SELECT COUNT(*) FROM purchases 
+                WHERE created_at >= date('now', ?)
+            """, (f"-{days_limit} days",))
+            row_purch = cursor.fetchone()
+            website_purchases = row_purch[0] if (row_purch and row_purch[0] is not None) else 0
+
+            # Conversion rate
+            conversion_rate = 0.0
+            if website_views > 0:
+                conversion_rate = round((website_purchases / website_views) * 100, 2)
+
+            # Append website to platforms
+            platforms.append({
+                "platform": "website",
+                "views": website_views,
+                "likes": 0,
+                "comments": 0,
+                "shares": 0,
+                "saves": website_purchases
+            })
             
             has_threads = any(p["platform"].lower() == "threads" for p in platforms)
             if not has_threads:
@@ -771,7 +811,7 @@ else:
             cursor.execute("SELECT snapshot_date as date, platform, SUM(views) as views FROM snapshots GROUP BY snapshot_date, platform ORDER BY snapshot_date ASC")
             snapshot_rows = cursor.fetchall()
             
-            platforms_to_track = ["youtube", "instagram", "tiktok", "facebook", "threads", "pinterest"]
+            platforms_to_track = ["youtube", "instagram", "tiktok", "facebook", "threads", "pinterest", "website"]
             growth_dict = {}
             last_known = {p: 0 for p in platforms_to_track}
             
@@ -783,6 +823,14 @@ else:
                 if dt not in rows_by_date:
                     rows_by_date[dt] = {}
                 rows_by_date[dt][r["platform"].lower()] = r["views"]
+
+            # Load website views per date from channel_insights
+            cursor.execute("SELECT date, profile_views FROM channel_insights WHERE platform = 'website'")
+            for r in cursor.fetchall():
+                dt = r["date"]
+                if dt not in rows_by_date:
+                    rows_by_date[dt] = {}
+                rows_by_date[dt]["website"] = r["profile_views"]
                 
             for dt in dates_sorted:
                 growth_dict[dt] = {"date": dt}
@@ -852,6 +900,34 @@ else:
             
             cursor.execute("SELECT song_name, SUM(amount) as revenue FROM revenue WHERE song_name IS NOT NULL AND song_name != '' GROUP BY song_name ORDER BY revenue DESC LIMIT 10")
             top_selling = [dict(r) for r in cursor.fetchall()]
+
+            # Query locale (language) breakdown
+            cursor.execute("""
+                SELECT locale, COUNT(*) as count 
+                FROM purchases 
+                WHERE created_at >= date('now', ?) AND locale IS NOT NULL AND locale != ''
+                GROUP BY locale
+                ORDER BY count DESC
+            """, (f"-{days_limit} days",))
+            by_locale = [dict(r) for r in cursor.fetchall()]
+
+            # Query currency breakdown
+            cursor.execute("""
+                SELECT currency, COUNT(*) as count, SUM(amount) as total 
+                FROM purchases 
+                WHERE created_at >= date('now', ?) AND currency IS NOT NULL AND currency != ''
+                GROUP BY currency
+                ORDER BY total DESC
+            """, (f"-{days_limit} days",))
+            by_currency = [dict(r) for r in cursor.fetchall()]
+
+            # Query recent sales list
+            cursor.execute("""
+                SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, status
+                FROM purchases 
+                ORDER BY created_at DESC LIMIT 50
+            """)
+            recent_sales = [dict(r) for r in cursor.fetchall()]
 
             cursor.execute("SELECT platform, followers, profile_views, website_clicks FROM channel_insights WHERE date = (SELECT MAX(date) FROM channel_insights)")
             channel = [dict(r) for r in cursor.fetchall()]
@@ -937,7 +1013,10 @@ else:
                     "totalComments": totals["c"] or 0,
                     "totalShares": totals["sh"] or 0,
                     "totalSaves": totals["sa"] or 0,
-                    "totalVideos": totals["cnt"] or 0
+                    "totalVideos": totals["cnt"] or 0,
+                    "websiteViews": website_views,
+                    "websitePurchases": website_purchases,
+                    "conversionRate": conversion_rate
                 },
                 "platformBreakdown": platforms,
                 "songPerformance": songs,
@@ -947,7 +1026,10 @@ else:
                 "revenue": {
                     "total": rev_total,
                     "byMonth": rev_by_month,
-                    "topSelling": top_selling
+                    "topSelling": top_selling,
+                    "byLocale": by_locale,
+                    "byCurrency": by_currency,
+                    "recentSales": recent_sales
                 },
                 "channelInsights": channel,
                 "bestPostingTime": bestPostingTime,
