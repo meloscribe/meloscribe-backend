@@ -316,11 +316,55 @@ def periodic_background_sync():
 # -------------------------------------------------------------------
 # Startup sequence
 # -------------------------------------------------------------------
+def run_automatic_backup():
+    try:
+        from zipfile import ZipFile
+        from datetime import date
+        
+        backups_dir = Path("C:/Dev/meloscribe-app/backups")
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        
+        today = date.today()
+        current_month_prefix = f"meloscribe_backup_{today.year}_{today.month:02d}"
+        
+        # Check if any backup for the current month already exists
+        existing_backups = list(backups_dir.glob(f"{current_month_prefix}*.zip"))
+        if existing_backups:
+            print(f"[Backup] Backup for {today.year}-{today.month:02d} already exists. Skipping.")
+            return
+            
+        backup_filename = f"{current_month_prefix}_{today.day:02d}.zip"
+        backup_zip_path = backups_dir / backup_filename
+        
+        print(f"[Backup] Starting automated monthly backup: {backup_filename}")
+        
+        files_to_backup = [
+            (Path("C:/Dev/meloscribe-app/tools/meloscribe/backend/analytics.db"), "analytics.db"),
+            (Path("C:/Dev/meloscribe-app/tools/meloscribe/backend/settings.json"), "settings.json"),
+            (Path("C:/Dev/meloscribe-app/tools/meloscribe/backend/pinterest_tokens.json"), "pinterest_tokens.json"),
+            (Path("C:/Dev/meloscribe-app/tools/meloscribe/backend/tiktok_tokens.json"), "tiktok_tokens.json"),
+            (Path("C:/Dev/meloscribe-app/tools/meloscribe/backend/ig_tokens.json"), "ig_tokens.json"),
+        ]
+        
+        with ZipFile(backup_zip_path, 'w') as zipf:
+            for filepath, arcname in files_to_backup:
+                if filepath.exists():
+                    zipf.write(filepath, arcname)
+                    print(f"[Backup] Added to archive: {arcname}")
+                    
+        print(f"[Backup] Automated monthly backup completed successfully: {backup_zip_path}")
+    except Exception as e:
+        print(f"[Backup] Warning: Automated backup failed: {e}")
+
 _sync_errors = []
 
 @app.on_event("startup")
 def startup_event():
     initialize_server_api_key()
+    
+    # Run local automatic backup (Windows local environment only)
+    if platform.system() == "Windows":
+        run_automatic_backup()
     
     # DB setup/migration
     try:
