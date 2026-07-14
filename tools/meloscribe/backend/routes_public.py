@@ -1386,7 +1386,10 @@ def get_public_songs(request: Request):
                     elif currency == "gbp":
                         song["price"] = price.replace("€", "£")
                         
-            return JSONResponse(content=filtered_songs)
+            return JSONResponse(
+                content=filtered_songs,
+                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+            )
         except Exception as e:
             print(f"[Public Songs] Error: {e}")
             return JSONResponse(content={"error": str(e)}, status_code=500)
