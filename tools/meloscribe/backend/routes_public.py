@@ -783,9 +783,9 @@ def request_download(hash: str, type: str, request: Request):
             c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
             conn.commit()
             
-    if download_count >= 100:
+    if download_count >= 50:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
         
     new_count = download_count
     if row:

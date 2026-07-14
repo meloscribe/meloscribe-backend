@@ -6,8 +6,9 @@ Living documentation for the meloscribe public API backend (`C:\Dev\meloscribe-b
 **Deployed on:** Oracle Cloud VM — `ubuntu@152.70.23.171`
 **API base:** `https://api.meloscribe.dev`
 
-> Credentials (API keys, R2 secrets, SSH key, Paddle key) are stored exclusively in
+> Credentials (API keys, R2 secrets, SSH key, Stripe keys) are stored exclusively in
 > `C:\Dev\meloscribe_credentials_backup.json` — never in this repo.
+
 
 ---
 
@@ -24,7 +25,8 @@ Uvicorn / FastAPI  (main.py)
     │
     ├── SQLite (analytics.db + purchases table)
     ├── Cloudflare R2 (presigned 15-min download URLs)
-    └── Paddle webhook (purchase verification)
+    └── Stripe webhook (purchase verification)
+
 ```
 
 **Server paths:**
@@ -103,8 +105,8 @@ git add . && git commit -m "..." && git push
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/paddle/webhook` | POST | Receive Paddle purchase events, create `purchases` row, generate `download_hash` |
-| `/order/{hash}` | GET | Serve success page — validates hash, returns presigned R2 download URLs (15 min, max 20 downloads) |
+| `/api/webhooks/stripe` | POST | Receive Stripe purchase events, create `purchases` row, generate `download_hash` |
+| `/order/{hash}` | GET | Serve success page — validates hash, returns presigned R2 download URLs (15 min, max 50 downloads) |
 | `/api/public/songs` | GET | Return dynamically localized `songs.json` catalog (replaces € price symbol with $ or £ based on IP location) |
 | `/api/checkout/create-session` | POST | Generate a Stripe Checkout Session mapped to user's local IP currency (EUR/USD/GBP) |
 | `/api/songs/sync` | POST | Sync song from desktop app upload pipeline |
@@ -120,9 +122,9 @@ git add . && git commit -m "..." && git push
 ## Database Schema (analytics.db)
 
 **`purchases` table** (payment + download tracking):
-- `id`, `paddle_order_id`, `product_id`, `buyer_email`
-- `download_hash` (unique URL token)
-- `download_count` (max 50)
+- `id`, `transaction_id`, `email`, `song_name`, `amount`, `currency`, `status`, `download_hash`, `download_count` (max 50)
+- `downloaded_types`, `locale`, `ip_addresses`, `buyer_name`
+
 - `created_at`
 
 **`notify_subscribers` table** (opt-in email alert list):
@@ -146,11 +148,11 @@ git add . && git commit -m "..." && git push
 - [x] Let's Encrypt SSL certificate + auto-renewal
 - [x] OCI Security List + iptables firewall rules
 - [x] Deploy FastAPI backend via public GitHub repo
-- [x] Paddle webhook endpoint + purchase recording
+- [x] Stripe webhook endpoint + purchase recording
 - [x] Cloudflare R2 presigned download URL generation (15 min, max 50 hits)
 - [x] SQLite WAL mode + connection timeout to prevent locking under concurrent load
 - [x] `download_hash` + `download_count` + `downloaded_types` columns migrated into `purchases` table
-- [x] Inject R2 credentials + Paddle API key into server `settings.json`
+- [x] Inject R2 credentials + Stripe API keys into server `settings.json`
 - [x] Separated backend into public repo (clean history — no credentials ever committed)
 - [x] Added `notify_subscribers` table migration to `db_setup.py`
 - [x] Implemented Double Opt-In subscription email system (`/api/notify/*` endpoints) using Resend API
@@ -158,7 +160,8 @@ git add . && git commit -m "..." && git push
 - [x] Implemented unique file downloaded types tracking to prevent double count decrements on duplicate downloads
 - [x] Applied brand gradient header styling to delivery emails with a solid cyan fallback
 - [x] Reduced default download limit from 100 to 50 hits, added informative help tooltips, and routed support mailto links to info@meloscribe.dev
-- [x] Updated Paddle webhook refund processing to handle adjustment.created and adjustment.updated events, setting the purchase status specifically to 'refunded'
+- [x] Updated Stripe webhook refund processing to handle charge/refund events, setting the purchase status specifically to 'refunded'
+
 - [x] Cleaned up public backend .gitignore to ensure token, credential, and settings files are strictly ignored and never exposed
 - [x] Updated get_preview_video endpoint to dynamically check and stream lightweight preview video files ([Song]_preview.mp4) from Cloudflare R2 bucket with full video fallback
 - [x] Implemented direct download button flow for free ($0.00) songs, bypassing Stripe payment screen on the website
@@ -171,6 +174,7 @@ git add . && git commit -m "..." && git push
 
 ## Active Blockers / Next Steps
 
-- **BLOCKED — Paddle Domain Verification abgelehnt**: Paddle Dashboard zeigt "Action required" für meloscribe.dev. Kein Live-Webhook-Test möglich bis Support-Ticket (sellers@paddle.com) gelöst ist. Klärung: Anforderungen für Domain-Freischaltung + undokumentierter 10%-Flat-Fee-Tarif.
-- End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification will be tested once production domain verification is approved. Preview video R2 streaming logic is fully functional.
+- Keine aktiven Blockaden. Das Payment-Gateway wurde am 2. Juli vollständig auf Stripe Checkout (redirects via FastAPI-Sessions) migriert. Die Domain-Verifizierung läuft fehlerfrei.
+- End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification is active. Preview video R2 streaming logic is fully functional.
+
 

@@ -68,6 +68,8 @@ tools/meloscribe/backend/*secrets*.json
 tools/meloscribe/backend/*client_secret*.json
 tools/meloscribe/backend/*cookie*.txt
 tools/meloscribe/backend/settings.json
+tools/meloscribe/backend/api_key.txt
+api_key.txt
 
 # Debug / temp exports
 tools/meloscribe/backend/*.csv
