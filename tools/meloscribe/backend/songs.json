@@ -199,13 +199,13 @@
     "title": "God Rest Ye Merry",
     "artist": "Traditional",
     "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "price": "Free",
+    "kofiId": "price_1TsjrTL8a9dEAmWsFbLFdMSh",
     "stripePriceId": "pri_01kwap86sgh9wg86me8sek8xxa",
-    "theme": "cold",
+    "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
     "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
-    "kofiId": "prod_dummy123"
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "theme": "cold"
   },
   {
     "id": "19",
@@ -326,5 +326,31 @@
     "audioPreviewUrl": "/audio-previews/Believer.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "theme": "warm"
+  },
+  {
+    "id": "54",
+    "title": "I don't know",
+    "artist": "Erika",
+    "difficulty": "Original",
+    "price": "Free",
+    "kofiId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
+    "stripePriceId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
+    "coverImage": "/covers/I don't know_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/I don't know.mp3",
+    "gradient": "from-purple-500/20 via-dark-700 to-purple-500/5",
+    "theme": "violet"
+  },
+  {
+    "id": "55",
+    "title": "I don't know",
+    "artist": "Erika",
+    "difficulty": "Easy",
+    "price": "Free",
+    "kofiId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
+    "stripePriceId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
+    "coverImage": "/covers/I don't know_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/I don't know.mp3",
+    "gradient": "from-purple-500/20 via-dark-700 to-purple-500/5",
+    "theme": "violet"
   }
 ]

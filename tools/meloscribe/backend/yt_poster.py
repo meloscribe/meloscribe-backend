@@ -72,6 +72,12 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
     if not tags:
         tags = ["piano", "music", "synthesia", "keysight", "tutorial"]
 
+    # Clean title and description of disallowed angle brackets (< and >)
+    if title:
+        title = title.replace("->", "→").replace("<", "").replace(">", "")
+    if description:
+        description = description.replace("->", "→").replace("<", "").replace(">", "")
+
     is_short = (format == "viral_part")
     # Shorts: title must contain #Shorts for discoverability
     if is_short and "#Shorts" not in title:

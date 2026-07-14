@@ -29,6 +29,16 @@ model = genai.GenerativeModel('models/gemini-2.5-flash')
 
 DB_PATH = Path(__file__).parent / "analytics.db"
 
+def get_settings():
+    try:
+        for p in (Path(__file__).parent / "settings.json", Path(__file__).parent.parent / "settings.json"):
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    return json.load(f)
+    except Exception:
+        pass
+    return {}
+
 def fetch_recent_data():
     """Fetch the most critical data from the last 14 days and overall top metrics."""
     conn = sqlite3.connect(DB_PATH)
@@ -83,6 +93,72 @@ def fetch_recent_data():
     except Exception as e:
         print(f"[AI Agent] Failed to fetch channel insights: {e}")
         
+    # --- Live remote metrics retrieval in local mode (Windows) ---
+    import platform
+    import urllib.request
+    import urllib.error
+    if platform.system() == "Windows":
+        settings = get_settings()
+        api_key = settings.get("server_api_key")
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        if api_key:
+            headers['X-Meloscribe-Key'] = api_key
+            
+        try:
+            req = urllib.request.Request(
+                "https://api.meloscribe.dev/api/analytics?range=30d",
+                headers=headers
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                remote_analytics = json.loads(response.read().decode('utf-8'))
+                if "platformBreakdown" in remote_analytics:
+                    remote_insights = []
+                    for pb in remote_analytics["platformBreakdown"]:
+                        remote_insights.append({
+                            "platform": pb.get("platform"),
+                            "followers": pb.get("followers", 0) or pb.get("likes", 0),
+                            "profile_views": pb.get("views", 0),
+                            "website_clicks": pb.get("saves", 0),
+                            "date": datetime.date.today().isoformat() if hasattr(datetime, 'date') else datetime.datetime.now().date().isoformat()
+                        })
+                    if remote_insights:
+                        channel_insights = remote_insights
+                if "totals" in remote_analytics and remote_analytics["totals"]:
+                    t_views = remote_analytics["totals"].get("v")
+                    if t_views is not None:
+                        total_views = t_views
+        except Exception as err:
+            print(f"[AI Agent] Warning: Failed to fetch live analytics from VM: {err}")
+            
+        try:
+            req = urllib.request.Request(
+                "https://api.meloscribe.dev/api/paddle/sales",
+                headers=headers
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as response:
+                sales = json.loads(response.read().decode('utf-8'))
+                if isinstance(sales, list):
+                    song_sales = {}
+                    total_rev = 0.0
+                    for sale in sales:
+                        s_name = sale.get("song_name") or "Unknown"
+                        amt = float(sale.get("amount") or 0.0)
+                        total_rev += amt
+                        if s_name not in song_sales:
+                            song_sales[s_name] = {"song_name": s_name, "sales_count": 0, "total_sales": 0.0}
+                        song_sales[s_name]["sales_count"] += 1
+                        song_sales[s_name]["total_sales"] += amt
+                    
+                    purchases_stats = list(song_sales.values())
+                    revenue_summary = {
+                        "total_amount": total_rev,
+                        "transactions_count": len(sales)
+                    }
+        except Exception as err:
+            print(f"[AI Agent] Warning: Failed to fetch live sales from VM: {err}")
+
     conn.close()
     return {
         "total_lifetime_views": total_views,

@@ -73,8 +73,7 @@ def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id:
     import io
     from pypdf import PdfReader, PdfWriter
     try:
-        name_part = f"{buyer_name} " if buyer_name else ""
-        text = f"Licensed to: {name_part}({email}) | Order #{transaction_id}"
+        text = f"Licensed to: {buyer_name} ({email})" if buyer_name else f"Licensed to: {email}"
         
         watermark_pdf_stream = generate_watermark_page(text)
         watermark_reader = PdfReader(watermark_pdf_stream)
@@ -393,6 +392,10 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             s = re.sub(r'(^-|-$)', '', s)
             return s
 
+        song_name_meta = song.get("title")
+        if req.difficulty == "Easy":
+            song_name_meta = f"{song_name_meta} Easy"
+
         session = stripe.checkout.Session.create(
             mode="payment",
             line_items=[{
@@ -412,7 +415,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
             metadata={
-                "song_title": song.get("title"),
+                "song_title": song_name_meta,
                 "download_hash": download_hash,
                 "locale": req.language
             }
@@ -456,7 +459,12 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 payload, sig_header, webhook_secret
             )
         else:
-            log_webhook("[Stripe Webhook] WARNING: stripe_webhook_secret not set. Proceeding without signature verification.")
+            if platform.system() != "Windows":
+                # Enforce signature verification on production server
+                log_webhook("[Stripe Webhook] ERROR: stripe_webhook_secret is missing. Aborting payload handling.")
+                return JSONResponse(status_code=400, content={"error": "Stripe Webhook Secret not configured."})
+                
+            log_webhook("[Stripe Webhook] WARNING: stripe_webhook_secret not set. Proceeding without signature verification (Development).")
             event = stripe.Event.construct_from(json.loads(payload.decode('utf-8')), stripe.api_key)
         log_webhook(f"Signature verified successfully. Event type: {event.type}")
     except Exception as e:
@@ -783,9 +791,9 @@ def request_download(hash: str, type: str, request: Request):
             c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
             conn.commit()
             
-    if download_count >= 50:
+    if download_count >= 100:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
         
     new_count = download_count
     if row:
@@ -1011,10 +1019,16 @@ def verify_download(checkout_id: str):
 # E-Mail Opt-in (double opt-in)
 # -------------------------------------------------------------------
 @router.post("/api/notify/subscribe")
-async def notify_subscribe(req: NotifySubscribeRequest):
+async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
     email = req.email.strip().lower()
     if not email or "@" not in email or "." not in email.split("@")[-1]:
         return JSONResponse(content={"error": "Invalid email address."}, status_code=400)
+        
+    if platform.system() != "Windows":
+        # Rate limit check on server: 5 subscription requests per hour
+        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        if is_rate_limited(client_ip, "notify_subscribe", 5, 3600):
+            return JSONResponse(content={"error": "Too many subscription attempts. Please wait a while."}, status_code=429)
     
     token = uuid.uuid4().hex
     
@@ -1253,7 +1267,7 @@ def get_suggestions():
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/public/suggestions")
-def create_suggestion(sug: NewSuggestion):
+def create_suggestion(sug: NewSuggestion, request: Request):
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/suggestions", json=sug.dict(), headers=get_proxy_headers(), timeout=5.0)
@@ -1261,6 +1275,10 @@ def create_suggestion(sug: NewSuggestion):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
+        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        if is_rate_limited(client_ip, "create_suggestion", 5, 3600):
+            return JSONResponse(content={"error": "Too many requests. Please wait before suggesting more songs."}, status_code=429)
+            
         import uuid
         from datetime import datetime
         sug_id = str(uuid.uuid4())
@@ -1286,7 +1304,7 @@ def create_suggestion(sug: NewSuggestion):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/public/suggestions/{sug_id}/vote")
-def upvote_suggestion(sug_id: str):
+def upvote_suggestion(sug_id: str, request: Request):
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/vote", headers=get_proxy_headers(), timeout=5.0)
@@ -1294,6 +1312,10 @@ def upvote_suggestion(sug_id: str):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
+        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        if is_rate_limited(client_ip, f"vote_{sug_id}", 20, 600):
+            return JSONResponse(content={"error": "Too many votes. Please wait a few minutes."}, status_code=429)
+            
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
@@ -1311,7 +1333,7 @@ def upvote_suggestion(sug_id: str):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/public/suggestions/{sug_id}/unvote")
-def downvote_suggestion(sug_id: str):
+def downvote_suggestion(sug_id: str, request: Request):
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/unvote", headers=get_proxy_headers(), timeout=5.0)
@@ -1319,6 +1341,10 @@ def downvote_suggestion(sug_id: str):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
+        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        if is_rate_limited(client_ip, f"vote_{sug_id}", 20, 600):
+            return JSONResponse(content={"error": "Too many votes. Please wait a few minutes."}, status_code=429)
+            
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
@@ -1495,15 +1521,39 @@ def get_preview_video(song_name: str):
             config=boto3.session.Config(signature_version='s3v4')
         )
 
-        file_key = f"{clean_name}/{clean_name}_preview.mp4"
+        # Determine format of the song from catalog to decide file key type
+        format_mode = "full_arrangement"
+        songs_path = Path(__file__).resolve().parent / "songs.json"
+        if not songs_path.exists():
+            songs_path = Path(r"c:\Dev\meloscribe-frontend\website\src\data\songs.json")
+        if songs_path.exists():
+            try:
+                with open(songs_path, "r", encoding="utf-8") as f:
+                    catalog = json.load(f)
+                    for s in catalog:
+                        title = s.get("title", "")
+                        slug = s.get("id", "")
+                        if title.lower() == clean_name.lower() or slug.lower() == clean_name.lower():
+                            format_mode = s.get("format", "full_arrangement")
+                            break
+            except Exception as e:
+                print(f"Error reading format from catalog: {e}")
+
+        if format_mode == "viral_part":
+            file_key = f"{clean_name}/{clean_name}.mp4"
+        else:
+            file_key = f"{clean_name}/{clean_name}_preview.mp4"
+
         try:
             s3.head_object(Bucket=r2_bucket, Key=file_key)
         except Exception:
-            file_key = f"{clean_name}/{clean_name}.mp4"
+            # Fallback check if the preferred file key doesn't exist
+            alt_key = f"{clean_name}/{clean_name}_preview.mp4" if format_mode == "viral_part" else f"{clean_name}/{clean_name}.mp4"
             try:
-                s3.head_object(Bucket=r2_bucket, Key=file_key)
+                s3.head_object(Bucket=r2_bucket, Key=alt_key)
+                file_key = alt_key
             except Exception as head_err:
-                print(f"[Preview Video] Video key '{file_key}' not found in R2 bucket '{r2_bucket}'.")
+                print(f"[Preview Video] Video key '{file_key}' (nor '{alt_key}') not found in R2 bucket '{r2_bucket}'.")
                 return JSONResponse(content={"error": f"Preview video '{file_key}' not found in R2"}, status_code=404)
 
         presigned_url = s3.generate_presigned_url(
@@ -1542,10 +1592,34 @@ def stream_preview_video(song_name: str, request: Request):
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
         def get_local_video(name):
-            local_path = f"/home/ubuntu/meloscribe/Scores/{name}_preview.mp4"
-            if os.path.exists(local_path):
-                print(f"[Preview Video] Serving local file: {local_path}")
-                return FileResponse(local_path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
+            # Check format first
+            format_mode = "full_arrangement"
+            songs_path = Path(__file__).resolve().parent / "songs.json"
+            if not songs_path.exists():
+                songs_path = Path(r"c:\Dev\meloscribe-frontend\website\src\data\songs.json")
+            if songs_path.exists():
+                try:
+                    with open(songs_path, "r", encoding="utf-8") as f:
+                        catalog = json.load(f)
+                        for s in catalog:
+                            title = s.get("title", "")
+                            slug = s.get("id", "")
+                            if title.lower() == name.lower() or slug.lower() == name.lower():
+                                format_mode = s.get("format", "full_arrangement")
+                                break
+                except:
+                    pass
+            
+            paths_to_try = []
+            if format_mode == "viral_part":
+                paths_to_try = [f"/home/ubuntu/meloscribe/Scores/{name}.mp4", f"/home/ubuntu/meloscribe/Scores/{name}_preview.mp4"]
+            else:
+                paths_to_try = [f"/home/ubuntu/meloscribe/Scores/{name}_preview.mp4", f"/home/ubuntu/meloscribe/Scores/{name}.mp4"]
+                
+            for local_path in paths_to_try:
+                if os.path.exists(local_path):
+                    print(f"[Preview Video] Serving local file: {local_path}")
+                    return FileResponse(local_path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
             return None
 
         res = get_preview_video(song_name)
@@ -1759,7 +1833,12 @@ def public_free_download_internal(song_id: str, type: str, request: Request):
     if not is_free:
         return JSONResponse(content={"error": "This song is not free"}, status_code=403)
 
-    song_name = target_song.get("title")
+    song_title = target_song.get("title")
+    difficulty = target_song.get("difficulty", "Original")
+    if difficulty == "Easy":
+        song_name = f"{song_title} Easy"
+    else:
+        song_name = song_title
 
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
     r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
@@ -1844,6 +1923,17 @@ def oauth_callback(code: str, state: str = "fb"):
     conn.close()
     
     print(f"[OAuth Callback] Successfully captured code for state '{state}': {code[:15]}...")
+    
+    # Forward the callback to localhost:8080 (e.g. for TikTok/Pinterest local auth)
+    # so that background setup scripts can receive the code
+    try:
+        forward_url = f"http://localhost:8080/?code={code}"
+        if state:
+            forward_url += f"&state={state}"
+        requests.get(forward_url, timeout=2)
+        print(f"[OAuth Callback] Successfully forwarded code to {forward_url}")
+    except Exception as e:
+        print(f"[OAuth Callback] Forwarding to localhost:8080 failed/skipped: {e}")
     
     return HTMLResponse(content=f"""
 <!DOCTYPE html>

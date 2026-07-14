@@ -18,14 +18,40 @@ import http.server
 import requests
 from pathlib import Path
 
+import sys
+# Custom logging redirection to a file in tools/meloscribe/backend/tiktok_setup_debug.log
+class DualLogger:
+    def __init__(self, filename):
+        self.terminal = sys.stdout
+        try:
+            self.log = open(filename, "a", encoding="utf-8")
+        except Exception:
+            self.log = None
+    def write(self, message):
+        self.terminal.write(message)
+        if self.log:
+            self.log.write(message)
+            self.log.flush()
+    def flush(self):
+        self.terminal.flush()
+        if self.log:
+            self.log.flush()
+
+try:
+    log_path = Path(__file__).parent / "tiktok_setup_debug.log"
+    sys.stdout = DualLogger(log_path)
+    sys.stderr = DualLogger(log_path)
+except Exception as e:
+    print(f"Failed to setup dual logger: {e}")
+
 # -------------------------------------------------------
 NGROK_EXE      = Path(__file__).parent.parent.parent / "ngrok" / "ngrok.exe"
 NGROK_DOMAIN   = "wooing-encrust-ladle.ngrok-free.dev"   # Permanent static domain
-CLIENT_KEY     = "sbawwonaqqe71vhfgd"
+CLIENT_KEY     = "sbawllqdpf3yk6g8kh"
 CLIENT_SECRET  = ""
 LOCAL_PORT     = 8080
 REDIRECT_URI   = f"https://{NGROK_DOMAIN}/callback"      # Never changes
-SCOPES         = "user.info.basic,video.list"
+SCOPES         = "user.info.basic,video.list,video.upload"
 TOKENS_PATH    = Path(__file__).parent / "tiktok_tokens.json"
 TOKEN_URL      = "https://open.tiktokapis.com/v2/oauth/token/"
 AUTH_BASE      = "https://www.tiktok.com/v2/auth/authorize/"
@@ -76,21 +102,45 @@ def _start_ngrok():
     return proc
 
 
-def run_setup():
+LAST_AUTH_URL = None
+
+def run_setup(force=False, open_browser=True, start_ngrok=True):
+    import os
     if TOKENS_PATH.exists():
-        print(f"[Setup] Tokens already exist — delete tiktok_tokens.json to re-authorize.")
-        return
+        if force:
+            try:
+                os.remove(str(TOKENS_PATH))
+                print("[Setup] Deleted existing tiktok_tokens.json for re-authorization.")
+            except Exception as e:
+                print(f"[Setup] Warning: Could not delete tiktok_tokens.json: {e}")
+        else:
+            print(f"[Setup] Tokens already exist — delete tiktok_tokens.json to re-authorize.")
+            return
+
+    # 1. Generate PKCE and build auth URL immediately so client can fetch it
+    code_verifier, code_challenge = _generate_pkce()
+    auth_url = AUTH_BASE + "?" + urllib.parse.urlencode({
+        "client_key":            CLIENT_KEY,
+        "response_type":         "code",
+        "scope":                 SCOPES,
+        "redirect_uri":          REDIRECT_URI,
+        "state":                 "meloscribe",
+        "code_challenge":        code_challenge,
+        "code_challenge_method": "S256",
+    })
+
+    global LAST_AUTH_URL
+    LAST_AUTH_URL = auth_url
 
     print(f"\n{'='*60}")
     print(f"Redirect URI (already registered in TikTok portal):")
     print(f"  {REDIRECT_URI}")
     print(f"{'='*60}\n")
 
-    # 1. Start ngrok with static domain
-    ngrok_proc = _start_ngrok()
-
-    # 2. Generate PKCE
-    code_verifier, code_challenge = _generate_pkce()
+    # 2. Start ngrok with static domain
+    ngrok_proc = None
+    if start_ngrok:
+        ngrok_proc = _start_ngrok()
     captured = {}
 
     # 3. Start local callback server
@@ -119,26 +169,19 @@ def run_setup():
     server_thread.daemon = True
     server_thread.start()
 
-    # 4. Build auth URL and open browser
-    auth_url = AUTH_BASE + "?" + urllib.parse.urlencode({
-        "client_key":            CLIENT_KEY,
-        "response_type":         "code",
-        "scope":                 SCOPES,
-        "redirect_uri":          REDIRECT_URI,
-        "state":                 "meloscribe",
-        "code_challenge":        code_challenge,
-        "code_challenge_method": "S256",
-    })
-
-    print("[Setup] Opening TikTok login in browser...")
-    webbrowser.open(auth_url)
+    if open_browser:
+        print("[Setup] Opening TikTok login in browser...")
+        webbrowser.open(auth_url)
+    else:
+        print("[Setup] Skipping backend browser open, URL will be returned to client.")
     print("[Setup] Waiting for you to log in (max 120s)...")
 
     server_thread.join(timeout=120)
 
     if "code" not in captured:
         print("[Setup] ERROR: No code received within 120 seconds.")
-        ngrok_proc.terminate()
+        if ngrok_proc:
+            ngrok_proc.terminate()
         return
 
     code = captured["code"]
@@ -154,8 +197,9 @@ def run_setup():
         "code_verifier": code_verifier,
     }, headers={"Content-Type": "application/x-www-form-urlencoded"})
 
-    ngrok_proc.terminate()
-    print("[ngrok] Tunnel closed.")
+    if ngrok_proc:
+        ngrok_proc.terminate()
+        print("[ngrok] Tunnel closed.")
 
     if resp.status_code != 200:
         print(f"[Setup] Token exchange failed: {resp.status_code} — {resp.text}")

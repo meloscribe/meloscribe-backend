@@ -28,11 +28,21 @@ def sync_pinterest():
     
     # 1. Fetch user account profile
     try:
+        url = "https://api.pinterest.com/v5/user_account"
         resp = requests.get(
-            "https://api.pinterest.com/v5/user_account",
+            url,
             headers={"Authorization": f"Bearer {access_token}"},
             timeout=10
         )
+        if resp.status_code == 403 and "use API Sandbox" in resp.text:
+            print("[Pinterest Sync] App is in Trial mode. Retrying with Pinterest Sandbox API...")
+            url = "https://api-sandbox.pinterest.com/v5/user_account"
+            resp = requests.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10
+            )
+
         if resp.status_code == 200:
             data = resp.json()
             followers = int(data.get("follower_count", 0))

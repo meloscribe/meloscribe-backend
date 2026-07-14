@@ -226,13 +226,16 @@ def tiktok_status():
 
 @router.post("/api/tiktok/authorize")
 def tiktok_authorize():
+    import sys
+    if "tiktok_setup" in sys.modules:
+        del sys.modules["tiktok_setup"]
     import importlib.util
-    auth_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_auth.py")
-    spec = importlib.util.spec_from_file_location("tiktok_auth", auth_path)
+    setup_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_setup.py")
+    spec = importlib.util.spec_from_file_location("tiktok_setup", setup_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     
-    threading.Thread(target=mod.run_initial_auth, args=(False,), daemon=True).start()
+    threading.Thread(target=mod.run_setup, kwargs={"force": True, "open_browser": False}, daemon=True).start()
     
     import time
     time.sleep(0.5)
@@ -624,6 +627,10 @@ def pinterest_status():
         url = "https://api.pinterest.com/v5/user_account"
         headers = {"Authorization": f"Bearer {access_token}"}
         resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 403 and "use API Sandbox" in resp.text:
+            url = "https://api-sandbox.pinterest.com/v5/user_account"
+            resp = requests.get(url, headers=headers, timeout=5)
+
         if resp.status_code == 200:
             data = resp.json()
             return {

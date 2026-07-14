@@ -27,10 +27,10 @@ def _generate_pkce():
     return code_verifier, code_challenge
 
 # -------------------------------------------------------
-CLIENT_KEY    = "sbawwonaqqe71vhfgd"
+CLIENT_KEY    = "sbawllqdpf3yk6g8kh"
 CLIENT_SECRET = ""
 REDIRECT_URI  = "https://wooing-encrust-ladle.ngrok-free.dev/callback"  # Static domain
-SCOPES        = "user.info.basic,video.list"
+SCOPES        = "user.info.basic,video.list,video.upload"
 TOKENS_PATH   = Path(__file__).parent / "tiktok_tokens.json"
 
 TOKEN_URL  = "https://open.tiktokapis.com/v2/oauth/token/"
@@ -47,7 +47,9 @@ try:
         CLIENT_SECRET = str(_settings.get("tiktok_client_secret"))
 except Exception:
     pass
-# -------------------------------------------------------
+LAST_AUTH_URL = None
+
+
 
 
 def _load_tokens() -> dict | None:
@@ -141,7 +143,7 @@ def _open_browser(url: str):
     webbrowser.open(url)
     print("[Auth] Opened browser via system default webbrowser module")
 
-def run_initial_auth():
+def run_initial_auth(open_browser=True):
     """
     Opens the browser for the TikTok authorization.
     Starts a local HTTP server to capture the callback code.
@@ -184,8 +186,14 @@ def run_initial_auth():
         })
     )
 
-    print(f"[TikTok] Opening browser for authorization...")
-    _open_browser(auth_url)
+    global LAST_AUTH_URL
+    LAST_AUTH_URL = auth_url
+    
+    if open_browser:
+        print(f"[TikTok] Opening browser for authorization...")
+        _open_browser(auth_url)
+    else:
+        print(f"[TikTok] Skipping backend browser open, URL will be returned to client.")
 
     print("[TikTok] Waiting for callback (max 120s)...")
     server_thread.join(timeout=120)

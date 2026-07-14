@@ -217,24 +217,14 @@ def init_db():
         amount         REAL,
         currency       TEXT,
         status         TEXT,
-        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        download_hash  TEXT,
-        download_count INTEGER DEFAULT 0,
-        downloaded_types TEXT DEFAULT '',
-        locale         TEXT DEFAULT 'en',
-        ip_addresses   TEXT DEFAULT '',
-        buyer_name     TEXT DEFAULT ''
+        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
 
-    # Migrate: add download_hash, download_count, downloaded_types, locale, ip_addresses, and buyer_name to purchases
+    # Migrate: add download_hash and download_count to purchases
     for col, coltype in [
         ('download_hash', 'TEXT'),
-        ('download_count', 'INTEGER DEFAULT 0'),
-        ('downloaded_types', "TEXT DEFAULT ''"),
-        ('locale', "TEXT DEFAULT 'en'"),
-        ('ip_addresses', "TEXT DEFAULT ''"),
-        ('buyer_name', "TEXT DEFAULT ''")
+        ('download_count', 'INTEGER DEFAULT 0')
     ]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
@@ -264,16 +254,6 @@ def init_db():
     )
     ''')
 
-    # ── DOWNLOAD IP LOG (rolling IP tracking to prevent sharing) ──────────────
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS download_ip_log (
-        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-        purchase_hash  TEXT,
-        ip_address     TEXT,
-        created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    ''')
-
     # ── RATE LIMITS (shared-state SQLite backend for workers) ──────────────────
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS rate_limits (
@@ -288,7 +268,6 @@ def init_db():
     except Exception:
         pass
 
-    # ── BATCH INGEST QUEUE ────────────────────────────────────────────────────
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS batch_ingest_queue (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,10 +279,20 @@ def init_db():
         difficulty      TEXT,
         status          TEXT DEFAULT 'initialized',
         error_message   TEXT,
+        hook_start      REAL,
+        hook_end        REAL,
+        progress        REAL DEFAULT 0.0,
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         processed_at    TIMESTAMP
     )
     ''')
+
+    # Migrate existing databases: add columns if not present
+    for col in ('hook_start', 'hook_end', 'progress'):
+        try:
+            cursor.execute(f'ALTER TABLE batch_ingest_queue ADD COLUMN {col} REAL DEFAULT 0.0')
+        except Exception:
+            pass  # Column already exists
 
     conn.commit()
     conn.close()

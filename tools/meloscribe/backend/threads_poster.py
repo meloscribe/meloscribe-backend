@@ -60,23 +60,52 @@ def refresh_token():
 def _upload_to_temp_host(video_path: str) -> str | None:
     """Upload video to a temporary file hosting service and return public URL."""
     print(f"[Threads] Uploading video to temporary host...")
+    
+    # 1. Try file.io
     try:
+        print("[Threads] Trying file.io...")
         with open(video_path, "rb") as f:
             resp = requests.post(
                 "https://file.io",
                 files={"file": (os.path.basename(video_path), f, "video/mp4")},
-                data={"expires": "1h"}  # Auto-delete after 1 hour
+                data={"expires": "1h"},
+                timeout=120
             )
         if resp.status_code == 200 and resp.json().get("success"):
             url = resp.json().get("link")
-            print(f"[Threads] Video uploaded: {url}")
+            print(f"[Threads] Video uploaded to file.io: {url}")
             return url
         else:
-            print(f"[Threads] Upload failed: {resp.text[:200]}")
-            return None
+            print(f"[Threads] file.io upload failed: {resp.text[:200]}")
     except Exception as e:
-        print(f"[Threads] Upload error: {e}")
-        return None
+        print(f"[Threads] file.io upload error: {e}")
+
+    # 2. Fallback to tmpfiles.org
+    try:
+        print("[Threads] Fallback: Trying tmpfiles.org...")
+        with open(video_path, "rb") as f:
+            resp = requests.post(
+                "https://tmpfiles.org/api/v1/upload",
+                files={"file": f},
+                timeout=120
+            )
+        if resp.status_code == 200:
+            data = resp.json()
+            if data.get("status") == "success":
+                view_url = data["data"]["url"]
+                # Convert view URL to direct download URL (needed for Threads)
+                # e.g., https://tmpfiles.org/w2w91vvJZUIL/morph.txt -> https://tmpfiles.org/dl/w2w91vvJZUIL/morph.txt
+                direct_url = view_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                print(f"[Threads] Video uploaded to tmpfiles.org: {direct_url}")
+                return direct_url
+            else:
+                print(f"[Threads] tmpfiles.org upload failed: {data}")
+        else:
+            print(f"[Threads] tmpfiles.org HTTP failed: {resp.status_code} - {resp.text[:200]}")
+    except Exception as e:
+        print(f"[Threads] tmpfiles.org fallback error: {e}")
+
+    return None
 
 
 def post_video(video_path: str, caption: str) -> bool:

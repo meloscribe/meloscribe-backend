@@ -58,11 +58,14 @@ class WorkflowRequest(BaseModel):
     enableMetronome: bool = True
     enablePortraitAddon: bool = True
     timesig: str = "auto"
+    metro_offset: float = 0.0
     scheduleDate: str = ""
     scheduleTime: str = "16:00"
     phase: int = 1
     resumeFromStep: int = 0
     paddle_product_id: str = ""
+    hook_start: float = 0.0
+    hook_end: float = 60.0
 
 process_lock = threading.Lock()
 captured_youtube_urls: dict[str, str] = {}
@@ -100,6 +103,15 @@ async def run_tool(cmd: list[str], label: str = ""):
         for line in iter(active_workflow_task["current_process"].stdout.readline, ""):
             if active_workflow_task["stop_requested"]:
                 break
+            
+            # Write to persistent log file
+            try:
+                log_file = Path(__file__).resolve().parent / "backend_logs.txt"
+                with open(log_file, "a", encoding="utf-8") as lf:
+                    lf.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{label}] {line}")
+            except Exception:
+                pass
+
             asyncio.run_coroutine_threadsafe(
                 manager.broadcast({"type": "log", "message": line.rstrip()}),
                 loop,
@@ -141,6 +153,7 @@ async def run_tool(cmd: list[str], label: str = ""):
 # One-Click Rendering Pipeline background thread
 # -------------------------------------------------------------------
 async def _run_workflow(req: WorkflowRequest):
+    active_workflow_task["stop_requested"] = False  # Reset lock!
     python = sys.executable
     song = req.song
     author = req.author
@@ -175,82 +188,111 @@ async def _run_workflow(req: WorkflowRequest):
     easy_dir = Path(cakewalk_dir) / easy_folder_name
 
     steps = []
-    if req.phase == 1:
-        if req.enableVisualizerNormal:
-            cmd = [python, "-u", "keysight_bot.py", "--song", song, "--theme", req.theme]
-            steps.append((cmd, "Render Keysight (Original Version)"))
-            
-            cmd_hb = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song}.mp4")]
-            steps.append((cmd_hb, "Compress Original Video (Normal Speed)"))
-            
-            cmd_hb_slow = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} slow.mp4")]
-            steps.append((cmd_hb_slow, "Compress Original Video (Slow Speed)"))
+    versions = [("", song)]
+    if has_easy:
+        versions.append((" Easy", f"{song} Easy"))
 
-        if has_easy and req.enableVisualizerTutorial:
-            cmd = [python, "-u", "keysight_bot.py", "--song", f"{song} Easy", "--theme", req.theme]
-            steps.append((cmd, "Render Keysight (Easy Version)"))
-            
-            cmd_hb_easy = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} Easy.mp4")]
-            steps.append((cmd_hb_easy, "Compress Easy Video (Normal Speed)"))
-            
-            cmd_hb_easy_slow = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} Easy slow.mp4")]
-            steps.append((cmd_hb_easy_slow, "Compress Easy Video (Slow Speed)"))
-            
-    elif req.phase == 2:
-        zoom_val = str(req.zoom)
-        shift_val = str(req.shift)
+    # --- Phase 1: Ingest & Render Keysight ---
+    for suffix, folder_name in versions:
+        v_song = f"{song}{suffix}"
+        cmd = [python, "-u", "musescore_launcher.py", "--song", v_song, "--author", author, "--no_wait"]
+        steps.append((cmd, f"Launch MuseScore Layout ({v_song})"))
+
+    # --- Step 1: Render Keysight & Compress ---
+    cmd = [python, "-u", "keysight_bot.py", "--song", song, "--theme", req.theme]
+    steps.append((cmd, "Render Keysight (Original Version)"))
+    
+    cmd_hb = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song}.mp4")]
+    steps.append((cmd_hb, "Compress Original Video (Normal Speed)"))
+    
+    cmd_hb_slow = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} slow.mp4")]
+    steps.append((cmd_hb_slow, "Compress Original Video (Slow Speed)"))
+
+    if has_easy:
+        cmd = [python, "-u", "keysight_bot.py", "--song", f"{song} Easy", "--theme", req.theme]
+        steps.append((cmd, "Render Keysight (Easy Version)"))
         
-        versions = [("", song)]
-        if has_easy:
-            versions.append((" Easy", f"{song} Easy"))
+        cmd_hb_easy = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} Easy.mp4")]
+        steps.append((cmd_hb_easy, "Compress Easy Video (Normal Speed)"))
+        
+        cmd_hb_easy_slow = [python, "-u", "handbrake_bot.py", "--input", str(Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song} Easy slow.mp4")]
+        steps.append((cmd_hb_easy_slow, "Compress Easy Video (Slow Speed)"))
 
-        keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
-        for suffix, folder_name in versions:
-            v_song = f"{song}{suffix}"
-            for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
-                vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
-                midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
-                
-                cmd_portrait = [
+    # --- Step 2: Wait for MuseScore PDF Sheets ---
+    steps.append(("WAIT_FOR_PDF", "Wait for MuseScore PDF Sheets"))
+
+    # --- Phase 2: Portrait Video & Uploads ---
+    zoom_val = str(req.zoom)
+    shift_val = str(req.shift)
+    
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+
+    for suffix, folder_name in versions:
+        v_song = f"{song}{suffix}"
+        for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
+            vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
+            midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
+            
+            cmd_portrait = [
+                python, "-u", "video_generator.py",
+                "--video", vid_in, "--title", v_song, "--author", author,
+                "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
+                "--midipath", midi_path, "--theme", req.theme
+            ]
+            if vtype == "tutorial":
+                cmd_portrait.append("--metronome")
+                if req.metro_offset:
+                    cmd_portrait.extend(["--metro_offset", str(req.metro_offset)])
+            if req.enablePortraitAddon:
+                cmd_portrait.append("--use_portrait_addon")
+            if has_easy:
+                cmd_portrait.append("--has_easy")
+            if (vtype == "normal" and req.enableVisualizerNormal) or (vtype == "tutorial" and req.enableVisualizerTutorial):
+                cmd_portrait.append("--visualizer")
+            steps.append((cmd_portrait, f"Generate Portrait Video ({v_song}{prefix})"))
+
+            if req.format == "full_arrangement":
+                cmd_wide = [
                     python, "-u", "video_generator.py",
                     "--video", vid_in, "--title", v_song, "--author", author,
                     "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
-                    "--midipath", midi_path, "--theme", req.theme
+                    "--midipath", midi_path, "--theme", req.theme, "--wide"
                 ]
-                if req.enablePortraitAddon:
-                    cmd_portrait.append("--use_portrait_addon")
-                steps.append((cmd_portrait, f"Generate Portrait Video ({v_song}{prefix})"))
+                if vtype == "tutorial":
+                    cmd_wide.append("--metronome")
+                    if req.metro_offset:
+                        cmd_wide.extend(["--metro_offset", str(req.metro_offset)])
+                if (vtype == "normal" and req.enableVisualizerNormal) or (vtype == "tutorial" and req.enableVisualizerTutorial):
+                    cmd_wide.append("--visualizer")
+                steps.append((cmd_wide, f"Generate Widescreen Video ({v_song}{prefix})"))
 
-                if req.format == "full_arrangement":
-                    cmd_wide = [
-                        python, "-u", "video_generator.py",
-                        "--video", vid_in, "--title", v_song, "--author", author,
-                        "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
-                        "--midipath", midi_path, "--theme", req.theme, "--wide"
-                    ]
-                    steps.append((cmd_wide, f"Generate Widescreen Video ({v_song}{prefix})"))
+    for suffix, folder_name in versions:
+        v_song = f"{song}{suffix}"
+        cmd = [python, "-u", "cover_generator.py", "--song", v_song, "--author", author, "--theme", req.theme]
+        steps.append((cmd, f"Generate Cover Art ({v_song})"))
 
+    if req.doR2:
         for suffix, folder_name in versions:
             v_song = f"{song}{suffix}"
-            cmd = [python, "-u", "cover_generator.py", "--song", v_song, "--author", author, "--theme", req.theme]
-            steps.append((cmd, f"Generate Cover Art ({v_song})"))
+            cmd = [
+                python, "-u", "upload_bot.py",
+                "--song", v_song,
+                "--author", author,
+                "--mode", "r2",
+                "--format", req.format,
+                "--hook_start", str(req.hook_start),
+                "--hook_end", str(req.hook_end)
+            ]
+            if req.metro_offset:
+                cmd.extend(["--metro_offset", str(req.metro_offset)])
+            steps.append((cmd, f"Cloudflare R2 Upload ({v_song})"))
 
+    if req.localUpload:
+        # Local website catalog sync
         for suffix, folder_name in versions:
             v_song = f"{song}{suffix}"
-            cmd = [python, "-u", "musescore_launcher.py", "--song", v_song, "--author", author]
-            steps.append((cmd, f"Launch MuseScore Layout ({v_song})"))
-
-        if req.doR2:
-            for suffix, folder_name in versions:
-                v_song = f"{song}{suffix}"
-                cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--author", author, "--mode", "r2", "--format", req.format]
-                steps.append((cmd, f"Cloudflare R2 Upload ({v_song})"))
-
-        if req.localUpload:
-            for suffix, folder_name in versions:
-                v_song = f"{song}{suffix}"
-                cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
-                steps.append((cmd, f"Local Catalog Sync ({v_song})"))
+            cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
+            steps.append((cmd, f"Local Catalog Sync ({v_song})"))
 
         socials = []
         if req.doYoutube: socials.append("youtube")
@@ -260,11 +302,117 @@ async def _run_workflow(req: WorkflowRequest):
         if req.doThreads: socials.append("threads")
         if req.doPinterest: socials.append("pinterest")
 
-        for platform in socials:
-            cmd = [python, "-u", "upload_bot.py", "--song", song, "--author", author, "--mode", platform, "--format", req.format]
-            if req.scheduleDate:
-                cmd.extend(["--schedule_date", req.scheduleDate, "--schedule_time", req.scheduleTime])
-            steps.append((cmd, f"Social Upload ({platform})"))
+        if socials:
+            from datetime import datetime as dt, timedelta
+            interval_days = int(settings.get("schedule_interval_days", 3))
+            
+            start_date_str = req.scheduleDate
+            start_time_str = req.scheduleTime or "16:00"
+            
+            try:
+                current_date = dt.fromisoformat(start_date_str)
+            except Exception:
+                current_date = dt.now()
+            
+            # Build social videos queue based on 5-video-split-strategy
+            social_videos = []
+            if req.format == "full_arrangement":
+                # V1: Teaser (Hook)
+                social_videos.append((song, "hook", "Teaser"))
+                # V2: Normal Speed Original
+                social_videos.append((song, "normal", "Normal Speed Original"))
+                # V3: Slow Speed Original (Tutorial)
+                social_videos.append((song, "tutorial", "Slow Speed Original"))
+                if has_easy:
+                    # V4: Normal Speed Easy
+                    social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
+                    # V5: Slow Speed Easy (Tutorial)
+                    social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
+            else: # viral_part (Teaser is not needed as video is already short)
+                # V1: Normal Speed Original
+                social_videos.append((song, "normal", "Normal Speed Original"))
+                # V2: Slow Speed Original (Tutorial)
+                social_videos.append((song, "tutorial", "Slow Speed Original"))
+                if has_easy:
+                    # V3: Normal Speed Easy
+                    social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
+                    # V4: Slow Speed Easy (Tutorial)
+                    social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
+            
+            # Add steps for each video version, with each step scheduled with the proper date spacing
+            for v_idx, (v_song, profile, label) in enumerate(social_videos):
+                plat_date = current_date + timedelta(days=v_idx * interval_days)
+                plat_date_str = plat_date.date().isoformat()
+                
+                for platform in socials:
+                    cmd = [
+                        python, "-u", "upload_bot.py",
+                        "--song", v_song,
+                        "--author", author,
+                        "--mode", platform,
+                        "--profile", profile,
+                        "--format", req.format
+                    ]
+                    if req.scheduleDate:
+                        cmd.extend(["--schedule_date", plat_date_str, "--schedule_time", start_time_str])
+                    steps.append((cmd, f"Social Upload ({platform} - {label})"))
+
+        if req.doKofi:
+            # Original Ko-Fi Upload step
+            cmd = [
+                python, "-u", "upload_bot.py",
+                "--song", song,
+                "--mode", "kofi",
+                "--price", req.price,
+                "--format", req.format
+            ]
+            steps.append((cmd, f"Ko-Fi Upload ({song})"))
+            
+            # Easy Ko-Fi Upload step
+            if has_easy:
+                cmd = [
+                    python, "-u", "upload_bot.py",
+                    "--song", f"{song} Easy",
+                    "--mode", "kofi",
+                    "--price", req.price,
+                    "--format", req.format
+                ]
+                steps.append((cmd, f"Ko-Fi Upload ({song} Easy)"))
+    else:
+        # Server-side upload (localUpload is False)
+        # Always run local catalog sync so local files are updated
+        for suffix, folder_name in versions:
+            v_song = f"{song}{suffix}"
+            cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
+            steps.append((cmd, f"Local Catalog Sync ({v_song})"))
+
+        socials = []
+        if req.doYoutube: socials.append("youtube")
+        if req.doInstagram: socials.append("instagram")
+        if req.doFacebook: socials.append("facebook")
+        if req.doTiktok: socials.append("tiktok")
+        if req.doThreads: socials.append("threads")
+        if req.doPinterest: socials.append("pinterest")
+
+        server_platforms = list(socials)
+        if req.doKofi:
+            server_platforms.append("kofi")
+            
+        if server_platforms:
+            start_time_str = req.scheduleTime or "16:00"
+            cmd = [
+                python, "-u", "stage_to_server.py",
+                "--song", song,
+                "--author", author,
+                "--price", req.price,
+                "--schedule_date", req.scheduleDate or "",
+                "--schedule_time", start_time_str,
+                "--platforms", ",".join(server_platforms),
+                "--format", req.format
+            ]
+            if has_easy:
+                cmd.append("--has_easy")
+            steps.append((cmd, f"Stage to Oracle VM Server ({song})"))
 
     total = len(steps)
     if total == 0:
@@ -273,11 +421,43 @@ async def _run_workflow(req: WorkflowRequest):
 
     start_idx = max(0, req.resumeFromStep)
     for i in range(start_idx, total):
+        while active_workflow_task.get("pause_requested", False) and not active_workflow_task["stop_requested"]:
+            await asyncio.sleep(0.5)
+
         if active_workflow_task["stop_requested"]:
             await manager.broadcast({"type": "done", "message": "⏹️ Workflow stopped by user."})
             return
 
         cmd, label = steps[i]
+        if cmd == "WAIT_FOR_PDF":
+            musescore_dir = Path(settings.get("musescore_dir", r"C:\Dev\meloscribe\Scores"))
+            expected_files = [musescore_dir / f"{song}.pdf"]
+            if has_easy:
+                expected_files.append(musescore_dir / f"{song} Easy.pdf")
+
+            await manager.broadcast({"type": "status", "message": f"Waiting for MuseScore PDF exports in Scores/ directory..."})
+            await manager.broadcast({"type": "progress", "value": i / total})
+            
+            while not active_workflow_task["stop_requested"]:
+                missing = [f.name for f in expected_files if not f.exists()]
+                if not missing:
+                    await manager.broadcast({"type": "log", "message": "✅ Found all expected PDF files! Continuing workflow..."})
+                    break
+                
+                await manager.broadcast({"type": "status", "message": f"⏳ Waiting for: {', '.join(missing)}..."})
+                await asyncio.sleep(2)
+            
+            if active_workflow_task["stop_requested"]:
+                return
+            continue
+
+        platform = None
+        if "Social Upload (" in label:
+            try:
+                platform = label.split("Social Upload (")[1].split(" - ")[0].split(")")[0].strip()
+            except Exception:
+                pass
+
         if label.startswith("Social Upload (pinterest)"):
             try:
                 tokens_path = Path(__file__).resolve().parent / "pinterest_tokens.json"
@@ -329,7 +509,8 @@ async def _run_workflow(req: WorkflowRequest):
             return
 
     await manager.broadcast({"type": "progress", "value": 1.0})
-    await manager.broadcast({"type": "done", "message": "🎉 Workflow completed!"})
+    done_msg = "🎉 Automation Workflow completed successfully! All files are rendered, packaged, uploaded, and synced!"
+    await manager.broadcast({"type": "done", "message": done_msg})
 
 # -------------------------------------------------------------------
 # Batch queue worker logic
@@ -374,10 +555,18 @@ def batch_processor_worker():
             should_abort_queue = False
             try:
                 has_easy = (difficulty == "both")
-                steps = []
-                
+                versions = [("", song_name)]
+                if has_easy:
+                    versions.append((" Easy", f"{song_name} Easy"))
+                    
+                # MuseScore launcher first
+                for suffix, folder_name in versions:
+                    v_song = f"{song_name}{suffix}"
+                    steps.append([python, "-u", str(TOOLS_DIR / "musescore_launcher.py"), "--song", v_song, "--author", author])
+
                 # Original Render
                 steps.append([python, "-u", str(TOOLS_DIR / "keysight_bot.py"), "--song", song_name, "--theme", theme])
+
                 # Compression (Original Normal)
                 normal_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name}.mp4"
                 steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(normal_vid)])
@@ -395,9 +584,7 @@ def batch_processor_worker():
                     easy_slow_vid = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")) / f"{song_name} Easy slow.mp4"
                     steps.append([python, "-u", str(TOOLS_DIR / "handbrake_bot.py"), "--input", str(easy_slow_vid)])
                     
-                versions = [("", song_name)]
-                if has_easy:
-                    versions.append((" Easy", f"{song_name} Easy"))
+
                     
                 zoom_val = "1.50"
                 shift_val = "0"
@@ -413,24 +600,32 @@ def batch_processor_worker():
                             python, "-u", str(TOOLS_DIR / "video_generator.py"),
                             "--video", vid_in, "--title", v_song, "--author", author,
                             "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
-                            "--midipath", midi_path, "--theme", theme, "--use_portrait_addon"
+                            "--midipath", midi_path, "--theme", theme, "--use_portrait_addon",
+                            "--force"
                         ]
+                        if vtype == "tutorial":
+                            cmd_portrait.append("--metronome")
+                        if has_easy:
+                            cmd_portrait.append("--has_easy")
                         steps.append(cmd_portrait)
+
                         
                         if fmt == "full_arrangement":
                             cmd_widescreen = [
                                 python, "-u", str(TOOLS_DIR / "video_generator.py"),
                                 "--video", vid_in, "--title", v_song, "--author", author,
                                 "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
-                                "--midipath", midi_path, "--theme", theme, "--wide"
+                                "--midipath", midi_path, "--theme", theme, "--wide",
+                                "--force"
                             ]
+                            if vtype == "tutorial":
+                                cmd_widescreen.append("--metronome")
                             steps.append(cmd_widescreen)
                             
                     # Cover Generator
                     steps.append([python, "-u", str(TOOLS_DIR / "cover_generator.py"), "--song", v_song, "--author", author, "--theme", theme])
-                    # MuseScore launcher
-                    steps.append([python, "-u", str(TOOLS_DIR / "musescore_launcher.py"), "--song", v_song, "--author", author])
                     # R2 Upload
+
                     steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2", "--format", fmt])
                     # Catalog sync
                     steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website", "--author", author])
@@ -451,9 +646,10 @@ def batch_processor_worker():
                     cmd_str = " ".join(cmd)
                     is_interactive = "keysight_bot.py" in cmd_str or "musescore_launcher.py" in cmd_str
                     if sys.platform == "win32":
-                        creation_flags = subprocess.CREATE_NEW_CONSOLE if is_interactive else subprocess.CREATE_NO_WINDOW
+                        creation_flags = subprocess.CREATE_NO_WINDOW
                     else:
                         creation_flags = 0
+
                         
                     if is_interactive:
                         res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=creation_flags)
@@ -476,7 +672,7 @@ def batch_processor_worker():
                             stdout_lines.append(line)
                             if line.startswith("PROGRESS:"):
                                 try:
-                                    pct = int(line.split(":")[1].replace("%", "").strip())
+                                    pct = int(line.split(":")[1].replace("%", "").strip().split("(")[0].strip())
                                     sub_progress = min(base_progress + int(pct / total_steps), 100)
                                     conn = sqlite3.connect(str(db_path), timeout=30.0)
                                     c = conn.cursor()
@@ -504,6 +700,8 @@ def batch_processor_worker():
                     conn.commit()
                     conn.close()
                     log_error(f"[Batch Worker] Successfully processed '{song_name}'")
+                    # Trigger git push & VM sync automatically to publish the updated catalog/covers
+                    threading.Thread(target=run_git_push, daemon=True).start()
                 else:
                     conn = sqlite3.connect(str(db_path), timeout=30.0)
                     c = conn.cursor()
@@ -531,9 +729,24 @@ def batch_processor_worker():
 # -------------------------------------------------------------------
 # REST Endpoints
 # -------------------------------------------------------------------
+async def _run_workflow_safe(req: WorkflowRequest):
+    try:
+        await _run_workflow(req)
+    except Exception as err:
+        import traceback
+        tb = traceback.format_exc()
+        print(f"[Workflow Error] {tb}")
+        try:
+            await manager.broadcast({"type": "status", "message": f"❌ Error: {str(err)}"})
+            await manager.broadcast({"type": "log", "message": f"CRITICAL WORKFLOW EXCEPTION:\n{tb}"})
+            await manager.broadcast({"type": "done", "message": f"❌ Workflow failed: {str(err)}"})
+        except Exception:
+            pass
+
 @router.post("/api/workflow/start")
 async def start_workflow(req: WorkflowRequest):
-    asyncio.create_task(_run_workflow(req))
+    active_workflow_task["stop_requested"] = False  # Reset lock!
+    asyncio.create_task(_run_workflow_safe(req))
     return {"status": "started"}
 
 @router.post("/api/workflow/stop")
@@ -542,12 +755,51 @@ def stop_workflow():
     proc = active_workflow_task["current_process"]
     if proc:
         try:
+            # If suspended, resume first so it can terminate properly
+            import psutil
+            try:
+                p = psutil.Process(proc.pid)
+                p.resume()
+                for child in p.children(recursive=True):
+                    child.resume()
+            except:
+                pass
             subprocess.Popen(f"taskkill /F /T /PID {proc.pid}", shell=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              creationflags=CREATION_FLAGS)
         except Exception:
             pass
     return {"status": "stop requested"}
+
+@router.post("/api/workflow/pause")
+def pause_workflow():
+    active_workflow_task["pause_requested"] = True
+    proc = active_workflow_task["current_process"]
+    if proc:
+        try:
+            import psutil
+            p = psutil.Process(proc.pid)
+            p.suspend()
+            for child in p.children(recursive=True):
+                child.suspend()
+        except Exception as e:
+            print(f"[Workflow] Error suspending process: {e}")
+    return {"status": "paused"}
+
+@router.post("/api/workflow/resume")
+def resume_workflow():
+    active_workflow_task["pause_requested"] = False
+    proc = active_workflow_task["current_process"]
+    if proc:
+        try:
+            import psutil
+            p = psutil.Process(proc.pid)
+            p.resume()
+            for child in p.children(recursive=True):
+                child.resume()
+        except Exception as e:
+            print(f"[Workflow] Error resuming process: {e}")
+    return {"status": "resumed"}
 
 @router.post("/api/module/{module}")
 def run_individual_module(module: str, req: dict):
@@ -766,9 +1018,9 @@ def run_deep_asset_cleanup(song_name: str):
             
     # 3. Cloudflare R2 Assets
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if r2_account_id and r2_access_key and r2_secret_key:
         try:
@@ -799,6 +1051,18 @@ def run_deep_asset_cleanup(song_name: str):
         except Exception as e:
             log_error("Deep Cleanup", f"Cloudflare R2 API deletion failed: {e}")
             
+    # 4. Ingest Queue DB Cleanup
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("DELETE FROM batch_ingest_queue WHERE song_name = ?", (song_name,))
+        c.execute("DELETE FROM batch_ingest_queue WHERE song_name = ?", (f"{song_name} Easy",))
+        conn.commit()
+        conn.close()
+        log_error("Deep Cleanup", f"Deleted '{song_name}' and variant from batch_ingest_queue.")
+    except Exception as e:
+        log_error("Deep Cleanup", f"Failed to delete queue entries: {e}")
+        
     log_error("Deep Cleanup", f"Deep cleanup for '{song_name}' completed successfully.")
 
 # -------------------------------------------------------------------
@@ -871,7 +1135,139 @@ async def batch_initialize(
         raise HTTPException(status_code=500, detail=f"Database or filesystem error: {str(e)}")
 
     conn.close()
-    return {"status": "success", "initialized": initialized_songs}
+class InitializeExistingRequest(BaseModel):
+    songName: str
+    author: str = "Traditional"
+    theme: str = "warm"
+    price: str = "6.00"
+    format: str = "full_arrangement"
+    difficulty: str = "Original"
+
+@router.post("/api/batch/initialize-existing")
+def initialize_existing_song(req: InitializeExistingRequest):
+    song_name = req.songName.strip()
+    author = req.author.strip()
+    theme = req.theme.strip()
+    price = req.price.strip()
+    fmt = req.format.strip()
+    difficulty = req.difficulty.strip().lower()
+
+    cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
+    song_dir = Path(cakewalk_dir) / song_name
+
+    # Verify the MIDI file exists in project directory
+    midi_path = song_dir / f"{song_name}.mid"
+    if not midi_path.exists():
+        mid_files = list(song_dir.glob("*.mid"))
+        if mid_files:
+            midi_path = mid_files[0]
+        else:
+            raise HTTPException(status_code=400, detail=f"No MIDI file found in Cakewalk project directory: {song_dir}")
+
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute(
+            """
+            INSERT OR REPLACE INTO batch_ingest_queue 
+            (song_name, author, theme, price, format, difficulty, status, error_message, processed_at, progress)
+            VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL, 0)
+            """,
+            (song_name, author, theme, price, fmt, difficulty)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    return {"status": "success", "songName": song_name}
+
+class UpdateMetadataRequest(BaseModel):
+    songName: str
+    author: str
+    theme: str
+    price: str
+    format: str
+    difficulty: str
+
+@router.post("/api/batch/update-metadata")
+def update_batch_metadata(req: UpdateMetadataRequest):
+    song_name = req.songName.strip()
+    author = req.author.strip()
+    theme = req.theme.strip()
+    price = req.price.strip()
+    fmt = req.format.strip()
+    difficulty = req.difficulty.strip().lower()
+
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute(
+            """
+            UPDATE batch_ingest_queue 
+            SET author = ?, theme = ?, price = ?, format = ?, difficulty = ?
+            WHERE song_name = ?
+            """,
+            (author, theme, price, fmt, difficulty, song_name)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    return {"status": "success", "songName": song_name}
+
+@router.get("/api/batch/scan-cakewalk")
+def scan_cakewalk_songs():
+    """
+    Scan the Cakewalk Projects directory and return all detected song names.
+    A valid song folder must contain at least one .mid file matching the folder name.
+    """
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    if not cakewalk_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Cakewalk directory not found: {cakewalk_dir}")
+
+    IGNORED_FOLDERS = {"_archive", "_backup", "_legacy", "test", "template"}
+    songs = []
+
+    try:
+        for folder in sorted(cakewalk_dir.iterdir()):
+            if not folder.is_dir():
+                continue
+            name = folder.name
+            if name.lower().startswith("_") or name.lower() in IGNORED_FOLDERS:
+                continue
+            # Check if folder contains a .mid file (any name)
+            mid_files = list(folder.glob("*.mid"))
+            if not mid_files:
+                continue
+            # Check queue status
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=10.0)
+                c = conn.cursor()
+                c.execute("SELECT status FROM batch_ingest_queue WHERE song_name = ?", (name,))
+                row = c.fetchone()
+                conn.close()
+                queue_status = row[0] if row else None
+            except Exception:
+                queue_status = None
+
+            # Check if Keysight exports exist
+            keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+            has_normal_video = (keysight_dir / f"{name}.mp4").exists()
+            has_slow_video   = (keysight_dir / f"{name} slow.mp4").exists()
+
+            songs.append({
+                "name": name,
+                "queueStatus": queue_status,
+                "hasNormalVideo": has_normal_video,
+                "hasSlowVideo": has_slow_video,
+                "midiFiles": [m.name for m in mid_files],
+            })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error scanning Cakewalk directory: {str(e)}")
+
+    return {"songs": songs, "total": len(songs), "cakewalkDir": str(cakewalk_dir)}
 
 @router.get("/api/batch/queue")
 def get_batch_queue():
@@ -1059,6 +1455,23 @@ async def regenerate_preview(req: dict):
             pass
         return 2560, 1440
 
+    def get_video_duration(video_path):
+        import subprocess as _sp
+        import sys
+        try:
+            cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                   '-of', 'default=noprint_wrappers=1:nokey=1', str(video_path)]
+            creation_flags = 0x08000000 if sys.platform == "win32" else 0
+            res = _sp.run(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, text=True, encoding='utf-8', errors='replace', creationflags=creation_flags)
+            return float(res.stdout.strip())
+        except Exception:
+            return 60.0
+
+    duration = get_video_duration(source)
+    half_duration = max(10.0, duration / 2.0)
+    fade_start = half_duration - 3.0
+    text_fade_start = half_duration - 2.0
+
     width, height = get_video_dimensions(source)
     title_size = int(width * 0.05)
     artist_size = int(width * 0.024)
@@ -1075,29 +1488,40 @@ async def regenerate_preview(req: dict):
     
     title_txt = os.path.join(temp_dir, f"_title_{uid}.txt")
     artist_txt = os.path.join(temp_dir, f"_artist_{uid}.txt")
+    endscreen_txt = os.path.join(temp_dir, f"_endscreen_{uid}.txt")
     
     with open(title_txt, "w", encoding="utf-8") as f:
         f.write(song_name)
     with open(artist_txt, "w", encoding="utf-8") as f:
         f.write(author)
+    with open(endscreen_txt, "w", encoding="utf-8") as f:
+        f.write("Unlock full Sheets & MIDI below")
         
     title_txt_esc = escape_path_for_ffmpeg(title_txt)
     artist_txt_esc = escape_path_for_ffmpeg(artist_txt)
+    endscreen_txt_esc = escape_path_for_ffmpeg(endscreen_txt)
     
     filter_complex = (
-        f"[0:v]drawtext=fontfile='{font_title_esc}':textfile='{title_txt_esc}':fontcolor=white:fontsize={title_size}"
+        f"[0:v]fade=type=out:start_time={fade_start}:duration=1.0:color=black[v_fade]; "
+        f"[v_fade]drawtext=fontfile='{font_title_esc}':textfile='{title_txt_esc}':fontcolor=white:fontsize={title_size}"
         f":x=(w-text_w)/2:y=(h/2)-{int(height*0.06)}:shadowcolor=black@0.6:shadowx=4:shadowy=4"
         f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'[v1]; "
         
         f"[v1]drawtext=fontfile='{font_artist_esc}':textfile='{artist_txt_esc}':fontcolor=white:fontsize={artist_size}"
         f":x=(w-text_w)/2:y=(h/2)+{int(height*0.05)}:shadowcolor=black@0.6:shadowx=3:shadowy=3"
-        f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'"
+        f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'[v2]; "
+        
+        f"[v2]drawtext=fontfile='{font_title_esc}':textfile='{endscreen_txt_esc}':fontcolor=white:fontsize={int(width*0.038)}"
+        f":x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.6:shadowx=3:shadowy=3"
+        f":alpha='if(lt(t,{text_fade_start}),0,min(1,(t-{text_fade_start})/0.5))'"
     )
     
     cmd = [
         "ffmpeg", "-y",
+        "-to", f"{half_duration:.2f}",
         "-i", str(source),
         "-filter_complex", filter_complex,
+        "-af", f"afade=type=out:start_time={fade_start}:duration=3.0",
         "-c:v", "libx264", "-preset", "fast", "-crf", "28",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
@@ -1109,6 +1533,7 @@ async def regenerate_preview(req: dict):
     try:
         os.remove(title_txt)
         os.remove(artist_txt)
+        os.remove(endscreen_txt)
     except Exception:
         pass
     

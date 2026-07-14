@@ -90,16 +90,7 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
-    @router.post("/api/demographics/sync")
-    def sync_local_demographics(request: Request):
-        try:
-            headers = get_proxy_headers()
-            if "x-admin-passcode" in request.headers:
-                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
-            r = requests.post(f"{VM_API_BASE}/api/demographics/sync", headers=headers, timeout=180.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
-        except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
 
     @router.get("/api/todos")
     def get_local_todos(request: Request):
@@ -494,21 +485,39 @@ if platform.system() == "Windows":
                                 staged_files[song_name][category].append(filename)
                 
                 for item in queue_data:
-                    song = item.get("song")
+                    song = item.get("song") or ""
                     mode = item.get("mode")
                     profile = item.get("profile")
                     item_files = []
                     
-                    if song in staged_files:
-                        song_data = staged_files[song]
+                    base_song = song
+                    if base_song.lower().endswith(" easy"):
+                        base_song = base_song[:-5].strip()
+                    elif base_song.lower().endswith(" teaser"):
+                        base_song = base_song[:-7].strip()
+                        
+                    if base_song in staged_files:
+                        song_data = staged_files[base_song]
                         if mode == "kofi":
                             item_files = song_data.get("packages", [])
                         else:
                             videos = song_data.get("tiktoks", [])
-                            if profile == "tutorial":
-                                item_files = [f for f in videos if "slow" in f.lower()]
+                            is_easy = song.lower().endswith(" easy")
+                            
+                            # Filter videos matching 'easy' status of the song
+                            filtered_videos = videos
+                            if is_easy:
+                                filtered_videos = [f for f in filtered_videos if "easy" in f.lower()]
                             else:
-                                item_files = [f for f in videos if "slow" not in f.lower()]
+                                filtered_videos = [f for f in filtered_videos if "easy" not in f.lower()]
+                                
+                            # Filter by profile type
+                            if profile == "tutorial":
+                                item_files = [f for f in filtered_videos if "slow" in f.lower()]
+                            elif profile == "teaser" or profile == "hook":
+                                item_files = [f for f in filtered_videos if "teaser" in f.lower() or "hook" in f.lower()]
+                            else:
+                                item_files = [f for f in filtered_videos if "slow" not in f.lower() and "teaser" not in f.lower() and "hook" not in f.lower()]
                     
                     item["files"] = item_files
                     

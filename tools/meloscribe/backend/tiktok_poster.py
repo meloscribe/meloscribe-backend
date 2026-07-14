@@ -16,7 +16,7 @@ try:
 except ImportError:
     from tiktok_auth import get_valid_token
 
-INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
 
 def get_video_duration_ms(video_path: str) -> int:
     try:
@@ -31,7 +31,7 @@ def get_video_duration_ms(video_path: str) -> int:
 
 def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE") -> bool:
     """
-    Uploads an MP4 video to TikTok using the Direct Post API.
+    Uploads an MP4 video to TikTok inbox/drafts.
     Uses chunked file upload to bypass timeouts.
     """
     if not os.path.exists(video_path):
@@ -52,7 +52,11 @@ def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE")
     if chunk_size > file_size:
         chunk_size = file_size
 
-    total_chunks = (file_size + chunk_size - 1) // chunk_size
+    # TikTok expects total_chunk_count to be floor(file_size / chunk_size).
+    # Except if that is 0 (for small files), it must be at least 1.
+    total_chunks = file_size // chunk_size
+    if total_chunks == 0:
+        total_chunks = 1
 
     print(f"\n[TikTok API] Initializing Upload for '{os.path.basename(video_path)}'")
     print(f"             Size: {file_size / (1024*1024):.2f} MB | Chunks: {total_chunks}")
@@ -114,7 +118,10 @@ def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE")
             
             # Read chunk
             f.seek(start_byte)
-            chunk_data = f.read(chunk_size)
+            if chunk_idx == total_chunks - 1:
+                chunk_data = f.read() # Read all remaining bytes
+            else:
+                chunk_data = f.read(chunk_size)
             end_byte = start_byte + len(chunk_data) - 1
 
             put_headers = {

@@ -11,6 +11,7 @@ from ig_sync import sync_instagram
 from tiktok_sync import sync_tiktok
 from fb_sync import sync_facebook
 from threads_sync import sync_threads
+from pinterest_sync import sync_pinterest
 
 def run_all_syncs():
     print("=== Starting Global Social Media Analytics Sync ===")
@@ -44,6 +45,12 @@ def run_all_syncs():
         sync_threads()
     except Exception as e:
         print(f"[ERROR] Threads sync failed: {e}")
+        
+    # 6. Pinterest
+    try:
+        sync_pinterest()
+    except Exception as e:
+        print(f"[ERROR] Pinterest sync failed: {e}")
         
     print("=== Sync Complete ===")
 
