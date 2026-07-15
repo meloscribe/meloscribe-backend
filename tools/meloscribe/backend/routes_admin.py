@@ -563,6 +563,34 @@ if platform.system() == "Windows":
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    @router.post("/api/server/queue/{task_id}/toggle-status")
+    def toggle_server_task_status(task_id: int):
+        import subprocess
+        key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+        server_ip = "152.70.23.171"
+        if not os.path.exists(key_path):
+            return {"status": "error", "message": f"SSH Key not found at {key_path}"}
+            
+        ssh_cmd = f"sqlite3 /home/ubuntu/meloscribe/queue.db \"UPDATE upload_queue SET status = CASE WHEN status = 'disabled' THEN 'pending' ELSE 'disabled' END WHERE id = {task_id} AND status IN ('pending', 'failed', 'disabled');\""
+        cmd = [
+            "ssh", "-i", key_path, 
+            "-o", "StrictHostKeyChecking=accept-new", 
+            "-o", "ConnectTimeout=5", 
+            "-o", "IdentitiesOnly=yes", 
+            f"ubuntu@{server_ip}", 
+            ssh_cmd
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12, creationflags=CREATION_FLAGS)
+            if res.returncode == 0:
+                return {"status": "success", "message": "Task status toggled successfully."}
+            else:
+                return {"status": "error", "message": f"Action failed: {res.stderr or res.stdout}"}
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "message": "Connection timed out"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
     @router.delete("/api/server/queue/{task_id}")
     def delete_server_task(task_id: int):
         import subprocess
