@@ -783,6 +783,60 @@ if platform.system() == "Windows":
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    @router.get("/api/server/file")
+    def get_server_file(song: str, filename: str):
+        settings = get_settings()
+        is_video = filename.lower().endswith(".mp4")
+        
+        # 1. Resolve local path
+        if is_video:
+            local_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
+            media_type = "video/mp4"
+        else:
+            local_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
+            media_type = "image/jpeg"
+            
+        local_path = os.path.join(local_dir, filename)
+        if os.path.exists(local_path):
+            from fastapi.responses import FileResponse
+            return FileResponse(local_path, media_type=media_type)
+            
+        # 2. If not local, stream from server
+        key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+        server_ip = "152.70.23.171"
+        if not os.path.exists(key_path):
+            from fastapi.responses import HTMLResponse
+            return HTMLResponse(content="SSH Key not found", status_code=404)
+            
+        sub_dir = "TikToks" if is_video else "Covers"
+        remote_path = f"/home/ubuntu/meloscribe/staging/{song}/{sub_dir}/{filename}"
+        
+        import subprocess
+        from fastapi.responses import StreamingResponse
+        
+        cmd = [
+            "ssh", "-i", key_path, 
+            "-o", "StrictHostKeyChecking=accept-new", 
+            "-o", "ConnectTimeout=5", 
+            "-o", "IdentitiesOnly=yes", 
+            f"ubuntu@{server_ip}", 
+            f"cat '{remote_path}'"
+        ]
+        
+        def iter_file():
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATION_FLAGS)
+            try:
+                while True:
+                    chunk = proc.stdout.read(65536)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                proc.terminate()
+                proc.wait()
+                
+        return StreamingResponse(iter_file(), media_type=media_type)
+
 else:
     # -------------------------------------------------------------------
     # Production Server Admin Route Handlers
