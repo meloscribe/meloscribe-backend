@@ -785,7 +785,6 @@ if platform.system() == "Windows":
 
     @router.get("/api/server/file")
     def get_server_file(song: str, filename: str):
-        settings = get_settings()
         is_video = filename.lower().endswith(".mp4")
         
         # 1. Resolve local path
