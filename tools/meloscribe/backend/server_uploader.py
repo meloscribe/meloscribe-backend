@@ -122,7 +122,7 @@ def run_uploads():
         
         # Construct the execution command
         # upload_bot.py is in TOOLS_DIR
-        python_bin = "python3"
+        python_bin = sys.executable
         bot_path = os.path.join(TOOLS_DIR, "upload_bot.py")
         
         cmd = [
