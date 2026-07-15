@@ -17,7 +17,8 @@ from shared import (
     db_path,
     verify_admin,
     get_server_api_key,
-    TOOLS_DIR
+    TOOLS_DIR,
+    CREATION_FLAGS
 )
 
 router = APIRouter()
@@ -273,7 +274,6 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
-    CREATION_FLAGS = 0x08000000
 
     class ServerActionRequest(BaseModel):
         action: str
