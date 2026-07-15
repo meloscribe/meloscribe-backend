@@ -158,6 +158,7 @@ EMAIL_TEMPLATES = {
         "action": "Click the button below to download your sheet music (PDF), MIDI files, and practice video tutorials:",
         "button": "Download Learning Package",
         "footer": "This download link is permanent. You can access it anytime to download updates or get your files.",
+        "happy_practicing": "Happy practicing,",
         "help_text": "Need help? Reply directly to this email or visit"
     },
     "de": {
@@ -172,6 +173,7 @@ EMAIL_TEMPLATES = {
         "action": "Klicke auf den Button unten, um deine Klaviernoten (PDF), MIDI-Dateien und Video-Tutorials herunterzuladen:",
         "button": "Lernpaket herunterladen",
         "footer": "Dieser Download-Link ist dauerhaft gültig. Du kannst ihn jederzeit aufrufen, um deine Dateien herunterzuladen.",
+        "happy_practicing": "Viel Spaß beim Üben,",
         "help_text": "Brauchst du Hilfe? Antworte direkt auf diese E-Mail oder besuche"
     },
     "fr": {
@@ -186,6 +188,7 @@ EMAIL_TEMPLATES = {
         "action": "Cliquez sur le bouton ci-dessous pour télécharger vos partitions (PDF), fichiers MIDI et tutoriels vidéo :",
         "button": "Télécharger le pack musical",
         "footer": "Ce lien de téléchargement est permanent. Vous pouvez y accéder à tout moment pour récupérer vos fichiers.",
+        "happy_practicing": "Bonne pratique,",
         "help_text": "Besoin d'aide ? Répondez directement à cet e-mail ou visitez"
     },
     "es": {
@@ -200,6 +203,7 @@ EMAIL_TEMPLATES = {
         "action": "Haz clic en el botón de abajo para descargar tus partituras (PDF), archivos MIDI y tutoriales en video:",
         "button": "Descargar paquete de música",
         "footer": "Este enlace de descarga es permanente. Puedes acceder en cualquier momento para obtener tus archivos.",
+        "happy_practicing": "¡Disfruta practicando!,",
         "help_text": "¿Necesitas ayuda? Responde directamente a este correo o visita"
     },
     "it": {
@@ -213,7 +217,8 @@ EMAIL_TEMPLATES = {
         "body_gift": "Hai ricevuto un pacchetto musicale per <strong>{song_name}</strong> in regalo!",
         "action": "Clicca sul pulsante qui sotto per scaricare i tuoi spartiti (PDF), i file MIDI e i tutorial video:",
         "button": "Scarica pacchetto musicale",
-        "footer": "Questo link di download è permanente. Puoi accedervi in qualsiasi momento per scaricare i tuoi file.",
+        "footer": "Questo link di download é permanente. Puoi accedervi in qualsiasi momento per scaricare i tuoi file.",
+        "happy_practicing": "Buon esercizio,",
         "help_text": "Hai bisogno di aiuto? Rispondi direttamente a questa email o visita"
     }
 }
@@ -270,7 +275,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
       {tpl["footer"]}
     </p>
     
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Happy practicing,<br>meloscribe</p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">{tpl["happy_practicing"]}<br>meloscribe</p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
     {tpl["help_text"]} <a href="https://meloscribe.dev" style="color: #00f5d4;">meloscribe.dev</a>
