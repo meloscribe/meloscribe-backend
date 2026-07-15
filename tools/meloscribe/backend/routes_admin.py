@@ -1339,7 +1339,7 @@ else:
         return {"success": True}
 
     class ManualOrderRequest(BaseModel):
-        email: str
+        email: str = ""
         song_name: str
         buyer_name: str = ""
         amount: float = 0.0
@@ -1359,18 +1359,30 @@ else:
         transaction_id = f"gift_{uuid.uuid4().hex[:12]}"
         created_at = datetime.datetime.utcnow().isoformat()
         
+        email = req.email.strip() if req.email else ""
+        buyer_name = req.buyer_name.strip() if req.buyer_name else ""
+        
         c.execute(
             "INSERT INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, created_at, download_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (transaction_id, req.email, req.song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, req.buyer_name, created_at)
+            (transaction_id, email, req.song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, buyer_name, created_at)
         )
         conn.commit()
         conn.close()
+        
+        email_sent = False
+        if email and "@" in email and "." in email.split("@")[-1]:
+            try:
+                from routes_public import send_purchase_delivery_email
+                email_sent = send_purchase_delivery_email(email, req.song_name, download_hash, req.locale, is_gift=True, buyer_name=buyer_name)
+            except Exception as email_err:
+                print(f"[Manual Order] Email send failed: {email_err}")
         
         return {
             "success": True, 
             "transaction_id": transaction_id, 
             "download_hash": download_hash,
-            "download_url": f"https://www.meloscribe.dev/order/{download_hash}"
+            "download_url": f"https://www.meloscribe.dev/order/{download_hash}",
+            "email_sent": email_sent
         }
 
 # -------------------------------------------------------------------

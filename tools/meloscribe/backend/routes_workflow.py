@@ -991,30 +991,7 @@ def run_git_push():
 
 def run_deep_asset_cleanup(song_name: str):
     log_error("Deep Cleanup", f"Starting deep cleanup for '{song_name}' assets...")
-    cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
-    packages_dir = settings.get("packages_dir", r"C:\Dev\meloscribe\packages")
-    
-    # 1. Local Cakewalk Directories
-    folders_to_delete = [
-        Path(cakewalk_dir) / song_name,
-        Path(cakewalk_dir) / f"{song_name} Easy"
-    ]
-    for folder in folders_to_delete:
-        if folder.exists():
-            try:
-                shutil.rmtree(folder)
-                log_error("Deep Cleanup", f"Deleted local directory: {folder}")
-            except Exception as e:
-                log_error("Deep Cleanup", f"Failed to delete {folder}: {e}")
-                
-    # 2. Local Customer Package ZIP
-    local_zip = Path(packages_dir) / f"{song_name} Full Package.zip"
-    if local_zip.exists():
-        try:
-            os.remove(local_zip)
-            log_error("Deep Cleanup", f"Deleted local package: {local_zip}")
-        except Exception as e:
-            log_error("Deep Cleanup", f"Failed to delete package {local_zip}: {e}")
+    # NOTE: Local directory and package deletions have been disabled to preserve user's local projects.
             
     # 3. Cloudflare R2 Assets
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
