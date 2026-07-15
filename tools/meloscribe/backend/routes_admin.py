@@ -1338,6 +1338,41 @@ else:
         conn.close()
         return {"success": True}
 
+    class ManualOrderRequest(BaseModel):
+        email: str
+        song_name: str
+        buyer_name: str = ""
+        amount: float = 0.0
+        currency: str = "EUR"
+        locale: str = "de"
+
+    @router.post("/api/admin/orders")
+    def admin_create_manual_order(req: ManualOrderRequest, request: Request):
+        verify_admin(request)
+        import uuid
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("PRAGMA journal_mode=WAL")
+        
+        # Generate hash and txn ID
+        download_hash = uuid.uuid4().hex
+        transaction_id = f"gift_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.datetime.utcnow().isoformat()
+        
+        c.execute(
+            "INSERT INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, created_at, download_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (transaction_id, req.email, req.song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, req.buyer_name, created_at)
+        )
+        conn.commit()
+        conn.close()
+        
+        return {
+            "success": True, 
+            "transaction_id": transaction_id, 
+            "download_hash": download_hash,
+            "download_url": f"https://www.meloscribe.dev/order/{download_hash}"
+        }
+
 # -------------------------------------------------------------------
 # Order Management Endpoints (Global - runs on all platforms including VM)
 # -------------------------------------------------------------------
