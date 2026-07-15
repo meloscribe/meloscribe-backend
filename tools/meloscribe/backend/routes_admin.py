@@ -641,6 +641,148 @@ if platform.system() == "Windows":
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
+    @router.get("/api/server/combined-status")
+    def get_server_combined_status():
+        import subprocess
+        import json
+        key_path = r"C:\Dev\ssh-key-2026-05-07.key"
+        server_ip = "152.70.23.171"
+        if not os.path.exists(key_path):
+            return {"status": "error", "message": f"SSH Key not found at {key_path}"}
+            
+        combined_cmd = (
+            "echo '===SNIPER===' && (systemctl is-active oci-sniper 2>/dev/null || echo 'inactive') && "
+            "echo '---SNIPER_LOGS---' && tail -n 100 /home/ubuntu/oci-sniper/sniper.log 2>/dev/null && "
+            "echo '===UPLOADER===' && (systemctl is-active oci-uploader 2>/dev/null || echo 'inactive') && "
+            "echo '---UPLOADER_LOGS---' && tail -n 100 /home/ubuntu/meloscribe/uploader.log 2>/dev/null && "
+            "echo '===DISK===' && df -h /home/ubuntu 2>/dev/null && "
+            "echo '===QUEUE===' && python3 -c \"import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT * FROM upload_queue ORDER BY datetime(schedule_time) DESC LIMIT 100').fetchall()]))\" 2>/dev/null && "
+            "echo '===FILES===' && find /home/ubuntu/meloscribe/staging -type f 2>/dev/null"
+        )
+        
+        cmd = [
+            "ssh", "-i", key_path, 
+            "-o", "StrictHostKeyChecking=accept-new", 
+            "-o", "ConnectTimeout=5", 
+            "-o", "IdentitiesOnly=yes", 
+            f"ubuntu@{server_ip}", 
+            combined_cmd
+        ]
+        
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, creationflags=CREATION_FLAGS)
+            if res.returncode != 0 and not res.stdout:
+                return {"status": "error", "message": f"SSH command failed: {res.stderr}"}
+                
+            stdout = res.stdout
+            
+            # Parse sections
+            sections = {}
+            current_section = None
+            section_lines = []
+            
+            for line in stdout.split("\n"):
+                if line.startswith("===SNIPER==="):
+                    if current_section:
+                        sections[current_section] = "\n".join(section_lines).strip()
+                    current_section = "sniper"
+                    section_lines = []
+                elif line.startswith("===UPLOADER==="):
+                    if current_section:
+                        sections[current_section] = "\n".join(section_lines).strip()
+                    current_section = "uploader"
+                    section_lines = []
+                elif line.startswith("===DISK==="):
+                    if current_section:
+                        sections[current_section] = "\n".join(section_lines).strip()
+                    current_section = "disk"
+                    section_lines = []
+                elif line.startswith("===QUEUE==="):
+                    if current_section:
+                        sections[current_section] = "\n".join(section_lines).strip()
+                    current_section = "queue"
+                    section_lines = []
+                elif line.startswith("===FILES==="):
+                    if current_section:
+                        sections[current_section] = "\n".join(section_lines).strip()
+                    current_section = "files"
+                    section_lines = []
+                else:
+                    section_lines.append(line)
+                    
+            if current_section:
+                sections[current_section] = "\n".join(section_lines).strip()
+                
+            # Process sections
+            # Sniper
+            sniper_sec = sections.get("sniper", "")
+            sniper_status = "inactive"
+            sniper_logs = ""
+            if "---SNIPER_LOGS---" in sniper_sec:
+                parts = sniper_sec.split("---SNIPER_LOGS---", 1)
+                sniper_status = parts[0].strip()
+                sniper_logs = parts[1].strip()
+            else:
+                sniper_status = sniper_sec
+                
+            # Uploader
+            uploader_sec = sections.get("uploader", "")
+            uploader_status = "inactive"
+            uploader_logs = ""
+            if "---UPLOADER_LOGS---" in uploader_sec:
+                parts = uploader_sec.split("---UPLOADER_LOGS---", 1)
+                uploader_status = parts[0].strip()
+                uploader_logs = parts[1].strip()
+            else:
+                uploader_status = uploader_sec
+                
+            # Disk
+            disk_output = sections.get("disk", "No disk info available.")
+            
+            # Queue & Files
+            queue_data = []
+            queue_str = sections.get("queue", "[]")
+            try:
+                queue_data = json.loads(queue_str)
+            except Exception:
+                queue_data = []
+                
+            files_output = sections.get("files", "")
+            staged_files = [f.strip() for f in files_output.split("\n") if f.strip()]
+            
+            # Merge files into queue tasks
+            for task in queue_data:
+                task_files = []
+                for f_path in staged_files:
+                    f_name = os.path.basename(f_path)
+                    song_clean = task["song"].replace(" Easy", "").strip()
+                    if song_clean.lower() in f_name.lower():
+                        if "slow" in f_name.lower():
+                            if task["profile"] == "tutorial":
+                                task_files.append(f_name)
+                        else:
+                            if task["profile"] == "normal":
+                                task_files.append(f_name)
+                task["files"] = list(set(task_files))
+                
+            return {
+                "status": "success",
+                "sniper": {
+                    "active": "active" in sniper_status.lower(),
+                    "output": f"Service status: {sniper_status}\n\n--- RECENT LOGS ---\n{sniper_logs}"
+                },
+                "uploader": {
+                    "active": "active" in uploader_status.lower(),
+                    "output": f"Service status: {uploader_status}\n\n--- RECENT LOGS ---\n{uploader_logs}"
+                },
+                "disk": disk_output,
+                "queue": queue_data
+            }
+        except subprocess.TimeoutExpired:
+            return {"status": "error", "message": "Connection timed out"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
 else:
     # -------------------------------------------------------------------
     # Production Server Admin Route Handlers

@@ -5,6 +5,7 @@ import sqlite3
 import subprocess
 import shutil
 import datetime
+from zoneinfo import ZoneInfo
 
 DB_PATH = "/home/ubuntu/meloscribe/queue.db"
 STAGING_DIR = "/home/ubuntu/meloscribe/staging"
@@ -90,7 +91,7 @@ def run_uploads():
     cursor = conn.cursor()
     
     # Query pending tasks that are due
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = datetime.datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y-%m-%d %H:%M")
     cursor.execute("""
         SELECT id, song, author, price, mode, profile, schedule_time, youtube_url, condensed, format 
         FROM upload_queue 
