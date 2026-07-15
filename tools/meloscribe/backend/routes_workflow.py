@@ -42,7 +42,7 @@ class WorkflowRequest(BaseModel):
     format: str = "viral_part"
     shutdown: bool = False
     doR2: bool = True
-    doKofi: bool = True
+    doKofi: bool = False
     doYoutube: bool = True
     doInstagram: bool = True
     doFacebook: bool = True
@@ -395,9 +395,7 @@ async def _run_workflow(req: WorkflowRequest):
         if req.doPinterest: socials.append("pinterest")
 
         server_platforms = list(socials)
-        if req.doKofi:
-            server_platforms.append("kofi")
-            
+        
         if server_platforms:
             start_time_str = req.scheduleTime or "16:00"
             cmd = [
