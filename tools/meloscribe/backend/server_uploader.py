@@ -55,30 +55,30 @@ def check_disk_space():
         
         if free_gb < 10.0 or free_pct < 0.10:
             print("[Cleanup] Free space is low! Initiating clean up...")
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            
-            # Find songs where all scheduled upload tasks are completed
-            cursor.execute("""
-                SELECT DISTINCT song FROM upload_queue 
-                WHERE song NOT IN (
-                    SELECT DISTINCT song FROM upload_queue WHERE status != 'completed'
-                )
-            """)
-            completed_songs = [row[0] for row in cursor.fetchall()]
-            conn.close()
-            
             cleaned_any = False
-            for song in completed_songs:
-                song_stage_path = os.path.join(STAGING_DIR, song)
-                if os.path.exists(song_stage_path):
-                    # Delete videos inside the song's staging path to save space
-                    print(f"[Cleanup] Removing staged files for completed song: {song}")
-                    try:
-                        shutil.rmtree(song_stage_path)
-                        cleaned_any = True
-                    except Exception as clean_err:
-                        print(f"[Cleanup] Error deleting {song_stage_path}: {clean_err}")
+            if os.path.exists(STAGING_DIR):
+                for folder in os.listdir(STAGING_DIR):
+                    folder_path = os.path.join(STAGING_DIR, folder)
+                    if not os.path.isdir(folder_path):
+                        continue
+                    
+                    conn = sqlite3.connect(DB_PATH)
+                    cursor = conn.cursor()
+                    # Query if any task is not completed for this base song or its variations
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM upload_queue 
+                        WHERE (song = ? OR song LIKE ?) AND status != 'completed'
+                    """, (folder, f"{folder} %"))
+                    active_count = cursor.fetchone()[0]
+                    conn.close()
+                    
+                    if active_count == 0:
+                        print(f"[Cleanup] Removing staged files for completed song folder: {folder}")
+                        try:
+                            shutil.rmtree(folder_path)
+                            cleaned_any = True
+                        except Exception as clean_err:
+                            print(f"[Cleanup] Error deleting {folder_path}: {clean_err}")
             
             if not cleaned_any:
                 print("[Cleanup] Low space but no completed songs found to clean up.")
