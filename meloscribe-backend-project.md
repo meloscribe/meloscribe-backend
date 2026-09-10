@@ -171,6 +171,10 @@ git add . && git commit -m "..." && git push
 - [x] Implemented dynamic IP-based checkout currency routing on Stripe (`routes_public.py`), preserving round numeric values (e.g. `4 €` -> `4 $` for US or `4 £` for UK) using Cloudflare `CF-IPCountry` and `ip-api.com` fallback with in-memory caching.
 - [x] Added public catalog endpoint `/api/public/songs` to dynamically convert the `price` field currency symbols (`€` to `$` or `£`) based on client IP, allowing the website catalog to automatically display the correct currency to international users.
 - [x] Synchronized and deployed changes to local and remote production OCI VM servers, restarted FastAPI services, and verified dynamic routing with custom test cases.
+- [x] Updated TikTok API uploader integration to use Content Posting API v2 Inbox Drafts (`/v2/post/publish/inbox/video/init/`) with integer floor chunking (`file_size // chunk_size`), enabling inbox draft delivery for creators.
+- [x] Resolved Facebook Graph API Reels reach suppression: migrated Meta App to Live Mode, raised duration cutoff to 90s (`is_short = duration <= 90.0`), and enriched SEO hashtags in `settings.json` and `settings.py`.
+- [x] Executed Facebook Page cleanup of low-view/duplicate dev-mode Reels via Graph API and scheduled 12 staged songs in `queue.db` on OCI VM server with a daily 17:00 cadence.
+- [x] Fixed mobile checkout abandonment: Removed billing_address_collection="required" and forced invoice_creation in routes_public.py, switching to billing_address_collection="auto" to allow 1-click Apple Pay/Google Pay/Card payments without physical street address entry. Deployed live to Oracle VM and restarted backend service.
 
 ## Active Blockers / Next Steps
 
