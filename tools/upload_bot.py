@@ -11,6 +11,11 @@ import ctypes
 import re
 import urllib.parse
 
+tools_dir = os.path.dirname(os.path.abspath(__file__))
+local_ffmpeg_bin = os.path.join(tools_dir, "ffmpeg", "bin")
+if os.path.exists(local_ffmpeg_bin) and local_ffmpeg_bin not in os.environ.get("PATH", ""):
+    os.environ["PATH"] = local_ffmpeg_bin + os.pathsep + os.environ.get("PATH", "")
+
 def get_settings():
     sys.path.append(os.path.join(os.path.dirname(__file__), "meloscribe", "backend"))
     try:
@@ -239,7 +244,7 @@ def send_ntfy_notification(title, body, image_path=None):
         print(f"[ntfy] Error sending text notification: {e}")
         return False
 
-def generate_previews(song_name, format_mode="viral_part", **kwargs):
+def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
     """
     Generate audio hover preview MP3 and website preview video segment.
     For full_arrangement, pass hook_start and hook_end (seconds) to control clip window.
@@ -267,6 +272,13 @@ def generate_previews(song_name, format_mode="viral_part", **kwargs):
         except Exception:
             pass
             
+    if (hook_start is None or float(hook_start) == 0.0) and settings.get("hook_start"):
+        try: hook_start = float(settings.get("hook_start"))
+        except Exception: pass
+    if (hook_end is None or float(hook_end) == 60.0 or float(hook_end) <= float(hook_start or 0.0)) and settings.get("hook_end"):
+        try: hook_end = float(settings.get("hook_end"))
+        except Exception: pass
+
     if hook_start is None: hook_start = 0.0
     if hook_end is None: hook_end = 30.0
 
@@ -443,101 +455,136 @@ def generate_previews(song_name, format_mode="viral_part", **kwargs):
         # Title subtitle: "Short Preview"
         # Endscreen text: "Full video coming soon"
         # -------------------------------------------------------------
+        is_easy_version = "easy" in song_name.lower()
         if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and float(hook_end) > float(hook_start):
             teaser_start = float(hook_start)
             teaser_end = float(hook_end)
             teaser_dur = teaser_end - teaser_start
             
-            tiktoks_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
-            teaser_dest = os.path.join(tiktoks_dir, f"{song_name} Teaser.mp4")
-            
-            hook_sub = kwargs.get("subtitle_hook")
-            if hook_sub is None:
-                hook_sub = settings.get("subtitle_hook", "Short Preview")
-            if hook_sub is None:
-                hook_sub = ""
-                
-            zoom_val = kwargs.get("zoom")
-            shift_val = kwargs.get("shift")
+            mp3_preview_dir = settings.get("mp3_preview_dir", r"C:\Dev\meloscribe\mp3 preview")
+            os.makedirs(mp3_preview_dir, exist_ok=True)
+            mp3_teaser_dest = os.path.join(mp3_preview_dir, f"{song_name} Teaser.mp3")
 
-            clean_base = song_name
-            if clean_base.lower().endswith(" teaser"): clean_base = clean_base[:-7].strip()
-            if clean_base.lower().endswith(" easy"): clean_base = clean_base[:-5].strip()
-            
-            midi_p = settings.get("midi_path", "")
-            if not midi_p:
-                midi_candidates = [
-                    f"C:\\Cakewalk Projects\\{clean_base}\\{clean_base}.mid",
-                    f"C:\\Cakewalk Projects\\{song_name}\\{song_name}.mid"
-                ]
-                for mc in midi_candidates:
-                    if os.path.exists(mc):
-                        midi_p = mc
-                        break
-
-            if (zoom_val is None or shift_val is None) and midi_p and os.path.exists(midi_p):
-                try:
-                    from auto_crop import calculate_auto_crop
-                    az, ash = calculate_auto_crop(midi_p, left_tolerance_keys=1, right_tolerance_keys=4)
-                    if zoom_val is None: zoom_val = az
-                    if shift_val is None: shift_val = ash
-                except Exception as ex_crop:
-                    print(f"[Previews] Note calculating auto_crop for teaser: {ex_crop}")
-
-            if zoom_val is None: zoom_val = settings.get("zoom", 1.5)
-            if shift_val is None: shift_val = settings.get("shift", 0)
-
-            zoom_val = str(zoom_val)
-            shift_val = str(shift_val)
-            theme_val = settings.get("theme", "warm")
-
-            cmd_teaser = [
-                sys.executable, os.path.join(tools_dir, "video_generator.py"),
-                "--video", input_source,
-                "--title", f"{song_name} Teaser",
-                "--author", author,
-                "--subtitle", hook_sub.strip(),
-                "--start_time", str(teaser_start),
-                "--end_time", str(teaser_end),
-                "--zoom", zoom_val,
-                "--shift", shift_val,
-                "--theme", theme_val,
-                "--use_portrait_addon",
-                "--force"
-            ]
-            if midi_p:
-                cmd_teaser.extend(["--midipath", midi_p])
-            if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
-                cmd_teaser.append("--visualizer")
-            rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
-                
-            if rc_teaser == 0 and os.path.exists(teaser_dest):
-                print(f"[Previews] Success: Created 9:16 Social Media Teaser video in TikToks -> {teaser_dest}")
-                
-                # --- Export Isolated MP3 of the Hook Video to C:\Dev\meloscribe\mp3 preview ---
-                try:
-                    mp3_preview_dir = settings.get("mp3_preview_dir", r"C:\Dev\meloscribe\mp3 preview")
-                    os.makedirs(mp3_preview_dir, exist_ok=True)
-                    mp3_teaser_dest = os.path.join(mp3_preview_dir, f"{song_name} Teaser.mp3")
-                    
-                    print(f"[Previews] Exporting isolated Hook MP3 -> {mp3_teaser_dest}...")
-                    cmd_mp3 = [
+            if is_easy_version:
+                # ArrangeMe requires an audio preview MP3 for Easy versions, but NO video in TikToks
+                print(f"[Previews] Easy version detected: generating audio teaser only for ArrangeMe -> {mp3_teaser_dest}")
+                tiktoks_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
+                normal_tiktok = os.path.join(tiktoks_dir, f"{song_name}.mp4")
+                if os.path.exists(normal_tiktok):
+                    cmd_easy_mp3 = [
                         "ffmpeg", "-y",
-                        "-i", teaser_dest,
+                        "-ss", str(teaser_start),
+                        "-to", str(teaser_end),
+                        "-i", normal_tiktok,
                         "-vn",
                         "-c:a", "libmp3lame",
                         "-b:a", "192k",
                         mp3_teaser_dest
                     ]
-                    rc_mp3 = subprocess.run(cmd_mp3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
-                    if rc_mp3 == 0:
-                        print(f"[Previews] Success: Isolated Hook MP3 saved -> {mp3_teaser_dest}")
-                    else:
-                        print(f"[Previews] Warning: FFmpeg failed to extract isolated Hook MP3.")
-                except Exception as ex_mp3:
-                    print(f"[Previews] Warning: Exception exporting isolated Hook MP3: {ex_mp3}")
+                else:
+                    cmd_easy_mp3 = [
+                        "ffmpeg", "-y",
+                        "-ss", str(teaser_start + 2.5),
+                        "-to", str(teaser_end + 2.5),
+                        "-i", input_source,
+                        "-vn",
+                        "-c:a", "libmp3lame",
+                        "-b:a", "192k",
+                        mp3_teaser_dest
+                    ]
+                rc_easy_mp3 = subprocess.run(cmd_easy_mp3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                if rc_easy_mp3 == 0:
+                    print(f"[Previews] Success: Isolated Easy Hook MP3 for ArrangeMe saved -> {mp3_teaser_dest}")
+                else:
+                    print(f"[Previews] Warning: FFmpeg failed to extract isolated Easy Hook MP3.")
             else:
-                print(f"[Previews] Error: FFmpeg failed to generate 9:16 teaser video.")
+                # Normal version: Generate BOTH 9:16 Social Media Teaser video AND isolated Hook MP3
+                tiktoks_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
+                teaser_dest = os.path.join(tiktoks_dir, f"{song_name} Teaser.mp4")
+                
+                hook_sub = kwargs.get("subtitle_hook")
+                if hook_sub is None:
+                    hook_sub = settings.get("subtitle_hook", "Short Preview")
+                if hook_sub is None:
+                    hook_sub = ""
+                    
+                zoom_val = kwargs.get("zoom")
+                shift_val = kwargs.get("shift")
+
+                clean_base = song_name
+                if clean_base.lower().endswith(" teaser"): clean_base = clean_base[:-7].strip()
+                if clean_base.lower().endswith(" easy"): clean_base = clean_base[:-5].strip()
+                
+                midi_p = settings.get("midi_path", "")
+                if not midi_p:
+                    midi_candidates = [
+                        f"C:\\Cakewalk Projects\\{clean_base}\\{clean_base}.mid",
+                        f"C:\\Cakewalk Projects\\{song_name}\\{song_name}.mid"
+                    ]
+                    for mc in midi_candidates:
+                        if os.path.exists(mc):
+                            midi_p = mc
+                            break
+
+                if (zoom_val is None or shift_val is None) and midi_p and os.path.exists(midi_p):
+                    try:
+                        from auto_crop import calculate_auto_crop
+                        az, ash = calculate_auto_crop(midi_p, left_tolerance_keys=1, right_tolerance_keys=4)
+                        if zoom_val is None: zoom_val = az
+                        if shift_val is None: shift_val = ash
+                    except Exception as ex_crop:
+                        print(f"[Previews] Note calculating auto_crop for teaser: {ex_crop}")
+
+                if zoom_val is None: zoom_val = settings.get("zoom", 1.5)
+                if shift_val is None: shift_val = settings.get("shift", 0)
+
+                zoom_val = str(zoom_val)
+                shift_val = str(shift_val)
+                theme_val = settings.get("theme", "warm")
+
+                cmd_teaser = [
+                    sys.executable, os.path.join(tools_dir, "video_generator.py"),
+                    "--video", input_source,
+                    "--title", f"{song_name} Teaser",
+                    "--author", author,
+                    "--subtitle", hook_sub.strip(),
+                    "--start_time", str(teaser_start),
+                    "--end_time", str(teaser_end),
+                    "--zoom", zoom_val,
+                    "--shift", shift_val,
+                    "--theme", theme_val,
+                    "--use_portrait_addon",
+                    "--force"
+                ]
+                if midi_p:
+                    cmd_teaser.extend(["--midipath", midi_p])
+                if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
+                    cmd_teaser.append("--visualizer")
+                rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                    
+                if rc_teaser == 0 and os.path.exists(teaser_dest):
+                    print(f"[Previews] Success: Created 9:16 Social Media Teaser video in TikToks -> {teaser_dest}")
+                    
+                    # --- Export Isolated MP3 of the Hook Video to C:\Dev\meloscribe\mp3 preview ---
+                    try:
+                        print(f"[Previews] Exporting isolated Hook MP3 -> {mp3_teaser_dest}...")
+                        cmd_mp3 = [
+                            "ffmpeg", "-y",
+                            "-i", teaser_dest,
+                            "-vn",
+                            "-c:a", "libmp3lame",
+                            "-b:a", "192k",
+                            mp3_teaser_dest
+                        ]
+                        rc_mp3 = subprocess.run(cmd_mp3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                        if rc_mp3 == 0:
+                            print(f"[Previews] Success: Isolated Hook MP3 saved -> {mp3_teaser_dest}")
+                        else:
+                            print(f"[Previews] Warning: FFmpeg failed to extract isolated Hook MP3.")
+                    except Exception as ex_mp3:
+                        print(f"[Previews] Warning: Exception exporting isolated Hook MP3: {ex_mp3}")
+                else:
+                    print(f"[Previews] Error: FFmpeg failed to generate 9:16 teaser video.")
 
         try:
             os.remove(title_txt)
@@ -711,6 +758,22 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             if generated_id:
                 final_price_id = generated_id
         
+        # Auto-detect hook / preview start for audio hover playback on website
+        preview_start = kwargs.get("hook_start")
+        if preview_start is None:
+            try:
+                import sqlite3
+                db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meloscribe", "backend", "analytics.db")
+                conn = sqlite3.connect(db_path)
+                row = conn.execute("SELECT hook_start FROM batch_ingest_queue WHERE song_name=?", (song_name,)).fetchone()
+                if not row or row[0] is None:
+                    row = conn.execute("SELECT hook_start FROM tracks WHERE song_name=?", (song_name,)).fetchone()
+                conn.close()
+                if row and row[0] is not None:
+                    preview_start = row[0]
+            except:
+                pass
+
         new_song = {
             "id": next_id,
             "title": clean_name,
@@ -724,40 +787,69 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             "gradient": gradient,
             "theme": theme
         }
+        if preview_start is not None and float(preview_start) > 0:
+            new_song["previewStart"] = round(float(preview_start), 1)
         
-        # Upsert: update existing entry if song with same title AND difficulty exists, otherwise append
+        # Check for existing song entry by clean_name
         existing_idx = None
         for idx, s in enumerate(songs_list):
-            if s.get("title", "").strip().lower() == clean_name.strip().lower() and s.get("difficulty", "").strip().lower() == difficulty.strip().lower():
+            s_title = s.get("title", "").strip().lower()
+            if s_title == clean_name.strip().lower():
                 existing_idx = idx
                 break
         
         if existing_idx is not None:
             existing = songs_list[existing_idx]
-            # Preserve existing ID and real payment IDs
-            new_song["id"] = existing.get("id", next_id)
-            if existing.get("stripePriceId") and not existing["stripePriceId"].startswith("prod_dummy"):
-                new_song["stripePriceId"] = existing["stripePriceId"]
-            elif not final_price_id.startswith("prod_dummy"):
-                new_song["stripePriceId"] = final_price_id
-                
-            if existing.get("kofiId") and not existing["kofiId"].startswith("prod_dummy"):
-                new_song["kofiId"] = existing["kofiId"]
-            elif not final_price_id.startswith("prod_dummy"):
-                new_song["kofiId"] = final_price_id
-                
-            # Preserve other existing fields not set by queue
-            for key in ("hidden", "paymentsDisabled", "format"):
-                if key in existing:
-                    new_song[key] = existing[key]
-                    
+            if is_easy:
+                existing["hasEasy"] = True
+                if existing.get("difficulty") == "Original" or existing.get("hasOriginal"):
+                    existing["difficulty"] = "Original / Easy"
+                    existing["hasOriginal"] = True
+                else:
+                    existing["difficulty"] = "Easy"
+                existing["easyPrice"] = clean_price
+                if not final_price_id.startswith("prod_dummy"):
+                    existing["easyStripePriceId"] = final_price_id
+                    existing["easyKofiId"] = final_price_id
+                elif not existing.get("easyStripePriceId"):
+                    existing["easyStripePriceId"] = final_price_id
+                    existing["easyKofiId"] = final_price_id
+                if not existing.get("easyId"):
+                    existing["easyId"] = next_id
+            else:
+                existing["hasOriginal"] = True
+                if existing.get("difficulty") == "Easy" or existing.get("hasEasy"):
+                    existing["difficulty"] = "Original / Easy"
+                    existing["hasEasy"] = True
+                else:
+                    existing["difficulty"] = "Original"
+                existing["price"] = clean_price
+                if not final_price_id.startswith("prod_dummy"):
+                    existing["stripePriceId"] = final_price_id
+                    existing["kofiId"] = final_price_id
+                elif not existing.get("stripePriceId"):
+                    existing["stripePriceId"] = final_price_id
+                    existing["kofiId"] = final_price_id
+            
+            if preview_start is not None and float(preview_start) > 0 and not existing.get("previewStart"):
+                existing["previewStart"] = round(float(preview_start), 1)
+
             # Move updated song entry to top of songs.json list (index 0) so it appears first on website
-            songs_list.pop(existing_idx)
-            songs_list.insert(0, new_song)
-            print(f"[Website Sync] Updated existing entry for '{clean_name}' (ID: {new_song['id']}) and moved to top of catalog (index 0)!")
+            updated_song = songs_list.pop(existing_idx)
+            songs_list.insert(0, updated_song)
+            print(f"[Website Sync] Merged {difficulty} into existing entry for '{clean_name}' (ID: {updated_song.get('id')}) as '{updated_song.get('difficulty')}' and moved to top of catalog!")
         else:
+            if is_easy:
+                new_song["hasEasy"] = True
+                new_song["hasOriginal"] = False
+                new_song["easyPrice"] = clean_price
+                new_song["easyStripePriceId"] = final_price_id
+                new_song["easyKofiId"] = final_price_id
+            else:
+                new_song["hasOriginal"] = True
+                new_song["hasEasy"] = False
             songs_list.insert(0, new_song)
-            print(f"[Website Sync] Added new entry for '{clean_name}' (ID: {next_id}) to top of catalog (index 0)!")
+            print(f"[Website Sync] Added new entry for '{clean_name}' ({difficulty}, ID: {next_id}) to top of catalog (index 0)!")
         
         # Write to frontend songs.json
         with open(website_json_path, "w", encoding="utf-8") as f:
@@ -1017,7 +1109,7 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
         print(f"[Pinterest Bot] Exception failed: {e}")
         return False
 
-def run_kofi(song_name, price, is_full=False, yt_shorts_url=None):
+def run_kofi(song_name, price, is_full=True, yt_shorts_url=None):
     tools_dir = os.path.dirname(os.path.abspath(__file__))
     
     # Since you requested to use your main profile, we MUST kill any active Brave instances
@@ -1244,7 +1336,7 @@ def run_kofi(song_name, price, is_full=False, yt_shorts_url=None):
         desc_input = page.locator("textarea#Description")
         
         is_easy = "easy" in song_name.lower()
-        is_condensed = not is_full
+        is_condensed = False
         
         # Clean song name for template formatting
         clean_song_name = song_name
@@ -1588,7 +1680,7 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
         print("❌ TikTok API Upload failed.")
         sys.exit(1)
 
-def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=None, force=False, subtitle_hook=None):
+def upload_to_r2(song_name, format_mode="full_arrangement", hook_start=None, hook_end=None, force=False, subtitle_hook=None):
     import subprocess
     settings = get_settings()
     r2_account_id = settings.get("r2_account_id")
@@ -1877,11 +1969,11 @@ if __name__ == "__main__":
     format_mode = args.format
     if format_mode is None:
         if args.condensed:
-            format_mode = "viral_part"
+            format_mode = "full_arrangement"
         elif args.full:
             format_mode = "full_arrangement"
         else:
-            format_mode = "viral_part"  # default
+            format_mode = "full_arrangement"  # default
             
     if args.mode == "kofi":
         run_kofi(args.song, args.price, is_full=(format_mode == "full_arrangement"), yt_shorts_url=args.youtube_url)
@@ -2054,15 +2146,13 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Warning: Failed to parse datetime '{args.datetime}': {e}")
         
-        is_easy = args.song.lower().endswith(" easy")
+        is_easy = ("easy" in args.song.lower()) or (hasattr(args, 'profile') and args.profile == "easy")
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
-        if base_song.lower().endswith(" easy"):
-            base_song = base_song[:-5].strip()
-        elif base_song.lower().endswith(" teaser"):
-            base_song = base_song[:-7].strip()
+        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial)\b', '', base_song).strip()
+        base_song = re.sub(r'\s+', ' ', base_song).strip()
             
         label_parts = []
         if is_easy:
@@ -2118,9 +2208,18 @@ if __name__ == "__main__":
         if is_tut:
             fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(fb_tpl, args.song, args.author, label, medium_arg='reel' if format_mode == "viral_part" else 'video')
+        
+        # Build direct sheet music link & comment text
+        slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
+        version_param = "easy" if is_easy else "original"
+        song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+        default_fb_comment = f"Sheet Music (Easy): {song_link}" if is_easy else f"Sheet Music: {song_link}"
+        fb_comment_tpl = settings.get("comment_template_facebook")
+        fb_comment = fb_comment_tpl.replace("{song_link}", song_link) if fb_comment_tpl else default_fb_comment
+
         success = post_video(video_path, f"{base_song} - {args.author}{label}", desc,
                    format=format_mode, thumbnail_path=thumbnail_path,
-                   publish_at_dt=dt_obj)
+                   publish_at_dt=dt_obj, comment_text=fb_comment)
         if not success:
             sys.exit(1)
     elif args.mode == "tiktok":
@@ -2132,15 +2231,13 @@ if __name__ == "__main__":
             sys.path.append(os.path.join(os.path.dirname(__file__), "meloscribe", "backend"))
             from threads_poster import post_video as threads_post
         
-        is_easy = args.song.lower().endswith(" easy")
+        is_easy = ("easy" in args.song.lower()) or (hasattr(args, 'profile') and args.profile == "easy")
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
-        if base_song.lower().endswith(" easy"):
-            base_song = base_song[:-5].strip()
-        elif base_song.lower().endswith(" teaser"):
-            base_song = base_song[:-7].strip()
+        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial)\b', '', base_song).strip()
+        base_song = re.sub(r'\s+', ' ', base_song).strip()
             
         label_parts = []
         if is_easy:
@@ -2167,6 +2264,15 @@ if __name__ == "__main__":
         if is_tut:
             th_tpl = th_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         caption = format_description_template(th_tpl, args.song, args.author, label)
-        success = threads_post(video_path, caption)
+        
+        # Build direct sheet music link & comment text
+        slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
+        version_param = "easy" if is_easy else "original"
+        song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+        default_th_comment = f"Sheet Music (Easy): {song_link}" if is_easy else f"Sheet Music: {song_link}"
+        th_comment_tpl = settings.get("comment_template_threads")
+        th_comment = th_comment_tpl.replace("{song_link}", song_link) if th_comment_tpl else default_th_comment
+
+        success = threads_post(video_path, caption, comment_text=th_comment)
         if not success:
             sys.exit(1)

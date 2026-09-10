@@ -57,11 +57,51 @@ def refresh_token():
     return False
 
 
-def _upload_to_temp_host(video_path: str) -> str | None:
-    """Upload video to a temporary file hosting service and return public URL."""
-    print(f"[Threads] Uploading video to temporary host...")
-    
-    # 1. Try file.io
+def _upload_to_temp_host(video_path: str) -> tuple[str | None, str | None, any, str | None]:
+    """
+    Upload video to a temporary public URL.
+    Returns (url, temp_key, s3_client, bucket_name).
+    """
+    # 1. Try R2 first
+    try:
+        from settings import load_settings
+        settings = load_settings()
+        
+        r2_account_id = settings.get("r2_account_id")
+        r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id")
+        r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key")
+        r2_bucket     = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets")
+        
+        if r2_account_id and r2_access_key and r2_secret_key:
+            import boto3
+            from botocore.config import Config
+            import uuid
+            
+            s3 = boto3.client(
+                's3',
+                endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+                aws_access_key_id=r2_access_key,
+                aws_secret_access_key=r2_secret_key,
+                region_name='auto',
+                config=Config(signature_version='s3v4')
+            )
+            
+            filename = os.path.basename(video_path)
+            temp_key = f"temp_uploads/{uuid.uuid4().hex[:8]}_{filename}"
+            print(f"[Threads] Uploading temporary video to R2: {temp_key}...")
+            s3.upload_file(video_path, r2_bucket, temp_key, ExtraArgs={"ContentType": "video/mp4"})
+            
+            url = s3.generate_presigned_url(
+                ClientMethod='get_object',
+                Params={'Bucket': r2_bucket, 'Key': temp_key},
+                ExpiresIn=3600
+            )
+            print(f"[Threads] Video uploaded to R2: {url}")
+            return url, temp_key, s3, r2_bucket
+    except Exception as e:
+        print(f"[Threads] R2 upload error: {e}")
+
+    # 2. Try file.io
     try:
         print("[Threads] Trying file.io...")
         with open(video_path, "rb") as f:
@@ -74,13 +114,13 @@ def _upload_to_temp_host(video_path: str) -> str | None:
         if resp.status_code == 200 and resp.json().get("success"):
             url = resp.json().get("link")
             print(f"[Threads] Video uploaded to file.io: {url}")
-            return url
+            return url, None, None, None
         else:
             print(f"[Threads] file.io upload failed: {resp.text[:200]}")
     except Exception as e:
         print(f"[Threads] file.io upload error: {e}")
 
-    # 2. Fallback to tmpfiles.org
+    # 3. Fallback to tmpfiles.org
     try:
         print("[Threads] Fallback: Trying tmpfiles.org...")
         with open(video_path, "rb") as f:
@@ -93,11 +133,9 @@ def _upload_to_temp_host(video_path: str) -> str | None:
             data = resp.json()
             if data.get("status") == "success":
                 view_url = data["data"]["url"]
-                # Convert view URL to direct download URL (needed for Threads)
-                # e.g., https://tmpfiles.org/w2w91vvJZUIL/morph.txt -> https://tmpfiles.org/dl/w2w91vvJZUIL/morph.txt
                 direct_url = view_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
                 print(f"[Threads] Video uploaded to tmpfiles.org: {direct_url}")
-                return direct_url
+                return direct_url, None, None, None
             else:
                 print(f"[Threads] tmpfiles.org upload failed: {data}")
         else:
@@ -105,10 +143,10 @@ def _upload_to_temp_host(video_path: str) -> str | None:
     except Exception as e:
         print(f"[Threads] tmpfiles.org fallback error: {e}")
 
-    return None
+    return None, None, None, None
 
 
-def post_video(video_path: str, caption: str) -> bool:
+def post_video(video_path: str, caption: str, comment_text: str = None) -> bool:
     """
     Upload a video to Threads as a video post.
     Threads requires a publicly accessible video URL.
@@ -123,74 +161,129 @@ def post_video(video_path: str, caption: str) -> bool:
         return False
 
     # Step 0: Upload video to temp host
-    video_url = _upload_to_temp_host(video_path)
+    res = _upload_to_temp_host(video_path)
+    if not res:
+        print("[Threads API] Could not upload video to temporary host.")
+        return False
+        
+    video_url, temp_key, s3_client, bucket_name = res
     if not video_url:
         print("[Threads API] Could not upload video to temporary host.")
         return False
 
-    # Step 1: Create media container
-    print(f"[Threads API] Creating video container...")
+    try:
+        # Step 1: Create media container
+        print(f"[Threads API] Creating video container...")
+        container_resp = requests.post(
+            f"{THREADS_API}/{user_id}/threads",
+            params={
+                "media_type": "VIDEO",
+                "video_url": video_url,
+                "text": caption,
+                "access_token": token
+            }
+        )
+
+        if container_resp.status_code != 200:
+            print(f"[Threads API] Container creation failed: {container_resp.status_code} {container_resp.text[:300]}")
+            return False
+
+        container_id = container_resp.json().get("id")
+        if not container_id:
+            print(f"[Threads API] No container ID returned: {container_resp.text[:200]}")
+            return False
+
+        print(f"[Threads API] Container created (ID: {container_id}). Waiting for processing...")
+
+        # Step 2: Wait for processing
+        for attempt in range(20):
+            time.sleep(15)  # Threads video processing takes longer
+            status_resp = requests.get(
+                f"{THREADS_API}/{container_id}",
+                params={"fields": "status", "access_token": token}
+            )
+            if status_resp.status_code != 200:
+                print(f"  Status check failed: {status_resp.text[:100]}")
+                continue
+                
+            status = status_resp.json().get("status", "")
+            print(f"  Container status: {status} (attempt {attempt+1}/20)")
+
+            if status == "FINISHED":
+                break
+            elif status in ("ERROR", "EXPIRED"):
+                print(f"[Threads API] Container failed: {status_resp.json()}")
+                return False
+        else:
+            print("[Threads API] Timed out waiting for video processing.")
+            return False
+
+        # Step 3: Publish
+        print("[Threads API] Publishing...")
+        publish_resp = requests.post(
+            f"{THREADS_API}/{user_id}/threads_publish",
+            params={
+                "creation_id": container_id,
+                "access_token": token
+            }
+        )
+
+        if publish_resp.status_code == 200 and publish_resp.json().get("id"):
+            post_id = publish_resp.json()["id"]
+            print(f"[Threads API] SUCCESS! Video posted (Post ID: {post_id})")
+            if comment_text:
+                time.sleep(3)
+                post_reply(post_id, comment_text)
+            return True
+        else:
+            print(f"[Threads API] Publish failed: {publish_resp.status_code} {publish_resp.text[:300]}")
+            return False
+            
+    finally:
+        if s3_client and temp_key and bucket_name:
+            try:
+                print(f"[Threads API] Deleting temporary R2 file: {temp_key}...")
+                s3_client.delete_object(Bucket=bucket_name, Key=temp_key)
+            except Exception as del_err:
+                print(f"[Threads API] Warning: Failed to delete temp R2 file: {del_err}")
+
+
+def post_reply(parent_post_id: str, text: str) -> str | None:
+    """Post a reply/comment to a Threads post."""
+    token, user_id = _get_creds()
+    if not token or not user_id:
+        print("[Threads API] ERROR: No valid Threads token.")
+        return None
+
+    # Step 1: Create container
     container_resp = requests.post(
         f"{THREADS_API}/{user_id}/threads",
         params={
-            "media_type": "VIDEO",
-            "video_url": video_url,
-            "text": caption,
+            "media_type": "TEXT",
+            "text": text,
+            "reply_to_id": parent_post_id,
             "access_token": token
         }
     )
 
     if container_resp.status_code != 200:
-        print(f"[Threads API] Container creation failed: {container_resp.status_code} {container_resp.text[:300]}")
-        return False
+        print(f"[Threads API] Reply container failed: {container_resp.text[:200]}")
+        return None
 
     container_id = container_resp.json().get("id")
-    if not container_id:
-        print(f"[Threads API] No container ID returned: {container_resp.text[:200]}")
-        return False
-
-    print(f"[Threads API] Container created (ID: {container_id}). Waiting for processing...")
-
-    # Step 2: Wait for processing
-    for attempt in range(20):
-        time.sleep(15)  # Threads video processing takes longer
-        status_resp = requests.get(
-            f"{THREADS_API}/{container_id}",
-            params={"fields": "status", "access_token": token}
-        )
-        if status_resp.status_code != 200:
-            print(f"  Status check failed: {status_resp.text[:100]}")
-            continue
-            
-        status = status_resp.json().get("status", "")
-        print(f"  Container status: {status} (attempt {attempt+1}/20)")
-
-        if status == "FINISHED":
-            break
-        elif status in ("ERROR", "EXPIRED"):
-            print(f"[Threads API] Container failed: {status_resp.json()}")
-            return False
-    else:
-        print("[Threads API] Timed out waiting for video processing.")
-        return False
-
-    # Step 3: Publish
-    print("[Threads API] Publishing...")
+    time.sleep(2)
     publish_resp = requests.post(
         f"{THREADS_API}/{user_id}/threads_publish",
-        params={
-            "creation_id": container_id,
-            "access_token": token
-        }
+        params={"creation_id": container_id, "access_token": token}
     )
 
     if publish_resp.status_code == 200 and publish_resp.json().get("id"):
-        post_id = publish_resp.json()["id"]
-        print(f"[Threads API] SUCCESS! Video posted (Post ID: {post_id})")
-        return True
+        reply_id = publish_resp.json()["id"]
+        print(f"[Threads API] SUCCESS! Reply posted (Reply ID: {reply_id})")
+        return reply_id
     else:
-        print(f"[Threads API] Publish failed: {publish_resp.status_code} {publish_resp.text[:300]}")
-        return False
+        print(f"[Threads API] Publish reply failed: {publish_resp.status_code} {publish_resp.text[:200]}")
+        return None
 
 
 def post_text(text: str) -> bool:
