@@ -502,8 +502,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 },
                 "quantity": 1,
             }],
-            invoice_creation={"enabled": True},
-            billing_address_collection="required",
+            billing_address_collection="auto",
             success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
             metadata={
