@@ -27,12 +27,33 @@ def get_settings():
                 song_name = sys.argv[i + 1]
                 break
         if song_name:
+            base_staging_name = song_name
+            if base_staging_name.lower().endswith(" easy"):
+                base_staging_name = base_staging_name[:-5].strip()
+            elif base_staging_name.lower().endswith(" teaser"):
+                base_staging_name = base_staging_name[:-7].strip()
+                
             staging_base = "/home/ubuntu/meloscribe/staging"
-            res["tiktok_dir"] = os.path.join(staging_base, song_name, "TikToks")
-            res["covers_dir"] = os.path.join(staging_base, song_name, "Covers")
-            res["musescore_dir"] = os.path.join(staging_base, song_name, "Scores")
-            res["cakewalk_dir"] = os.path.join(staging_base, song_name, "Cakewalk")
+            song_stage_dir = resolve_case_insensitive_path(os.path.join(staging_base, base_staging_name))
+            res["tiktok_dir"] = resolve_case_insensitive_path(os.path.join(song_stage_dir, "TikToks"))
+            res["covers_dir"] = resolve_case_insensitive_path(os.path.join(song_stage_dir, "Covers"))
+            res["musescore_dir"] = resolve_case_insensitive_path(os.path.join(song_stage_dir, "Scores"))
+            res["cakewalk_dir"] = resolve_case_insensitive_path(os.path.join(song_stage_dir, "Cakewalk"))
     return res
+
+def resolve_case_insensitive_path(path):
+    if not path:
+        return path
+    if os.path.exists(path):
+        return path
+    parent = os.path.dirname(path)
+    if not os.path.exists(parent):
+        return path
+    base = os.path.basename(path).lower()
+    for f in os.listdir(parent):
+        if f.lower() == base:
+            return os.path.join(parent, f)
+    return path
 
 def escape_path_for_ffmpeg(p: str) -> str:
     p = p.replace('\\', '/')
@@ -178,29 +199,45 @@ def send_ntfy_notification(title, body, image_path=None):
     title_b64 = "=?utf-8?B?" + base64.b64encode(title.encode("utf-8")).decode("ascii") + "?="
     body_b64 = "=?utf-8?B?" + base64.b64encode(body.encode("utf-8")).decode("ascii") + "?="
     
-    headers = {
-        "Title": title_b64,
-        "Message": body_b64,
-        "Priority": "default",
-        "Tags": "musical_note,clapper"
-    }
-    try:
-        if image_path and os.path.exists(image_path):
-            headers["X-Filename"] = os.path.basename(image_path)
+    # If image_path exists, send a single combined notification containing both text body and image attachment
+    if image_path and os.path.exists(image_path):
+        try:
+            print(f"[ntfy] Sending single combined notification with cover attachment: {image_path}")
+            headers = {
+                "Title": title_b64,
+                "X-Message": body_b64,
+                "Priority": "default",
+                "Tags": "musical_note,picture",
+                "X-Filename": os.path.basename(image_path)
+            }
             with open(image_path, "rb") as f:
                 res = requests.put(url, data=f, headers=headers, timeout=15)
-        else:
-            # Fallback to standard POST with text in body if no image exists
-            res = requests.post(url, data=body.encode("utf-8"), headers={"Title": title_b64, "Priority": "default", "Tags": "musical_note,clapper"}, timeout=10)
-            
-        if res.status_code == 200:
-            print("[ntfy] Notification sent successfully to your phone!")
+            if res.status_code == 200:
+                print("[ntfy] Single attachment + text notification sent successfully!")
+                return True
+            else:
+                print(f"[ntfy] Single notification failed ({res.status_code}): {res.text}. Trying text fallback.")
+        except Exception as e:
+            print(f"[ntfy] Error sending single notification: {e}")
+
+    # Fallback or text-only notification
+    try:
+        print("[ntfy] Sending text notification...")
+        res_text = requests.post(
+            url, 
+            data=body.encode("utf-8"), 
+            headers={"Title": title_b64, "Priority": "default", "Tags": "musical_note,clapper"}, 
+            timeout=10
+        )
+        if res_text.status_code == 200:
+            print("[ntfy] Text notification sent successfully!")
             return True
         else:
-            print(f"[ntfy] Failed to send notification: {res.status_code} {res.text}")
+            print(f"[ntfy] Text notification failed: {res_text.status_code} {res_text.text}")
+            return False
     except Exception as e:
-        print(f"[ntfy] Error sending notification: {e}")
-    return False
+        print(f"[ntfy] Error sending text notification: {e}")
+        return False
 
 def generate_previews(song_name, format_mode="viral_part", **kwargs):
     """
@@ -304,12 +341,7 @@ def generate_previews(song_name, format_mode="viral_part", **kwargs):
             except:
                 return 60.0
 
-        duration = get_video_duration(input_source)
-        half_duration = max(10.0, duration / 2.0)
-        fade_start = half_duration - 3.0
-        text_fade_start = half_duration - 2.0
-        
-        print(f"[Previews] Generating dynamic half-duration video preview from {input_source} (0.0s to {half_duration:.2f}s)...")
+        total_dur = get_video_duration(input_source)
         width, height = get_video_dimensions(input_source, ffmpeg_exe="ffmpeg")
         title_size = int(width * 0.05)
         artist_size = int(width * 0.024)
@@ -332,30 +364,40 @@ def generate_previews(song_name, format_mode="viral_part", **kwargs):
                 if row: author = row[0]
             except:
                 pass
-        if not author: author = "Traditional"
+        if not author: author = settings.get("author") or "Abilene"
+
+        # -------------------------------------------------------------
+        # 2a. Generate Website Preview Video (_preview.mp4)
+        # Duration: 50% of total video duration starting from 0.0s
+        # Endscreen text: "Unlock sheets below"
+        # -------------------------------------------------------------
+        web_start = 0.0
+        web_clip_dur = max(10.0, total_dur / 2.0)
+        web_end = web_start + web_clip_dur
+        web_fade_start = max(0.0, web_clip_dur - 2.0)
         
         import tempfile
         import uuid
-        uid = uuid.uuid4().hex[:8]
+        uid1 = uuid.uuid4().hex[:8]
         temp_dir = tempfile.gettempdir()
         
-        title_txt = os.path.join(temp_dir, f"_title_{uid}.txt")
-        artist_txt = os.path.join(temp_dir, f"_artist_{uid}.txt")
-        endscreen_txt = os.path.join(temp_dir, f"_endscreen_{uid}.txt")
+        title_txt = os.path.join(temp_dir, f"_title_{uid1}.txt")
+        artist_txt = os.path.join(temp_dir, f"_artist_{uid1}.txt")
+        endscreen_web_txt = os.path.join(temp_dir, f"_endscreen_web_{uid1}.txt")
         
         with open(title_txt, "w", encoding="utf-8") as f:
             f.write(song_name)
         with open(artist_txt, "w", encoding="utf-8") as f:
             f.write(author)
-        with open(endscreen_txt, "w", encoding="utf-8") as f:
-            f.write("Unlock full Sheets & MIDI below")
+        with open(endscreen_web_txt, "w", encoding="utf-8") as f:
+            f.write("Unlock sheets below")
             
         title_txt_esc = escape_path_for_ffmpeg(title_txt)
         artist_txt_esc = escape_path_for_ffmpeg(artist_txt)
-        endscreen_txt_esc = escape_path_for_ffmpeg(endscreen_txt)
+        endscreen_web_esc = escape_path_for_ffmpeg(endscreen_web_txt)
         
-        filter_complex = (
-            f"[0:v]fade=type=out:start_time={fade_start}:duration=1.0:color=black[v_fade]; "
+        filter_web = (
+            f"[0:v]fade=type=out:start_time={web_fade_start:.2f}:duration=1.5:color=black[v_fade]; "
             f"[v_fade]drawtext=fontfile='{font_title_esc}':textfile='{title_txt_esc}':fontcolor=white:fontsize={title_size}"
             f":x=(w-text_w)/2:y=(h/2)-{int(height*0.06)}:shadowcolor=black@0.6:shadowx=4:shadowy=4"
             f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'[v1]; "
@@ -364,36 +406,144 @@ def generate_previews(song_name, format_mode="viral_part", **kwargs):
             f":x=(w-text_w)/2:y=(h/2)+{int(height*0.05)}:shadowcolor=black@0.6:shadowx=3:shadowy=3"
             f":alpha='if(lt(t,1),t,if(lt(t,3.5),1,if(lt(t,4.5),4.5-t,0)))'[v2]; "
             
-            f"[v2]drawtext=fontfile='{font_title_esc}':textfile='{endscreen_txt_esc}':fontcolor=white:fontsize={int(width*0.038)}"
+            f"[v2]drawtext=fontfile='{font_title_esc}':textfile='{endscreen_web_esc}':fontcolor=white:fontsize={int(width*0.038)}"
             f":x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.6:shadowx=3:shadowy=3"
-            f":alpha='if(lt(t,{text_fade_start}),0,min(1,(t-{text_fade_start})/0.5))'"
+            f":alpha='if(lt(t,{web_fade_start:.2f}),0,min(1,(t-{web_fade_start:.2f})/0.5))'"
         )
         
-        cmd = [
+        print(f"[Previews] Generating Website Preview clip (50% duration: 0.00s to {web_end:.2f}s, Endscreen: 'Unlock sheets below')...")
+        cmd_web = [
             "ffmpeg", "-y",
-            "-to", f"{half_duration:.2f}",
+            "-ss", f"{web_start:.2f}",
+            "-to", f"{web_end:.2f}",
             "-i", input_source,
-            "-filter_complex", filter_complex,
-            "-af", f"afade=type=out:start_time={fade_start}:duration=3.0",
+            "-filter_complex", filter_web,
+            "-af", f"afade=type=out:start_time={web_fade_start:.2f}:duration=2.0",
             "-c:v", "libx264", "-preset", "fast", "-crf", "28",
             "-c:a", "aac", "-b:a", "128k",
             "-movflags", "+faststart",
             dest_preview
         ]
         creation_flags = 0x08000000 if os.name == 'nt' else 0
-        rc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
-        
+        rc_web = subprocess.run(cmd_web, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+        try:
+            os.remove(endscreen_web_txt)
+        except:
+            pass
+
+        if rc_web == 0:
+            print(f"[Previews] Success: Website Preview Video generated -> {dest_preview}")
+        else:
+            print(f"[Previews] Error: FFmpeg failed to generate website preview video.")
+
+        # -------------------------------------------------------------
+        # 2b. Generate Social Media Teaser Video (TikToks/{song_name} Teaser.mp4)
+        # Input: TikToks/{song_name}.mp4 (9:16 vertical portrait video)
+        # Duration: hook_start to hook_end (exact frame decoding with -ss after -i)
+        # Title subtitle: "Short Preview"
+        # Endscreen text: "Full video coming soon"
+        # -------------------------------------------------------------
+        if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and float(hook_end) > float(hook_start):
+            teaser_start = float(hook_start)
+            teaser_end = float(hook_end)
+            teaser_dur = teaser_end - teaser_start
+            
+            tiktoks_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
+            teaser_dest = os.path.join(tiktoks_dir, f"{song_name} Teaser.mp4")
+            
+            hook_sub = kwargs.get("subtitle_hook")
+            if hook_sub is None:
+                hook_sub = settings.get("subtitle_hook", "Short Preview")
+            if hook_sub is None:
+                hook_sub = ""
+                
+            zoom_val = kwargs.get("zoom")
+            shift_val = kwargs.get("shift")
+
+            clean_base = song_name
+            if clean_base.lower().endswith(" teaser"): clean_base = clean_base[:-7].strip()
+            if clean_base.lower().endswith(" easy"): clean_base = clean_base[:-5].strip()
+            
+            midi_p = settings.get("midi_path", "")
+            if not midi_p:
+                midi_candidates = [
+                    f"C:\\Cakewalk Projects\\{clean_base}\\{clean_base}.mid",
+                    f"C:\\Cakewalk Projects\\{song_name}\\{song_name}.mid"
+                ]
+                for mc in midi_candidates:
+                    if os.path.exists(mc):
+                        midi_p = mc
+                        break
+
+            if (zoom_val is None or shift_val is None) and midi_p and os.path.exists(midi_p):
+                try:
+                    from auto_crop import calculate_auto_crop
+                    az, ash = calculate_auto_crop(midi_p, left_tolerance_keys=1, right_tolerance_keys=4)
+                    if zoom_val is None: zoom_val = az
+                    if shift_val is None: shift_val = ash
+                except Exception as ex_crop:
+                    print(f"[Previews] Note calculating auto_crop for teaser: {ex_crop}")
+
+            if zoom_val is None: zoom_val = settings.get("zoom", 1.5)
+            if shift_val is None: shift_val = settings.get("shift", 0)
+
+            zoom_val = str(zoom_val)
+            shift_val = str(shift_val)
+            theme_val = settings.get("theme", "warm")
+
+            cmd_teaser = [
+                sys.executable, os.path.join(tools_dir, "video_generator.py"),
+                "--video", input_source,
+                "--title", f"{song_name} Teaser",
+                "--author", author,
+                "--subtitle", hook_sub.strip(),
+                "--start_time", str(teaser_start),
+                "--end_time", str(teaser_end),
+                "--zoom", zoom_val,
+                "--shift", shift_val,
+                "--theme", theme_val,
+                "--use_portrait_addon",
+                "--force"
+            ]
+            if midi_p:
+                cmd_teaser.extend(["--midipath", midi_p])
+            if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
+                cmd_teaser.append("--visualizer")
+            rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                
+            if rc_teaser == 0 and os.path.exists(teaser_dest):
+                print(f"[Previews] Success: Created 9:16 Social Media Teaser video in TikToks -> {teaser_dest}")
+                
+                # --- Export Isolated MP3 of the Hook Video to C:\Dev\meloscribe\mp3 preview ---
+                try:
+                    mp3_preview_dir = settings.get("mp3_preview_dir", r"C:\Dev\meloscribe\mp3 preview")
+                    os.makedirs(mp3_preview_dir, exist_ok=True)
+                    mp3_teaser_dest = os.path.join(mp3_preview_dir, f"{song_name} Teaser.mp3")
+                    
+                    print(f"[Previews] Exporting isolated Hook MP3 -> {mp3_teaser_dest}...")
+                    cmd_mp3 = [
+                        "ffmpeg", "-y",
+                        "-i", teaser_dest,
+                        "-vn",
+                        "-c:a", "libmp3lame",
+                        "-b:a", "192k",
+                        mp3_teaser_dest
+                    ]
+                    rc_mp3 = subprocess.run(cmd_mp3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                    if rc_mp3 == 0:
+                        print(f"[Previews] Success: Isolated Hook MP3 saved -> {mp3_teaser_dest}")
+                    else:
+                        print(f"[Previews] Warning: FFmpeg failed to extract isolated Hook MP3.")
+                except Exception as ex_mp3:
+                    print(f"[Previews] Warning: Exception exporting isolated Hook MP3: {ex_mp3}")
+            else:
+                print(f"[Previews] Error: FFmpeg failed to generate 9:16 teaser video.")
+
         try:
             os.remove(title_txt)
             os.remove(artist_txt)
-            os.remove(endscreen_txt)
         except:
             pass
-            
-        if rc == 0:
-            print(f"[Previews] Success: Dynamic half-duration video preview generated.")
-        else:
-            print(f"[Previews] Error: FFmpeg failed to generate video preview.")
     else:
         print(f"[Previews] Warning: Could not find normal video for preview generation: {input_source}")
 
@@ -600,11 +750,14 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             for key in ("hidden", "paymentsDisabled", "format"):
                 if key in existing:
                     new_song[key] = existing[key]
-            songs_list[existing_idx] = new_song
-            print(f"[Website Sync] Updated existing entry for '{clean_name}' (ID: {new_song['id']})")
+                    
+            # Move updated song entry to top of songs.json list (index 0) so it appears first on website
+            songs_list.pop(existing_idx)
+            songs_list.insert(0, new_song)
+            print(f"[Website Sync] Updated existing entry for '{clean_name}' (ID: {new_song['id']}) and moved to top of catalog (index 0)!")
         else:
-            songs_list.append(new_song)
-            print(f"[Website Sync] Added new entry for '{clean_name}' (ID: {next_id})")
+            songs_list.insert(0, new_song)
+            print(f"[Website Sync] Added new entry for '{clean_name}' (ID: {next_id}) to top of catalog (index 0)!")
         
         # Write to frontend songs.json
         with open(website_json_path, "w", encoding="utf-8") as f:
@@ -620,6 +773,7 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 print(f"[Website Sync] Warning: could not write local songs.json: {e}")
             
         # Copy clean cover to website directory so it's committed to Git
+        settings = get_settings()
         covers_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
         local_cover_path = os.path.join(covers_dir, f"{clean_name}_clean.jpg")
         website_cover_path = os.path.join(r"c:\Dev\meloscribe-frontend\website\public\covers", f"{clean_name}_clean.jpg")
@@ -633,6 +787,34 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 print(f"[Website Sync] Warning: failed to copy cover to website: {copy_err}")
                 
         print(f"[Website Sync] Automatically added song '{clean_name}' (ID: {next_id}, Price: {clean_price}, Theme: {theme}, Ko-fi: {kofi_id}) to website songs.json!")
+
+        # Automatically commit and push catalog changes + preview assets to GitHub and VM
+        try:
+            import subprocess
+            frontend_dir = r"c:\Dev\meloscribe-frontend"
+            if os.path.exists(frontend_dir):
+                creation_flags = 0x08000000 if os.name == 'nt' else 0
+                subprocess.run(["git", "add", "website/src/data/songs.json", "website/public/audio-previews/", "website/public/covers/"], cwd=frontend_dir, check=False, creationflags=creation_flags)
+                res_commit = subprocess.run(["git", "commit", "-m", f"Auto-sync {clean_name} to website catalog"], cwd=frontend_dir, capture_output=True, text=True, creationflags=creation_flags)
+                if "nothing to commit" not in res_commit.stdout.lower() and "nothing to commit" not in res_commit.stderr.lower():
+                    subprocess.run(["git", "push", "origin", "main"], cwd=frontend_dir, check=False, creationflags=creation_flags)
+                    print("[Website Sync] Successfully committed & pushed catalog updates to GitHub for live website deployment!")
+                else:
+                    print("[Website Sync] Catalog already up to date on GitHub.")
+
+                ssh_key = r"C:\Dev\ssh-key-2026-05-07.key"
+                if not os.path.exists(ssh_key):
+                    ssh_key = r"C:\Dev\meloscribe\ssh-key-2026-05-07.key"
+                local_songs = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+                if os.path.exists(ssh_key) and os.path.exists(local_songs):
+                    subprocess.run([
+                        "scp", "-i", ssh_key, "-o", "StrictHostKeyChecking=accept-new",
+                        local_songs,
+                        "ubuntu@152.70.23.171:/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json"
+                    ], check=False, creationflags=creation_flags)
+                    print("[Website Sync] Successfully synced songs.json to production VM!")
+        except Exception as push_err:
+            print(f"[Website Sync] Warning: Git push / VM sync error: {push_err}")
         return True
     except Exception as e:
         print(f"[Website Sync] Error syncing song to website: {e}")
@@ -658,7 +840,7 @@ def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg
     song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
     
     res = tpl
-    res = res.replace("#{song}", f"#{hashtag_name}")
+    res = re.sub(r'#\s*\{song\}', f"#{hashtag_name}", res)
     res = res.replace("{song_hashtag}", f"#{hashtag_name}")
     res = res.replace("{song_link}", song_link)
     res = res.replace("{song}", base_song)
@@ -770,13 +952,12 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
         if is_tut:
             label_part += " Tutorial"
             
-        # Try full title format first
-        title = f"🎹 {base_song} - Piano Cover & Tutorial ({label_part}) by {author}"
+        # Try format {song} - {author} {label}
+        title = f"🎹 {base_song} - {author} {label_part}"
         if len(title) > 100:
-            title = f"🎹 {base_song} - Piano Cover & Tutorial ({label_part})"
+            title = f"🎹 {base_song} - {label_part}"
         if len(title) > 100:
-            max_song_len = 100 - len(f"🎹  - Piano Cover & Tutorial ({label_part})") - 3
-            title = f"🎹 {base_song[:max_song_len]}... - Piano Cover & Tutorial ({label_part})"
+            title = title[:97] + "..."
             
         # Build Description
         settings = get_settings()
@@ -784,9 +965,11 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
             "Enjoy this piano arrangement of {song} by {author}! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
             "👉 Click the Pin to get the Sheet Music (PDF), MIDI & practice videos!\n\n"
             "Follow for more aesthetic piano covers and tutorials.\n\n"
-            "#piano #pianocover #pianotutorial #sheetmusic #{song} {song_link}"
+            "#piano #pianocover #pianotutorial #sheetmusic #{song}"
         )
         desc_template = settings.get("desc_template_pinterest") or tokens.get("desc_template_pinterest") or default_tpl
+        if is_tut:
+            desc_template = desc_template.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(desc_template, song_name, author, label_part)
         if len(desc) > 500:
             desc = desc[:497] + "..."
@@ -1353,26 +1536,39 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
     
     if not os.path.exists(video_path):
         print(f"❌ Error: Video not found at {video_path}")
-        return
+        sys.exit(1)
 
     # 2. Build Caption Text
     tiktok_tpl = settings.get("desc_template_tiktok") or (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
         "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #cover"
     )
+    if is_tut:
+        tiktok_tpl = tiktok_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
     full_title = format_description_template(tiktok_tpl, song_name, author_name, label)
     
-    # Resolve cover image path
+    # Resolve cover image path with full fallbacks (including hook.jpg for Teasers)
     covers_dir = settings.get("covers_dir")
-    cover_filename = f"{song_name}{prefix}.jpg"
+    clean_base = song_name.replace(" Teaser", "").replace(" Easy", "").strip()
     image_path = None
     if covers_dir:
-        image_path = os.path.join(covers_dir, cover_filename)
-        if not os.path.exists(image_path):
-            image_path = os.path.join(covers_dir, f"{song_name}.jpg")
+        candidates = [
+            f"{song_name}{prefix}.jpg",
+            f"{clean_base} hook.jpg",
+            f"{clean_base} hook_wide.jpg",
+            f"{clean_base}_clean.jpg",
+            f"{clean_base}.jpg",
+            f"{song_name}.jpg"
+        ]
+        for cand in candidates:
+            cand_path = os.path.join(covers_dir, cand)
+            cand_path = resolve_case_insensitive_path(cand_path)
+            if cand_path and os.path.exists(cand_path):
+                image_path = cand_path
+                break
 
     # Send description and cover image to user's phone via ntfy
     print("Sending caption, hashtags, and cover image to ntfy...")
@@ -1392,7 +1588,7 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
         print("❌ TikTok API Upload failed.")
         sys.exit(1)
 
-def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=None, force=False):
+def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=None, force=False, subtitle_hook=None):
     import subprocess
     settings = get_settings()
     r2_account_id = settings.get("r2_account_id")
@@ -1412,7 +1608,7 @@ def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=
     # Generate preview clip + audio MP3 FIRST so they exist when we upload them
     print(f"[R2 Upload] Generating preview assets before upload...")
     try:
-        generate_previews(song_name, format_mode, hook_start=hook_start, hook_end=hook_end)
+        generate_previews(song_name, format_mode, hook_start=hook_start, hook_end=hook_end, subtitle_hook=subtitle_hook)
     except Exception as e:
         print(f"[R2 Upload] Warning: preview generation error: {e}")
 
@@ -1433,18 +1629,6 @@ def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=
                 print(f"[R2 Upload] Skipping (not found): {os.path.basename(local_path)}")
                 return False
             local_size = os.path.getsize(local_path)
-            
-            if not force:
-                # Check if file already exists in R2 with same size
-                try:
-                    head = s3.head_object(Bucket=r2_bucket, Key=key)
-                    r2_size = head.get('ContentLength', 0)
-                    if r2_size == local_size:
-                        print(f"[R2 Upload] Already exists on R2 (size match): {key}. Skipping upload.")
-                        return True
-                except Exception:
-                    pass
-                
             size_mb = local_size / (1024 * 1024)
             print(f"[R2 Upload] Uploading {key} ({size_mb:.1f} MB)...")
             s3.upload_file(
@@ -1563,35 +1747,8 @@ def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=
                 title_txt_esc = escape_path_for_ffmpeg(title_txt)
                 artist_txt_esc = escape_path_for_ffmpeg(artist_txt)
                 
-                # Check and generate metronome click track for the slow tutorial version
+                # Video already contains metronome audio from Keysight recording — skip generating secondary click track to prevent double metronome audio
                 metro_wav = None
-                if is_slow:
-                    slow_midi = None
-                    try:
-                        for f in os.listdir(cakewalk_dir):
-                            if f.lower() == f"{song_name.lower()} slow.mid":
-                                slow_midi = os.path.join(cakewalk_dir, f)
-                                break
-                    except Exception:
-                        pass
-                    
-                    if slow_midi and os.path.exists(slow_midi):
-                        try:
-                            print(f"[Watermark Local] Generating metronome click track from {slow_midi}...")
-                            video_duration = get_duration_seconds(input_source)
-                            audio_delay = get_audio_delay(input_source)
-                            m_offset = 0.0
-                            try:
-                                import sys
-                                if "args" in globals():
-                                    m_offset = getattr(globals()["args"], "metro_offset", 0.0)
-                                elif hasattr(sys.modules["__main__"], "args"):
-                                    m_offset = getattr(sys.modules["__main__"].args, "metro_offset", 0.0)
-                            except Exception:
-                                pass
-                            metro_wav = generate_metronome_track(slow_midi, video_duration, audio_delay, metro_offset=m_offset)
-                        except Exception as e:
-                            print(f"[Watermark Local] WARNING: Failed to generate metronome track: {e}")
 
                 # Filter string with both title/subtitle fade-in/fade-out AND corner watermark
                 filter_str = (
@@ -1658,35 +1815,7 @@ def upload_to_r2(song_name, format_mode="viral_part", hook_start=None, hook_end=
             if os.path.exists(preview_vid_path):
                 upload_file(preview_vid_path, f"{prefix}/{song_name}_preview.mp4", "video/mp4")
 
-        # Copy to Packages folder on local disk
-        packages_dir = settings.get("packages_dir", r"C:\Dev\meloscribe\packages")
-        if packages_dir:
-            import shutil
-            song_pkg_dir = os.path.join(packages_dir, song_name)
-            os.makedirs(song_pkg_dir, exist_ok=True)
-            print(f"[R2 Upload] Copying customer package files to: {song_pkg_dir}")
-            
-            # List of (source_path, target_filename) to copy
-            to_copy = [
-                (os.path.join(musescore_dir, f"{song_name}.pdf"), f"{song_name}.pdf"),
-                (os.path.join(cakewalk_dir, f"{song_name}.mid"), f"{song_name}.mid"),
-                (os.path.join(cakewalk_dir, f"{song_name} slow.mid"), f"{song_name} slow.mid"),
-                (temp_wm_paths.get(f"{song_name}.mp4") or os.path.join(keysight_dir, f"{song_name}.mp4"), f"{song_name}.mp4"),
-                (temp_wm_paths.get(f"{song_name} slow.mp4") or os.path.join(keysight_dir, f"{song_name} slow.mp4"), f"{song_name} slow.mp4"),
-            ]
-            if format_mode == "full_arrangement":
-                to_copy.append((os.path.join(keysight_dir, f"{song_name}_preview.mp4"), f"{song_name}_preview.mp4"))
-                
-            for src, filename in to_copy:
-                if os.path.exists(src):
-                    dest = os.path.join(song_pkg_dir, filename)
-                    try:
-                        shutil.copy2(src, dest)
-                        print(f"  Copied: {filename}")
-                    except Exception as copy_err:
-                        print(f"  Warning: Failed to copy {filename}: {copy_err}")
-                else:
-                    print(f"  Skipping (not found): {filename}")
+
             
 
 
@@ -1736,6 +1865,7 @@ if __name__ == "__main__":
     parser.add_argument("--metro_offset", type=float, default=0.0, help="Shift metronome clicks by this many beats (e.g. 0.5)")
     parser.add_argument("--hook_start", type=float, default=None, help="Hook start time in seconds")
     parser.add_argument("--hook_end", type=float, default=None, help="Hook end time in seconds")
+    parser.add_argument("--subtitle_hook", type=str, default=None, help="Custom subtitle for Hook/Teaser video")
     
     args = parser.parse_args()
     
@@ -1770,7 +1900,7 @@ if __name__ == "__main__":
         if not success:
             sys.exit(1)
     elif args.mode == "r2":
-        success = upload_to_r2(args.song, format_mode=format_mode, hook_start=args.hook_start, hook_end=args.hook_end, force=args.force)
+        success = upload_to_r2(args.song, format_mode=format_mode, hook_start=args.hook_start, hook_end=args.hook_end, force=args.force, subtitle_hook=args.subtitle_hook)
         if not success:
             sys.exit(1)
     elif args.mode == "youtube":
@@ -1835,18 +1965,23 @@ if __name__ == "__main__":
             format_mode = "full_arrangement"
             
         thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
+        thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
         yt_tpl = settings.get("desc_template_youtube") or (
-            "🎹 {song}{label} - {author}\n\n"
+            "🎹 {song} - {author}{label}\n\n"
             "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
             "Sheet Music (PDF) & MIDI files -> Link in Bio\n\n"
             "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
-            "#piano #pianocover #pianotutorial #music #synthesia #keysight"
+            "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
         )
+        if is_tut:
+            yt_tpl = yt_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(yt_tpl, args.song, args.author, label)
         tags = ["piano", "tutorial", "synthesia", "cover", base_song, args.author, "music", "piano cover"]
-        post_video(video_path, f"{base_song}{label} - {args.author} | Piano Cover", desc, tags,
+        yt_url = post_video(video_path, f"{base_song} - {args.author}{label} | Piano Cover", desc, tags,
                    publish_at_dt=dt_obj, privacy="public", format=format_mode,
-                   thumbnail_path=thumbnail_path if format_mode == "full_arrangement" else None)
+                   thumbnail_path=thumbnail_path)
+        if not yt_url:
+            sys.exit(1)
     elif args.mode == "instagram":
         try:
             from meloscribe.backend.ig_poster import post_reel
@@ -1892,12 +2027,16 @@ if __name__ == "__main__":
         video_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}.mp4")
 
         ig_tpl = settings.get("desc_template_instagram") or (
-            "🎹 {song}{label} - {author}\n\n"
+            "🎹 {song} - {author}{label}\n\n"
             "Sheet Music & MIDI -> Link in Bio (Ko-Fi)\n\n"
-            "#piano #pianocover #pianotutorial #synthesia #music #pianomusic"
+            "#piano #pianocover #pianotutorial #synthesia #music #pianomusic #{song}"
         )
+        if is_tut:
+            ig_tpl = ig_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         caption = format_description_template(ig_tpl, args.song, args.author, label)
-        post_reel(video_path, caption, publish_at_dt=dt_obj)
+        success = post_reel(video_path, caption, publish_at_dt=dt_obj)
+        if not success:
+            sys.exit(1)
     elif args.mode == "facebook":
         try:
             from meloscribe.backend.fb_poster import post_video
@@ -1941,15 +2080,15 @@ if __name__ == "__main__":
             suffix = " teaser"
 
         
-        # Check duration dynamically to decide between Reel and Video
+        # Check duration dynamically to decide between Reel and Video (Reels support up to 90s)
         portrait_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}.mp4")
         duration = get_duration_seconds(portrait_path)
         print(f"[Facebook Uploader] Checked video duration: {duration:.2f} seconds")
         
-        is_short = duration <= 60.0
+        is_short = duration <= 90.0
         
         if is_short:
-            print("[Facebook Uploader] Duration <= 60s -> Uploading as Reel (Portrait 9:16).")
+            print("[Facebook Uploader] Duration <= 90s -> Uploading as Reel (Portrait 9:16).")
             video_path = portrait_path
             format_mode = "viral_part"
         else:
@@ -1960,17 +2099,30 @@ if __name__ == "__main__":
                 video_path = portrait_path
             format_mode = "full_arrangement"
             
-        thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
+        if format_mode == "full_arrangement":
+            wide_thumb = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}_wide.jpg")
+            wide_thumb = resolve_case_insensitive_path(wide_thumb)
+            if os.path.exists(wide_thumb):
+                thumbnail_path = wide_thumb
+            else:
+                thumbnail_path = resolve_case_insensitive_path(os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg"))
+        else:
+            thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
+            thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
         
         fb_tpl = settings.get("desc_template_facebook") or (
-            "🎹 {song}{label} - {author} | Piano Cover\n\n"
-            "Sheet Music & MIDI: https://ko-fi.com/meloscribe?utm_source=facebook&utm_medium={medium}\n\n"
-            "#piano #pianocover #synthesia #music"
+            "🎹 {song} - {author}{label}\n\n"
+            "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
+            "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
         )
+        if is_tut:
+            fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(fb_tpl, args.song, args.author, label, medium_arg='reel' if format_mode == "viral_part" else 'video')
-        post_video(video_path, f"{base_song}{label} - {args.author}", desc,
+        success = post_video(video_path, f"{base_song} - {args.author}{label}", desc,
                    format=format_mode, thumbnail_path=thumbnail_path,
                    publish_at_dt=dt_obj)
+        if not success:
+            sys.exit(1)
     elif args.mode == "tiktok":
         run_tiktok(args.song, args.author, schedule_dt=getattr(args, 'datetime', None), profile=args.profile)
     elif args.mode == "threads":
@@ -2008,9 +2160,13 @@ if __name__ == "__main__":
         video_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}.mp4")
 
         th_tpl = settings.get("desc_template_threads") or (
-            "🎹 {song}{label} - {author}\n\n"
+            "🎹 {song} - {author}{label}\n\n"
             "Sheet Music & MIDI -> Ko-Fi (link in bio)\n\n"
-            "#piano #pianocover #pianotutorial #synthesia #music"
+            "#piano #pianocover #pianotutorial #synthesia #music #{song}"
         )
+        if is_tut:
+            th_tpl = th_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         caption = format_description_template(th_tpl, args.song, args.author, label)
-        threads_post(video_path, caption)
+        success = threads_post(video_path, caption)
+        if not success:
+            sys.exit(1)

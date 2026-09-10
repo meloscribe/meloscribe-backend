@@ -37,6 +37,12 @@ router = APIRouter()
 class WorkflowRequest(BaseModel):
     song: str = ""
     author: str = ""
+    subtitle: str = ""
+    subtitle_normal: str = ""
+    subtitle_slow: str = ""
+    subtitle_hook: str = ""
+    subtitle_easy_normal: str = ""
+    subtitle_easy_slow: str = ""
     theme: str = "warm"
     price: str = "4.00"
     format: str = "viral_part"
@@ -54,9 +60,12 @@ class WorkflowRequest(BaseModel):
     shift: int = 0
     enableVisualizerNormal: bool = True
     enableVisualizerTutorial: bool = True
+    enableVisualizerWideNormal: bool = True
+    enableVisualizerWideTutorial: bool = True
     enableVisualizerHook: bool = True
     enableMetronome: bool = True
     enablePortraitAddon: bool = True
+    manual_crop: bool = False
     timesig: str = "auto"
     metro_offset: float = 0.0
     scheduleDate: str = ""
@@ -74,11 +83,17 @@ is_batch_processing = False
 # -------------------------------------------------------------------
 # Process Runner (streams stdout -> WebSocket)
 # -------------------------------------------------------------------
-async def run_tool(cmd: list[str], label: str = ""):
-    active_workflow_task["stop_requested"] = False
+workflow_global_progress = 0.0
+
+async def run_tool(cmd: list[str], label: str = "", base_progress: float = 0.0, slice_weight: float = 0.1):
+    global workflow_global_progress
+    if active_workflow_task.get("stop_requested"):
+        print(f"[Workflow] Stop requested — skipping execution of {label}")
+        return -1
     loop = asyncio.get_event_loop()
 
     def _run():
+        global workflow_global_progress
         with process_lock:
             active_workflow_task["current_process"] = subprocess.Popen(
                 cmd,
@@ -100,49 +115,65 @@ async def run_tool(cmd: list[str], label: str = ""):
             except Exception:
                 pass
 
-        for line in iter(active_workflow_task["current_process"].stdout.readline, ""):
-            if active_workflow_task["stop_requested"]:
-                break
-            
-            # Write to persistent log file
-            try:
-                log_file = Path(__file__).resolve().parent / "backend_logs.txt"
-                with open(log_file, "a", encoding="utf-8") as lf:
-                    lf.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{label}] {line}")
-            except Exception:
-                pass
+        proc = active_workflow_task.get("current_process")
+        if proc and proc.stdout:
+            import time
+            while True:
+                line = proc.stdout.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                    continue
 
-            asyncio.run_coroutine_threadsafe(
-                manager.broadcast({"type": "log", "message": line.rstrip()}),
-                loop,
-            )
-            if line.startswith("PROGRESS:") or line.startswith("VIS_PROGRESS:"):
+                if active_workflow_task.get("stop_requested"):
+                    break
+                
+                # Write to persistent log file
                 try:
-                    pct = int(line.split(":")[1].replace("%", "").strip().split("(")[0])
-                    asyncio.run_coroutine_threadsafe(
-                        manager.broadcast({"type": "progress", "value": pct / 100}),
-                        loop,
-                    )
+                    log_file = Path(__file__).resolve().parent / "backend_logs.txt"
+                    with open(log_file, "a", encoding="utf-8") as lf:
+                        lf.write(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] [{label}] {line}")
                 except Exception:
                     pass
-            elif "[R2 Upload] Progress:" in line:
-                try:
-                    pct_str = line.split("Progress:")[1].split("%")[0].strip()
-                    pct = float(pct_str)
-                    asyncio.run_coroutine_threadsafe(
-                        manager.broadcast({"type": "progress", "value": pct / 100.0}),
-                        loop,
-                    )
-                except Exception:
-                    pass
-            
-            if "SUCCESS! Video uploaded at https://youtu.be/" in line:
-                yt_url = line.split("at ")[-1].strip()
-                if song_arg:
-                    captured_youtube_urls[song_arg] = yt_url
 
-        active_workflow_task["current_process"].wait()
-        rc = active_workflow_task["current_process"].returncode
+                asyncio.run_coroutine_threadsafe(
+                    manager.broadcast({"type": "log", "message": line.rstrip()}),
+                    loop,
+                )
+                if line.startswith("PROGRESS:") or line.startswith("VIS_PROGRESS:"):
+                    try:
+                        pct = int(line.split(":")[1].replace("%", "").strip().split("(")[0])
+                        calculated = base_progress + ((pct / 100.0) * slice_weight)
+                        workflow_global_progress = max(workflow_global_progress, min(0.99, calculated))
+                        asyncio.run_coroutine_threadsafe(
+                            manager.broadcast({"type": "progress", "value": workflow_global_progress}),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+                elif "[R2 Upload] Progress:" in line:
+                    try:
+                        pct_str = line.split("Progress:")[1].split("%")[0].strip()
+                        pct = float(pct_str)
+                        calculated = base_progress + ((pct / 100.0) * slice_weight)
+                        workflow_global_progress = max(workflow_global_progress, min(0.99, calculated))
+                        asyncio.run_coroutine_threadsafe(
+                            manager.broadcast({"type": "progress", "value": workflow_global_progress}),
+                            loop,
+                        )
+                    except Exception:
+                        pass
+                
+                if "SUCCESS! Video uploaded at https://youtu.be/" in line:
+                    yt_url = line.split("at ")[-1].strip()
+                    if song_arg:
+                        captured_youtube_urls[song_arg] = yt_url
+
+        rc = 0
+        if proc:
+            rc_wait = proc.wait()
+            rc = rc_wait if rc_wait is not None else (proc.returncode if proc.returncode is not None else 0)
         active_workflow_task["current_process"] = None
         return rc
 
@@ -154,6 +185,9 @@ async def run_tool(cmd: list[str], label: str = ""):
 # -------------------------------------------------------------------
 async def _run_workflow(req: WorkflowRequest):
     active_workflow_task["stop_requested"] = False  # Reset lock!
+    active_workflow_task["pause_requested"] = False # Reset pause!
+    active_workflow_task["waiting_for_crop"] = False # Reset crop wait!
+    active_workflow_task["waiting_for_hook"] = False # Reset hook wait!
     python = sys.executable
     song = req.song
     author = req.author
@@ -221,6 +255,9 @@ async def _run_workflow(req: WorkflowRequest):
     # --- Step 2: Wait for MuseScore PDF Sheets ---
     steps.append(("WAIT_FOR_PDF", "Wait for MuseScore PDF Sheets"))
 
+    # --- Step 3: Wait for Crop Confirmation (Zoom & Shift) ---
+    steps.append(("WAIT_FOR_CROP_CONFIRMATION", f"Confirm Crop Safe Zone ({song})"))
+
     # --- Phase 2: Portrait Video & Uploads ---
     zoom_val = str(req.zoom)
     shift_val = str(req.shift)
@@ -229,6 +266,7 @@ async def _run_workflow(req: WorkflowRequest):
 
     for suffix, folder_name in versions:
         v_song = f"{song}{suffix}"
+        is_easy = ("easy" in suffix.lower())
         for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
             vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
             midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
@@ -239,6 +277,21 @@ async def _run_workflow(req: WorkflowRequest):
                 "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
                 "--midipath", midi_path, "--theme", req.theme
             ]
+            
+            # Select specific subtitle for each version
+            if not is_easy:
+                sub_text = req.subtitle_normal if vtype == "normal" else req.subtitle_slow
+            else:
+                sub_text = req.subtitle_easy_normal if vtype == "normal" else req.subtitle_easy_slow
+                
+            if not sub_text and req.subtitle:
+                sub_text = req.subtitle
+                
+            if sub_text:
+                sub_text = sub_text.strip(" -")
+                
+            if sub_text:
+                cmd_portrait.extend(["--subtitle", sub_text])
             if vtype == "tutorial":
                 cmd_portrait.append("--metronome")
                 if req.metro_offset:
@@ -258,11 +311,13 @@ async def _run_workflow(req: WorkflowRequest):
                     "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
                     "--midipath", midi_path, "--theme", req.theme, "--wide"
                 ]
+                if sub_text:
+                    cmd_wide.extend(["--subtitle", sub_text])
                 if vtype == "tutorial":
                     cmd_wide.append("--metronome")
                     if req.metro_offset:
                         cmd_wide.extend(["--metro_offset", str(req.metro_offset)])
-                if (vtype == "normal" and req.enableVisualizerNormal) or (vtype == "tutorial" and req.enableVisualizerTutorial):
+                if (vtype == "normal" and req.enableVisualizerWideNormal) or (vtype == "tutorial" and req.enableVisualizerWideTutorial):
                     cmd_wide.append("--visualizer")
                 steps.append((cmd_wide, f"Generate Widescreen Video ({v_song}{prefix})"))
 
@@ -270,6 +325,9 @@ async def _run_workflow(req: WorkflowRequest):
         v_song = f"{song}{suffix}"
         cmd = [python, "-u", "cover_generator.py", "--song", v_song, "--author", author, "--theme", req.theme]
         steps.append((cmd, f"Generate Cover Art ({v_song})"))
+
+    # --- Step 4: Wait for Hook Segment Confirmation ---
+    steps.append(("WAIT_FOR_HOOK_CONFIRMATION", f"Confirm Hook Segment ({song})"))
 
     if req.doR2:
         for suffix, folder_name in versions:
@@ -283,6 +341,8 @@ async def _run_workflow(req: WorkflowRequest):
                 "--hook_start", str(req.hook_start),
                 "--hook_end", str(req.hook_end)
             ]
+            if req.subtitle_hook is not None:
+                cmd.extend(["--subtitle_hook", req.subtitle_hook.strip()])
             if req.metro_offset:
                 cmd.extend(["--metro_offset", str(req.metro_offset)])
             steps.append((cmd, f"Cloudflare R2 Upload ({v_song})"))
@@ -294,90 +354,82 @@ async def _run_workflow(req: WorkflowRequest):
             cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
             steps.append((cmd, f"Local Catalog Sync ({v_song})"))
 
-        socials = []
-        if req.doYoutube: socials.append("youtube")
-        if req.doInstagram: socials.append("instagram")
-        if req.doFacebook: socials.append("facebook")
-        if req.doTiktok: socials.append("tiktok")
-        if req.doThreads: socials.append("threads")
-        if req.doPinterest: socials.append("pinterest")
+        socials = ["youtube", "instagram", "facebook", "tiktok", "threads", "pinterest"]
 
-        if socials:
-            from datetime import datetime as dt, timedelta
-            interval_days = int(settings.get("schedule_interval_days", 3))
+        from datetime import datetime as dt, timedelta
+        interval_days = int(settings.get("schedule_interval_days", 3))
+        
+        start_date_str = req.scheduleDate
+        start_time_str = req.scheduleTime or "16:00"
+        
+        try:
+            current_date = dt.fromisoformat(start_date_str)
+        except Exception:
+            current_date = dt.now()
+        
+        # Build social videos queue based on 5-video-split-strategy
+        social_videos = []
+        if req.format == "full_arrangement":
+            # V1: Teaser (Hook)
+            social_videos.append((song, "hook", "Teaser"))
+            # V2: Normal Speed Original
+            social_videos.append((song, "normal", "Normal Speed Original"))
+            # V3: Slow Speed Original (Tutorial)
+            social_videos.append((song, "tutorial", "Slow Speed Original"))
+            if has_easy:
+                # V4: Normal Speed Easy
+                social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
+                # V5: Slow Speed Easy (Tutorial)
+                social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
+        else: # viral_part (Teaser is not needed as video is already short)
+            # V1: Normal Speed Original
+            social_videos.append((song, "normal", "Normal Speed Original"))
+            # V2: Slow Speed Original (Tutorial)
+            social_videos.append((song, "tutorial", "Slow Speed Original"))
+            if has_easy:
+                # V3: Normal Speed Easy
+                social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
+                # V4: Slow Speed Easy (Tutorial)
+                social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
+        
+        # Add steps for each video version, with each step scheduled with the proper date spacing
+        for v_idx, (v_song, profile, label) in enumerate(social_videos):
+            plat_date = current_date + timedelta(days=v_idx * interval_days)
+            plat_date_str = plat_date.date().isoformat()
             
-            start_date_str = req.scheduleDate
-            start_time_str = req.scheduleTime or "16:00"
-            
-            try:
-                current_date = dt.fromisoformat(start_date_str)
-            except Exception:
-                current_date = dt.now()
-            
-            # Build social videos queue based on 5-video-split-strategy
-            social_videos = []
-            if req.format == "full_arrangement":
-                # V1: Teaser (Hook)
-                social_videos.append((song, "hook", "Teaser"))
-                # V2: Normal Speed Original
-                social_videos.append((song, "normal", "Normal Speed Original"))
-                # V3: Slow Speed Original (Tutorial)
-                social_videos.append((song, "tutorial", "Slow Speed Original"))
-                if has_easy:
-                    # V4: Normal Speed Easy
-                    social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
-                    # V5: Slow Speed Easy (Tutorial)
-                    social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
-            else: # viral_part (Teaser is not needed as video is already short)
-                # V1: Normal Speed Original
-                social_videos.append((song, "normal", "Normal Speed Original"))
-                # V2: Slow Speed Original (Tutorial)
-                social_videos.append((song, "tutorial", "Slow Speed Original"))
-                if has_easy:
-                    # V3: Normal Speed Easy
-                    social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
-                    # V4: Slow Speed Easy (Tutorial)
-                    social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
-            
-            # Add steps for each video version, with each step scheduled with the proper date spacing
-            for v_idx, (v_song, profile, label) in enumerate(social_videos):
-                plat_date = current_date + timedelta(days=v_idx * interval_days)
-                plat_date_str = plat_date.date().isoformat()
-                
-                for platform in socials:
-                    cmd = [
-                        python, "-u", "upload_bot.py",
-                        "--song", v_song,
-                        "--author", author,
-                        "--mode", platform,
-                        "--profile", profile,
-                        "--format", req.format
-                    ]
-                    if req.scheduleDate:
-                        cmd.extend(["--schedule_date", plat_date_str, "--schedule_time", start_time_str])
-                    steps.append((cmd, f"Social Upload ({platform} - {label})"))
+            for platform in socials:
+                cmd = [
+                    python, "-u", "upload_bot.py",
+                    "--song", v_song,
+                    "--author", author,
+                    "--mode", platform,
+                    "--profile", profile,
+                    "--format", req.format
+                ]
+                if req.scheduleDate:
+                    cmd.extend(["--schedule_date", plat_date_str, "--schedule_time", start_time_str])
+                steps.append((cmd, f"Social Upload ({platform} - {label})"))
 
-        if req.doKofi:
-            # Original Ko-Fi Upload step
+        # Original Ko-Fi Upload step
+        cmd = [
+            python, "-u", "upload_bot.py",
+            "--song", song,
+            "--mode", "kofi",
+            "--price", req.price,
+            "--format", req.format
+        ]
+        steps.append((cmd, f"Ko-Fi Upload ({song})"))
+        
+        # Easy Ko-Fi Upload step
+        if has_easy:
             cmd = [
                 python, "-u", "upload_bot.py",
-                "--song", song,
+                "--song", f"{song} Easy",
                 "--mode", "kofi",
                 "--price", req.price,
                 "--format", req.format
             ]
-            steps.append((cmd, f"Ko-Fi Upload ({song})"))
-            
-            # Easy Ko-Fi Upload step
-            if has_easy:
-                cmd = [
-                    python, "-u", "upload_bot.py",
-                    "--song", f"{song} Easy",
-                    "--mode", "kofi",
-                    "--price", req.price,
-                    "--format", req.format
-                ]
-                steps.append((cmd, f"Ko-Fi Upload ({song} Easy)"))
+            steps.append((cmd, f"Ko-Fi Upload ({song} Easy)"))
     else:
         # Server-side upload (localUpload is False)
         # Always run local catalog sync so local files are updated
@@ -386,36 +438,59 @@ async def _run_workflow(req: WorkflowRequest):
             cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
             steps.append((cmd, f"Local Catalog Sync ({v_song})"))
 
-        socials = []
-        if req.doYoutube: socials.append("youtube")
-        if req.doInstagram: socials.append("instagram")
-        if req.doFacebook: socials.append("facebook")
-        if req.doTiktok: socials.append("tiktok")
-        if req.doThreads: socials.append("threads")
-        if req.doPinterest: socials.append("pinterest")
-
-        server_platforms = list(socials)
-        
-        if server_platforms:
-            start_time_str = req.scheduleTime or "16:00"
-            cmd = [
-                python, "-u", "stage_to_server.py",
-                "--song", song,
-                "--author", author,
-                "--price", req.price,
-                "--schedule_date", req.scheduleDate or "",
-                "--schedule_time", start_time_str,
-                "--platforms", ",".join(server_platforms),
-                "--format", req.format
-            ]
-            if has_easy:
-                cmd.append("--has_easy")
-            steps.append((cmd, f"Stage to Oracle VM Server ({song})"))
+        server_platforms = ["youtube", "instagram", "facebook", "tiktok", "threads", "pinterest"]
+        start_time_str = req.scheduleTime or "16:00"
+        cmd = [
+            python, "-u", "stage_to_server.py",
+            "--song", song,
+            "--author", author,
+            "--price", req.price,
+            "--schedule_date", req.scheduleDate or "",
+            "--schedule_time", start_time_str,
+            "--platforms", ",".join(server_platforms),
+            "--format", req.format
+        ]
+        if has_easy:
+            cmd.append("--has_easy")
+        steps.append((cmd, f"Stage to Oracle VM Server ({song})"))
 
     total = len(steps)
     if total == 0:
         await manager.broadcast({"type": "done", "message": "No tasks selected."})
         return
+
+    # Calculate step weights (in estimated seconds) for monotonic weighted progress
+    def estimate_weight(c, l):
+        lbl = str(l).lower()
+        if "keysight" in lbl or "handbrake" in lbl:
+            return 180.0  # 3 mins per Keysight render
+        elif "portrait video" in lbl:
+            return 45.0
+        elif "widescreen video" in lbl:
+            return 35.0
+        elif "musescore" in lbl:
+            return 15.0
+        elif "r2 upload" in lbl:
+            return 20.0
+        elif "cover art" in lbl:
+            return 5.0
+        elif "stage to oracle" in lbl or "social upload" in lbl:
+            return 15.0
+        elif c in ["WAIT_FOR_PDF", "WAIT_FOR_CROP_CONFIRMATION", "WAIT_FOR_HOOK_CONFIRMATION"]:
+            return 3.0
+        return 10.0
+
+    step_weights = [estimate_weight(c, l) for c, l in steps]
+    total_weight = sum(step_weights) if step_weights else 1.0
+
+    cumulative_starts = []
+    curr_w = 0.0
+    for w in step_weights:
+        cumulative_starts.append(curr_w / total_weight)
+        curr_w += w
+
+    global workflow_global_progress
+    workflow_global_progress = 0.0
 
     start_idx = max(0, req.resumeFromStep)
     for i in range(start_idx, total):
@@ -427,14 +502,35 @@ async def _run_workflow(req: WorkflowRequest):
             return
 
         cmd, label = steps[i]
+        base_progress = cumulative_starts[i]
+        slice_weight = step_weights[i] / total_weight
+        workflow_global_progress = max(workflow_global_progress, base_progress)
+        await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
+        # Ticker state for smooth progress updates during long steps
+        ticker_stop = False
+        est_sec = step_weights[i]
+
+        async def smooth_ticker(b_prog, s_w, e_sec):
+            elapsed = 0.0
+            global workflow_global_progress
+            while not ticker_stop and not active_workflow_task["stop_requested"]:
+                await asyncio.sleep(1.0)
+                elapsed += 1.0
+                ratio = min(0.95, elapsed / e_sec)
+                val = b_prog + (ratio * s_w)
+                workflow_global_progress = max(workflow_global_progress, val)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
+        ticker_task = asyncio.create_task(smooth_ticker(base_progress, slice_weight, est_sec))
+
         if cmd == "WAIT_FOR_PDF":
             musescore_dir = Path(settings.get("musescore_dir", r"C:\Dev\meloscribe\Scores"))
             expected_files = [musescore_dir / f"{song}.pdf"]
-            if has_easy:
+            if has_easy and ((musescore_dir / f"{song} Easy.pdf").exists() or (musescore_dir / f"{song} Easy.mscz").exists() or (Path(cakewalk_dir) / f"{song} Easy").exists()):
                 expected_files.append(musescore_dir / f"{song} Easy.pdf")
 
             await manager.broadcast({"type": "status", "message": f"Waiting for MuseScore PDF exports in Scores/ directory..."})
-            await manager.broadcast({"type": "progress", "value": i / total})
             
             while not active_workflow_task["stop_requested"]:
                 missing = [f.name for f in expected_files if not f.exists()]
@@ -445,9 +541,211 @@ async def _run_workflow(req: WorkflowRequest):
                 await manager.broadcast({"type": "status", "message": f"⏳ Waiting for: {', '.join(missing)}..."})
                 await asyncio.sleep(2)
             
+            ticker_stop = True
+            ticker_task.cancel()
+            workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+            await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
             if active_workflow_task["stop_requested"]:
                 return
             continue
+            
+        if cmd == "WAIT_FOR_CROP_CONFIRMATION":
+            # Auto-skip Crop Confirmation if all TikTok portrait videos already exist on disk (>1MB)
+            tiktoks_dir = Path(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"))
+            expected_vids = [tiktoks_dir / f"{song}.mp4", tiktoks_dir / f"{song} slow.mp4"]
+            if has_easy:
+                expected_vids.extend([tiktoks_dir / f"{song} Easy.mp4", tiktoks_dir / f"{song} Easy slow.mp4"])
+            
+            all_exist = all(f.exists() and f.stat().st_size > 1024 * 1024 for f in expected_vids)
+            if all_exist:
+                await manager.broadcast({
+                    "type": "log",
+                    "message": f"⚡ [Auto-Skip] All TikTok portrait videos for '{song}' already exist. Auto-skipping Crop Confirmation!"
+                })
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
+
+            # Auto-calculate optimal zoom & shift from MIDI
+            midi_path = f"C:\\Cakewalk Projects\\{song}\\{song}.mid"
+            auto_zoom, auto_shift = 1.50, 0
+            try:
+                sys.path.append(str(TOOLS_DIR))
+                from auto_crop import calculate_auto_crop
+                auto_zoom, auto_shift = calculate_auto_crop(midi_path, left_tolerance_keys=1, right_tolerance_keys=4)
+                active_workflow_task["zoom"] = auto_zoom
+                active_workflow_task["shift"] = auto_shift
+            except Exception as e:
+                print(f"[AutoCrop] Calculation error: {e}")
+                
+            if not req.manual_crop:
+                await manager.broadcast({
+                    "type": "log",
+                    "message": f"🎯 Smart Auto-Crop: Zoom {auto_zoom:.2f}x, Shift {auto_shift:+d}px (1 key left, +4 keys right tolerance). Continuing automatically..."
+                })
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
+
+            active_workflow_task["waiting_for_crop"] = True
+            active_workflow_task["pause_requested"] = True
+            await manager.broadcast({
+                "type": "crop_confirmation_required",
+                "message": f"⏸️ Keysight video rendered! Please inspect and confirm crop safe zone (Zoom & Shift) for '{song}'.",
+                "song": song,
+                "zoom": auto_zoom,
+                "shift": auto_shift
+            })
+            await manager.broadcast({"type": "status", "message": f"⏸️ Waiting for Crop Confirmation (Zoom & Shift)..."})
+            
+            while active_workflow_task.get("waiting_for_crop", False) and not active_workflow_task["stop_requested"]:
+                await asyncio.sleep(0.5)
+            
+            ticker_stop = True
+            ticker_task.cancel()
+            workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+            await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
+            if active_workflow_task["stop_requested"]:
+                return
+            
+            active_workflow_task["pause_requested"] = False
+            await manager.broadcast({
+                "type": "log",
+                "message": f"✅ Crop confirmed! Zoom: {active_workflow_task.get('zoom', auto_zoom)}x, Shift: {active_workflow_task.get('shift', auto_shift)}px. Resuming video rendering..."
+            })
+            continue
+
+        if cmd == "WAIT_FOR_HOOK_CONFIRMATION":
+            active_workflow_task["waiting_for_hook"] = True
+            active_workflow_task["pause_requested"] = True
+            await manager.broadcast({
+                "type": "hook_confirmation_required",
+                "message": f"⏸️ TikTok video rendered! Please select hook clip segment (Start & End) for '{song}'.",
+                "song": song,
+                "hook_start": active_workflow_task.get("hook_start", req.hook_start),
+                "hook_end": active_workflow_task.get("hook_end", req.hook_end)
+            })
+            await manager.broadcast({"type": "status", "message": f"⏸️ Waiting for Hook Confirmation (Start & End)..."})
+            
+            while active_workflow_task.get("waiting_for_hook", False) and not active_workflow_task["stop_requested"]:
+                await asyncio.sleep(0.5)
+            
+            ticker_stop = True
+            ticker_task.cancel()
+            workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+            await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
+            if active_workflow_task["stop_requested"]:
+                return
+            
+            active_workflow_task["pause_requested"] = False
+            await manager.broadcast({
+                "type": "log",
+                "message": f"✅ Hook confirmed! Start: {active_workflow_task.get('hook_start', 0.0)}s, End: {active_workflow_task.get('hook_end', 60.0)}s. Resuming workflow..."
+            })
+            continue
+
+        # Dynamically override --hook_start and --hook_end for upload commands if hook was confirmed
+        if isinstance(cmd, list) and any(arg in ["--hook_start", "--hook_end"] for arg in cmd):
+            current_hstart = str(active_workflow_task.get("hook_start", req.hook_start))
+            current_hend = str(active_workflow_task.get("hook_end", req.hook_end))
+            new_cmd = []
+            skip_next = False
+            for c_val in cmd:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if c_val == "--hook_start":
+                    new_cmd.extend(["--hook_start", current_hstart])
+                    skip_next = True
+                elif c_val == "--hook_end":
+                    new_cmd.extend(["--hook_end", current_hend])
+                    skip_next = True
+                else:
+                    new_cmd.append(c_val)
+            cmd = new_cmd
+
+        # Dynamically override --zoom and --shift for video_generator commands if crop was confirmed
+        if isinstance(cmd, list) and any("video_generator.py" in str(arg) for arg in cmd):
+            current_zoom = str(active_workflow_task.get("zoom", 1.50))
+            current_shift = str(active_workflow_task.get("shift", 0))
+            new_cmd = []
+            skip_next = False
+            for c_val in cmd:
+                if skip_next:
+                    skip_next = False
+                    continue
+                if c_val == "--zoom":
+                    new_cmd.extend(["--zoom", current_zoom])
+                    skip_next = True
+                elif c_val == "--shift":
+                    new_cmd.extend(["--shift", current_shift])
+                    skip_next = True
+                else:
+                    new_cmd.append(c_val)
+            cmd = new_cmd
+
+        # Dynamically check live settings toggles RIGHT BEFORE executing upload steps
+        fresh_settings = load_settings()
+
+        if label.startswith("Cloudflare R2 Upload"):
+            if not fresh_settings.get("doR2", True):
+                await manager.broadcast({"type": "log", "message": f"⏭️ [Upload] Cloudflare R2 toggle is OFF in live settings — skipping {label}."})
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
+
+        if label.startswith("Social Upload"):
+            social_plat = None
+            try:
+                social_plat = label.split("Social Upload (")[1].split(" - ")[0].split(")")[0].strip().lower()
+            except Exception:
+                pass
+            if social_plat:
+                plat_key = f"do{social_plat.capitalize()}"
+                if not fresh_settings.get(plat_key, True):
+                    await manager.broadcast({"type": "log", "message": f"⏭️ [Upload] {social_plat.capitalize()} toggle ('{plat_key}') is OFF in live settings — skipping {label}."})
+                    ticker_stop = True
+                    ticker_task.cancel()
+                    workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                    await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                    continue
+
+        if label.startswith("Stage to Oracle VM Server"):
+            live_platforms = []
+            for plat_name, setting_key in [("youtube", "doYoutube"), ("instagram", "doInstagram"), ("facebook", "doFacebook"), ("tiktok", "doTiktok"), ("threads", "doThreads"), ("pinterest", "doPinterest")]:
+                if fresh_settings.get(setting_key, True):
+                    live_platforms.append(plat_name)
+            
+            if not live_platforms:
+                await manager.broadcast({"type": "log", "message": f"⏭️ [Upload] All social platform toggles are OFF in live settings — skipping Stage to Oracle VM Server."})
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
+            
+            if isinstance(cmd, list) and "--platforms" in cmd:
+                p_idx = cmd.index("--platforms")
+                cmd[p_idx + 1] = ",".join(live_platforms)
+                await manager.broadcast({"type": "log", "message": f"ℹ️ [Upload Staging] Live target platforms checked right before execution: {', '.join(live_platforms)}"})
+
+        if label.startswith("Ko-Fi Upload"):
+            if not fresh_settings.get("doKofi", True):
+                await manager.broadcast({"type": "log", "message": f"⏭️ [Upload] Ko-Fi Upload toggle is OFF in live settings — skipping {label}."})
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
 
         platform = None
         if "Social Upload (" in label:
@@ -482,7 +780,6 @@ async def _run_workflow(req: WorkflowRequest):
 
         if label.startswith("Social Upload (youtube)") or label.startswith("Social Upload (instagram)") or label.startswith("Social Upload (facebook)") or label.startswith("Social Upload (threads)"):
             try:
-                from settings import load_settings
                 s_dict = load_settings()
                 if platform == "youtube" and s_dict.get("yt_category"):
                     cmd.extend(["--yt_category", s_dict.get("yt_category")])
@@ -500,12 +797,18 @@ async def _run_workflow(req: WorkflowRequest):
                 print(f"[Workflow] Error injecting YouTube URL: {e}")
             
         await manager.broadcast({"type": "status", "message": f"[{i+1}/{total}] {label}..."})
-        await manager.broadcast({"type": "progress", "value": i / total})
-        rc = await run_tool(cmd, label)
+        rc = await run_tool(cmd, label, base_progress, slice_weight)
+        
+        ticker_stop = True
+        ticker_task.cancel()
+        workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+        await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+
         if rc != 0 and not active_workflow_task["stop_requested"]:
             await manager.broadcast({"type": "done", "message": f"❌ {label} failed (exit code {rc}). Resume from step {i}."})
             return
 
+    workflow_global_progress = 1.0
     await manager.broadcast({"type": "progress", "value": 1.0})
     done_msg = "🎉 Automation Workflow completed successfully! All files are rendered, packaged, uploaded, and synced!"
     await manager.broadcast({"type": "done", "message": done_msg})
@@ -590,6 +893,7 @@ def batch_processor_worker():
                 keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
                 for suffix, folder_name in versions:
                     v_song = f"{song_name}{suffix}"
+                    is_easy = (suffix == " easy")
                     for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
                         vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
                         midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
@@ -601,6 +905,17 @@ def batch_processor_worker():
                             "--midipath", midi_path, "--theme", theme, "--use_portrait_addon",
                             "--force"
                         ]
+                        
+                        # Subtitle selection
+                        if not is_easy:
+                            sub_text = settings.get("subtitle_normal", "") if vtype == "normal" else settings.get("subtitle_slow", "")
+                        else:
+                            sub_text = settings.get("subtitle_easy_normal", "") if vtype == "normal" else settings.get("subtitle_easy_slow", "")
+                        if not sub_text and settings.get("subtitle", ""):
+                            sub_text = settings.get("subtitle", "")
+                        if sub_text:
+                            cmd_portrait.extend(["--subtitle", sub_text.strip()])
+                            
                         if vtype == "tutorial":
                             cmd_portrait.append("--metronome")
                         if has_easy:
@@ -623,8 +938,10 @@ def batch_processor_worker():
                     # Cover Generator
                     steps.append([python, "-u", str(TOOLS_DIR / "cover_generator.py"), "--song", v_song, "--author", author, "--theme", theme])
                     # R2 Upload
-
-                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2", "--format", fmt])
+                    cmd_r2 = [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--author", author, "--mode", "r2", "--format", fmt]
+                    if settings.get("subtitle_hook"):
+                        cmd_r2.extend(["--subtitle_hook", settings.get("subtitle_hook").strip()])
+                    steps.append(cmd_r2)
                     # Catalog sync
                     steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website", "--author", author])
                 
@@ -750,16 +1067,20 @@ async def start_workflow(req: WorkflowRequest):
 @router.post("/api/workflow/stop")
 def stop_workflow():
     active_workflow_task["stop_requested"] = True
-    proc = active_workflow_task["current_process"]
+    proc = active_workflow_task.get("current_process")
     if proc:
         try:
-            # If suspended, resume first so it can terminate properly
             import psutil
             try:
                 p = psutil.Process(proc.pid)
                 p.resume()
                 for child in p.children(recursive=True):
-                    child.resume()
+                    try:
+                        child.resume()
+                        child.kill()
+                    except:
+                        pass
+                p.kill()
             except:
                 pass
             subprocess.Popen(f"taskkill /F /T /PID {proc.pid}", shell=True,
@@ -767,6 +1088,13 @@ def stop_workflow():
                              creationflags=CREATION_FLAGS)
         except Exception:
             pass
+    # Forcefully terminate any orphaned scp.exe, ffmpeg.exe or background python subprocesses
+    try:
+        subprocess.Popen("taskkill /F /IM scp.exe /IM ffmpeg.exe", shell=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=CREATION_FLAGS)
+    except:
+        pass
     return {"status": "stop requested"}
 
 @router.post("/api/workflow/pause")
@@ -799,6 +1127,50 @@ def resume_workflow():
             print(f"[Workflow] Error resuming process: {e}")
     return {"status": "resumed"}
 
+class ConfirmCropRequest(BaseModel):
+    zoom: float = 1.50
+    shift: int = 0
+
+@router.post("/api/workflow/confirm-crop")
+def confirm_crop(req: ConfirmCropRequest):
+    active_workflow_task["zoom"] = req.zoom
+    active_workflow_task["shift"] = req.shift
+    active_workflow_task["waiting_for_crop"] = False
+    active_workflow_task["pause_requested"] = False
+    proc = active_workflow_task.get("current_process")
+    if proc:
+        try:
+            import psutil
+            p = psutil.Process(proc.pid)
+            p.resume()
+            for child in p.children(recursive=True):
+                child.resume()
+        except Exception as e:
+            print(f"[Workflow] Error resuming process on crop confirm: {e}")
+    return {"status": "confirmed", "zoom": req.zoom, "shift": req.shift}
+
+class ConfirmHookRequest(BaseModel):
+    hook_start: float = 0.0
+    hook_end: float = 60.0
+
+@router.post("/api/workflow/confirm-hook")
+def confirm_hook(req: ConfirmHookRequest):
+    active_workflow_task["hook_start"] = req.hook_start
+    active_workflow_task["hook_end"] = req.hook_end
+    active_workflow_task["waiting_for_hook"] = False
+    active_workflow_task["pause_requested"] = False
+    proc = active_workflow_task.get("current_process")
+    if proc:
+        try:
+            import psutil
+            p = psutil.Process(proc.pid)
+            p.resume()
+            for child in p.children(recursive=True):
+                child.resume()
+        except Exception as e:
+            print(f"[Workflow] Error resuming process on hook confirm: {e}")
+    return {"status": "confirmed", "hook_start": req.hook_start, "hook_end": req.hook_end}
+
 @router.post("/api/module/{module}")
 def run_individual_module(module: str, req: dict):
     python = sys.executable
@@ -822,7 +1194,10 @@ def run_individual_module(module: str, req: dict):
         keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
         vid_in = str(keysight_dir / f"{song}.mp4")
         midi_path = f"C:\\Cakewalk Projects\\{song}\\{song}.mid"
+        subtitle = settings.get("subtitle", "")
         cmd = [python, "-u", "video_generator.py", "--video", vid_in, "--title", song, "--author", author, "--type", "normal", "--zoom", "1.5", "--midipath", midi_path, "--theme", theme, "--use_portrait_addon"]
+        if subtitle:
+            cmd.extend(["--subtitle", subtitle])
     elif module == "cover_generator":
         cmd = [python, "-u", "cover_generator.py", "--song", song, "--author", author, "--theme", theme]
     elif module == "musescore":
@@ -836,6 +1211,19 @@ def run_individual_module(module: str, req: dict):
         
     threading.Thread(target=lambda: asyncio.run(run_tool(cmd, f"Module: {module}")), daemon=True).start()
     return {"status": "started"}
+
+@router.get("/api/workflow/auto-crop")
+def get_auto_crop_endpoint(song: str = ""):
+    if not song:
+        return {"zoom": 1.50, "shift": 0}
+    midi_path = f"C:\\Cakewalk Projects\\{song}\\{song}.mid"
+    try:
+        sys.path.append(str(TOOLS_DIR))
+        from auto_crop import calculate_auto_crop
+        zoom, shift = calculate_auto_crop(midi_path, left_tolerance_keys=1, right_tolerance_keys=4)
+        return {"zoom": zoom, "shift": shift}
+    except Exception as e:
+        return {"zoom": 1.50, "shift": 0, "error": str(e)}
 
 @router.get("/api/workflow/suggest-date")
 def get_suggested_date():
@@ -949,11 +1337,12 @@ async def add_website_song(request: Request):
                 
             existing_idx = next((i for i, s in enumerate(songs) if s.get("id") == payload.get("id")), -1)
             if existing_idx != -1:
-                songs[existing_idx] = payload
-                print(f"[Catalog Update] Updated existing song '{payload.get('title')}'")
+                songs.pop(existing_idx)
+                songs.insert(0, payload)
+                print(f"[Catalog Update] Updated existing song '{payload.get('title')}' and moved to top")
             else:
-                songs.append(payload)
-                print(f"[Catalog Add] Added new song '{payload.get('title')}'")
+                songs.insert(0, payload)
+                print(f"[Catalog Add] Added new song '{payload.get('title')}' to top")
                 
             with open(songs_path, "w", encoding="utf-8") as f:
                 json.dump(songs, f, indent=2, ensure_ascii=False)
@@ -1399,7 +1788,7 @@ async def regenerate_preview(req: dict):
         raise HTTPException(status_code=500, detail=f"DB error: {e}")
     
     format_mode = row[0] if row else "full_arrangement"
-    author = row[1] if row and len(row) > 1 and row[1] else "Traditional"
+    author = row[1] if row and len(row) > 1 and row[1] else (settings.get("author") or "Abilene")
     
     keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
     raw_path = keysight_dir / "RAW" / f"{song_name}_RAW.mp4"
@@ -1470,7 +1859,7 @@ async def regenerate_preview(req: dict):
     with open(artist_txt, "w", encoding="utf-8") as f:
         f.write(author)
     with open(endscreen_txt, "w", encoding="utf-8") as f:
-        f.write("Unlock full Sheets & MIDI below")
+        f.write("Full video coming soon")
         
     title_txt_esc = escape_path_for_ffmpeg(title_txt)
     artist_txt_esc = escape_path_for_ffmpeg(artist_txt)

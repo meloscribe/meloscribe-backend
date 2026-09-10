@@ -23,42 +23,49 @@ DEFAULT_SETTINGS = {
     "tiktok_client_secret": "",
     "threads_app_id": "26975285422066567",
     "threads_app_secret": "",
+    "r2_bucket": "meloscribe-assets",
     "schedule_interval_days": 3,
     "localUpload": False,
+    "subtitle_normal": "",
+    "subtitle_slow": "",
+    "subtitle_hook": "",
+    "subtitle_easy_normal": "",
+    "subtitle_easy_slow": "",
+    "manual_crop": False,
     "desc_template_youtube": (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #music #synthesia #keysight"
+        "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
     ),
     "desc_template_instagram": (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #synthesia #music #pianomusic"
+        "#piano #pianocover #pianotutorial #synthesia #music #pianomusic #{song}"
     ),
     "desc_template_facebook": (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "Check out my page for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #synthesia #music"
+        "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_threads": (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #synthesia #music"
+        "#piano #pianocover #pianotutorial #synthesia #music #{song}"
     ),
     "desc_template_tiktok": (
-        "🎹 {song}{label} - {author}\n\n"
+        "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #music #synthesia #cover"
+        "#piano #pianocover #pianotutorial #music #synthesia #cover #{song}"
     ),
     "desc_template_kofi": (
         "Get the learning package for my '{song}' tutorial! This download includes:\n\n"
@@ -98,25 +105,38 @@ DEFAULT_SETTINGS = {
         "all packed into a ZIP, because sometimes files get missing after uploading.\n\n"
         "This simplified sheet music/MIDI contains all unique musical sections as shown in the video."
     ),
+    "yt_upload_normal": True,
+    "yt_upload_tutorial": True,
     "yt_upload_easy": True,
+    "ig_upload_normal": True,
+    "ig_upload_tutorial": True,
     "ig_upload_easy": True,
+    "fb_upload_normal": True,
+    "fb_upload_tutorial": True,
     "fb_upload_easy": True,
+    "tt_upload_normal": True,
+    "tt_upload_tutorial": True,
     "tt_upload_easy": True,
+    "threads_upload_normal": True,
+    "threads_upload_tutorial": True,
     "threads_upload_easy": True,
-    "pinterest_upload_easy": True,
     "pinterest_upload_normal": True,
     "pinterest_upload_tutorial": True,
+    "pinterest_upload_easy": True,
     "doPinterest": True,
     "enableVisualizerNormal": True,
     "enableVisualizerTutorial": True,
-    "enableVisualizerHook": True,
+    "enableVisualizerWideNormal": True,
+    "enableVisualizerWideTutorial": True,
+    "enableMetronome": True,
     "metro_offset": 0.0,
     "desc_template_pinterest": (
         "Enjoy this piano arrangement of {song} by {author}! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "👉 Click the Pin to get the Sheet Music (PDF), MIDI & practice videos!\n\n"
         "Follow for more aesthetic piano covers and tutorials.\n\n"
         "#piano #pianocover #pianotutorial #sheetmusic #{song} {song_link}"
-    )
+    ),
+    "show_audit_tools": False
 }
 
 def load_settings():

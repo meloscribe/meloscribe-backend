@@ -5,6 +5,7 @@ Replaces Playwright browser automation with the official TikTok Direct Post API.
 Uses chunked uploading (FILE_UPLOAD) to support large video files.
 """
 import os
+import math
 import time
 import requests
 import subprocess
@@ -29,7 +30,7 @@ def get_video_duration_ms(video_path: str) -> int:
         print(f"[TikTok API] Warning: Failed to get duration, defaulting cover to 0ms. ({e})")
         return 0
 
-def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE") -> bool:
+def post_video(video_path: str, title: str, privacy: str = "SELF_ONLY") -> bool:
     """
     Uploads an MP4 video to TikTok inbox/drafts.
     Uses chunked file upload to bypass timeouts.
@@ -46,19 +47,19 @@ def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE")
     # 1. Prepare File Info
     file_size = os.path.getsize(video_path)
     
-    # TikTok recommends chunks between 5MB and 64MB. Let's use 20MB.
-    # But if the file is smaller than 20MB, we can just do 1 chunk.
-    chunk_size = 20 * 1024 * 1024 
-    if chunk_size > file_size:
+    # TikTok API Chunk Size Rules:
+    # 1. If file_size <= 64MB, we send 1 chunk with chunk_size == file_size.
+    # 2. If file_size > 64MB:
+    #    - chunk_size is 20MB (20 * 1024 * 1024 bytes).
+    #    - total_chunk_count MUST BE integer division: file_size // chunk_size.
+    if file_size <= 64 * 1024 * 1024:
         chunk_size = file_size
-
-    # TikTok expects total_chunk_count to be floor(file_size / chunk_size).
-    # Except if that is 0 (for small files), it must be at least 1.
-    total_chunks = file_size // chunk_size
-    if total_chunks == 0:
         total_chunks = 1
+    else:
+        chunk_size = 20 * 1024 * 1024
+        total_chunks = file_size // chunk_size
 
-    print(f"\n[TikTok API] Initializing Upload for '{os.path.basename(video_path)}'")
+    print(f"\n[TikTok API] Initializing Inbox Upload for '{os.path.basename(video_path)}'")
     print(f"             Size: {file_size / (1024*1024):.2f} MB | Chunks: {total_chunks}")
 
     # 2. Init Upload
@@ -67,23 +68,7 @@ def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE")
         "Content-Type": "application/json; charset=UTF-8"
     }
 
-    # Ensure title isn't too long (TikTok limit: ~2200 chars, but let's be safe)
-    if len(title) > 2000:
-        title = title[:1997] + "..."
-
-    # Get duration for cover frame (we inject the cover frame at the very end of the video)
-    duration_ms = get_video_duration_ms(video_path)
-    cover_timestamp = max(0, duration_ms - 50) # 50ms before the absolute end
-
     init_payload = {
-        "post_info": {
-            "title": title,
-            "privacy_level": privacy,
-            "disable_duet": False,
-            "disable_comment": False,
-            "disable_stitch": False,
-            "video_cover_timestamp_ms": cover_timestamp
-        },
         "source_info": {
             "source": "FILE_UPLOAD",
             "video_size": file_size,
