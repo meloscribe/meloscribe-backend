@@ -73,7 +73,16 @@ def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id:
     import io
     from pypdf import PdfReader, PdfWriter
     try:
-        text = f"Licensed to: {buyer_name} ({email})" if buyer_name else f"Licensed to: {email}"
+        name_str = (buyer_name or "").strip()
+        email_str = (email or "").strip()
+        if name_str and email_str:
+            text = f"Licensed to: {name_str} ({email_str})"
+        elif name_str:
+            text = f"Licensed to: {name_str}"
+        elif email_str:
+            text = f"Licensed to: {email_str}"
+        else:
+            text = "Licensed to: meloscribe customer"
         
         watermark_pdf_stream = generate_watermark_page(text)
         watermark_reader = PdfReader(watermark_pdf_stream)
@@ -207,7 +216,7 @@ EMAIL_TEMPLATES = {
         "help_text": "¿Necesitas ayuda? Responde directamente a este correo o visita"
     },
     "it": {
-        "purchase_subject": "🎹 Il tuo pacchetto musicale per {song_name} é pronto!",
+        "purchase_subject": "🎹 Il tuo pacchetto musicale per {song_name} è pronto!",
         "gift_subject": "🎁 Un regalo musicale per te: spartiti di {song_name}!",
         "heading_purchase": "🎹 I tuoi spartiti sono pronti!",
         "heading_gift": "🎁 Un regalo musicale per te!",
@@ -217,7 +226,7 @@ EMAIL_TEMPLATES = {
         "body_gift": "Hai ricevuto un pacchetto musicale per <strong>{song_name}</strong> in regalo!",
         "action": "Clicca sul pulsante qui sotto per scaricare i tuoi spartiti (PDF), i file MIDI e i tutorial video:",
         "button": "Scarica pacchetto musicale",
-        "footer": "Questo link di download é permanente. Puoi accedervi in qualsiasi momento per scaricare i tuoi file.",
+        "footer": "Questo link di download è permanente. Puoi accedervi in qualsiasi momento per scaricare i tuoi file.",
         "happy_practicing": "Buon esercizio,",
         "help_text": "Hai bisogno di aiuto? Rispondi direttamente a questa email o visita"
     }
@@ -445,6 +454,9 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             raise HTTPException(status_code=403, detail="Product is no longer available")
             
         price_str = song.get("price", "6 €")
+        if req.difficulty == "Easy" and song.get("easyPrice"):
+            price_str = song.get("easyPrice")
+            
         if "$" in price_str:
             currency = "usd"
         elif "£" in price_str:
@@ -462,13 +474,18 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             amount_cents = 600
             
         download_hash = uuid.uuid4().hex
-        origin = request.headers.get("origin") or "https://meloscribe.dev"
+        origin = request.headers.get("origin") or "https://www.meloscribe.dev"
+        if origin == "https://meloscribe.dev":
+            origin = "https://www.meloscribe.dev"
         
         stripe.api_key = get_stripe_api_key()
         if not stripe.api_key:
             raise HTTPException(status_code=500, detail="Stripe API key is not configured")
             
-        product_name = f"{song.get('title')} ({req.format.replace('_', ' ').title()} - {req.difficulty})"
+        if req.difficulty == "Easy":
+            product_name = f"{song.get('title')} (Easy Version)"
+        else:
+            product_name = f"{song.get('title')} (Original Version)"
         product_desc = "Includes PDF Sheet Music, MIDI Files, and Practice Video Tutorials"
         
         cover_image_path = song.get("coverImage", "")
@@ -476,7 +493,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if cover_image_path:
             import urllib.parse
             quoted_path = urllib.parse.quote(cover_image_path)
-            product_image = f"https://meloscribe.dev{quoted_path}"
+            product_image = f"https://www.meloscribe.dev{quoted_path}"
             
         def to_slug(text):
             s = text.lower()
@@ -502,6 +519,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 },
                 "quantity": 1,
             }],
+            allow_promotion_codes=True,
             billing_address_collection="auto",
             success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
@@ -898,8 +916,59 @@ def request_download(hash: str, type: str, request: Request):
         conn.commit()
     conn.close()
     
-    download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
-    return {"download_url": download_file_url, "download_count": new_count}
+    # For PDF, use proxy endpoint to apply watermark on demand.
+    # For videos and MIDIs, generate direct presigned R2 URL instantly (1 ms) to make download start immediately!
+    if type == "pdf":
+        download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
+        return {"download_url": download_file_url, "download_count": new_count}
+    else:
+        r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
+        r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
+        r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+
+        if r2_account_id and r2_access_key and r2_secret_key:
+            try:
+                import boto3, re
+                from botocore.config import Config
+                clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+                clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+                
+                if type == "midi":
+                    file_key = f"{clean_base}/{clean_base}.mid"
+                elif type == "midi_slow":
+                    file_key = f"{clean_base}/{clean_base} slow.mid"
+                elif type == "video":
+                    file_key = f"{clean_base}/{clean_base}.mp4"
+                elif type == "video_slow":
+                    file_key = f"{clean_base}/{clean_base} slow.mp4"
+                else:
+                    file_key = f"{clean_base} Full Package.zip"
+
+                s3 = boto3.client(
+                    's3',
+                    endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
+                    aws_access_key_id=r2_access_key,
+                    aws_secret_access_key=r2_secret_key,
+                    region_name='auto',
+                    config=Config(signature_version='s3v4')
+                )
+                filename = file_key.split('/')[-1]
+                presigned_url = s3.generate_presigned_url(
+                    ClientMethod='get_object',
+                    Params={
+                        'Bucket': r2_bucket, 
+                        'Key': file_key,
+                        'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                    },
+                    ExpiresIn=900
+                )
+                return {"download_url": presigned_url, "download_count": new_count}
+            except Exception as e:
+                print(f"[Download Request] Error generating presigned URL: {e}")
+
+        download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
+        return {"download_url": download_file_url, "download_count": new_count}
 
 @router.get("/api/download/file")
 def download_file(hash: str, type: str, request: Request):
@@ -957,7 +1026,7 @@ def download_file(hash: str, type: str, request: Request):
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
     r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
     r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download File] R2 credentials missing, using demo redirect fallback.")
@@ -979,18 +1048,22 @@ def download_file(hash: str, type: str, request: Request):
         import boto3
         from botocore.config import Config
         
+        import re
+        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+        clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+
         if type == "pdf":
-            file_key = f"{song_name}/{song_name}.pdf"
+            file_key = f"{clean_base}/{clean_base}.pdf"
         elif type == "midi":
-            file_key = f"{song_name}/{song_name}.mid"
+            file_key = f"{clean_base}/{clean_base}.mid"
         elif type == "midi_slow":
-            file_key = f"{song_name}/{song_name} slow.mid"
+            file_key = f"{clean_base}/{clean_base} slow.mid"
         elif type == "video":
-            file_key = f"{song_name}/{song_name}.mp4"
+            file_key = f"{clean_base}/{clean_base}.mp4"
         elif type == "video_slow":
-            file_key = f"{song_name}/{song_name} slow.mp4"
+            file_key = f"{clean_base}/{clean_base} slow.mp4"
         else:
-            file_key = f"{song_name} Full Package.zip"
+            file_key = f"{clean_base} Full Package.zip"
             
         s3 = boto3.client(
             's3',
@@ -1001,6 +1074,28 @@ def download_file(hash: str, type: str, request: Request):
             config=Config(signature_version='s3v4')
         )
         
+        # Verify key exists, or resolve dynamically by prefix and extension
+        try:
+            s3.head_object(Bucket=r2_bucket, Key=file_key)
+        except Exception:
+            print(f"[Download File] Key '{file_key}' not found directly, resolving dynamically under '{clean_base}/'...")
+            ext = ".pdf" if type == "pdf" else (".mid" if "midi" in type else (".mp4" if "video" in type else ".zip"))
+            is_slow = "slow" in type
+            res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{clean_base}/")
+            found_key = None
+            for obj in res_objs.get("Contents", []):
+                k = obj["Key"]
+                if k.endswith(ext):
+                    if is_slow and ("slow" in k.lower() or "tuto" in k.lower()):
+                        found_key = k
+                        break
+                    elif not is_slow and "slow" not in k.lower() and "tuto" not in k.lower() and "preview" not in k.lower():
+                        found_key = k
+                        break
+            if found_key:
+                print(f"[Download File] Resolved alternate R2 key: '{found_key}'")
+                file_key = found_key
+
         if type == "pdf":
             print(f"[Download File] Fetching '{file_key}' from R2 for watermarking...")
             pdf_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
@@ -1038,7 +1133,7 @@ def download_file(hash: str, type: str, request: Request):
 def verify_download(checkout_id: str):
     conn = sqlite3.connect(str(db_path))
     c = conn.cursor()
-    c.execute("SELECT song_name FROM purchases WHERE transaction_id = ? AND status = 'completed'", (checkout_id,))
+    c.execute("SELECT song_name FROM purchases WHERE transaction_id = ? AND (LOWER(status) = 'completed' OR LOWER(status) LIKE '%active%')", (checkout_id,))
     row = c.fetchone()
     conn.close()
     
@@ -1077,12 +1172,16 @@ def verify_download(checkout_id: str):
             config=Config(signature_version='s3v4')
         )
 
+        import re
+        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+        clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+
         file_specs = [
-            {"key": f"{song_name}/{song_name}.pdf",       "label": "Sheet Music (PDF)",          "type": "pdf"},
-            {"key": f"{song_name}/{song_name}.mid",       "label": "MIDI – Normal Speed",         "type": "midi"},
-            {"key": f"{song_name}/{song_name} slow.mid",  "label": "MIDI – Slow Practice",        "type": "midi"},
-            {"key": f"{song_name}/{song_name}.mp4",       "label": "Practice Video – Normal Speed", "type": "video"},
-            {"key": f"{song_name}/{song_name} slow.mp4",  "label": "Practice Video – Slow",       "type": "video"},
+            {"key": f"{clean_base}/{clean_base}.pdf",       "label": "Sheet Music (PDF)",          "type": "pdf"},
+            {"key": f"{clean_base}/{clean_base}.mid",       "label": "MIDI – Normal Speed",         "type": "midi"},
+            {"key": f"{clean_base}/{clean_base} slow.mid",  "label": "MIDI – Slow Practice",        "type": "midi"},
+            {"key": f"{clean_base}/{clean_base}.mp4",       "label": "Practice Video – Normal Speed", "type": "video"},
+            {"key": f"{clean_base}/{clean_base} slow.mp4",  "label": "Practice Video – Slow",       "type": "video"},
         ]
 
         files = []
@@ -1633,16 +1732,11 @@ def get_preview_video(song_name: str):
             except Exception as e:
                 print(f"Error reading format from catalog: {e}")
 
-        if format_mode == "viral_part":
-            file_key = f"{clean_name}/{clean_name}.mp4"
-        else:
-            file_key = f"{clean_name}/{clean_name}_preview.mp4"
-
+        file_key = f"{clean_name}/{clean_name}_preview.mp4"
         try:
             s3.head_object(Bucket=r2_bucket, Key=file_key)
         except Exception:
-            # Fallback check if the preferred file key doesn't exist
-            alt_key = f"{clean_name}/{clean_name}_preview.mp4" if format_mode == "viral_part" else f"{clean_name}/{clean_name}.mp4"
+            alt_key = f"{clean_name}/{clean_name}.mp4"
             try:
                 s3.head_object(Bucket=r2_bucket, Key=alt_key)
                 file_key = alt_key
@@ -1713,7 +1807,7 @@ def stream_preview_video(song_name: str, request: Request):
             for local_path in paths_to_try:
                 if os.path.exists(local_path):
                     print(f"[Preview Video] Serving local file: {local_path}")
-                    return FileResponse(local_path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
+                    return FileResponse(local_path, media_type="video/mp4", headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"})
             return None
 
         res = get_preview_video(song_name)
@@ -1760,7 +1854,7 @@ def stream_preview_video(song_name: str, request: Request):
             for h in ("content-type", "content-length", "content-range", "accept-ranges", "etag"):
                 if h in r2_resp.headers:
                     resp_headers[h] = r2_resp.headers[h]
-            resp_headers["Cache-Control"] = "public, max-age=86400"
+            resp_headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
             if "content-type" not in resp_headers:
                 resp_headers["content-type"] = "video/mp4"
 
@@ -2001,20 +2095,23 @@ def oauth_callback(code: str, state: str = "fb"):
     Handle authorization callback codes (for Facebook Graph / Threads APIs).
     Renders a premium success HTML block with micro-animations.
     """
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS auth_codes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            state TEXT UNIQUE,
-            code TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    c.execute("INSERT OR REPLACE INTO auth_codes (state, code) VALUES (?, ?)", (state, code))
-    conn.commit()
-    conn.close()
+    try:
+        db_path = Path(__file__).resolve().parent / "analytics.db"
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS auth_codes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                state TEXT UNIQUE,
+                code TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        c.execute("INSERT OR REPLACE INTO auth_codes (state, code) VALUES (?, ?)", (state, code))
+        conn.commit()
+        conn.close()
+    except Exception as db_err:
+        print(f"[OAuth Callback] Warning: Could not write auth code to DB: {db_err}")
     
     print(f"[OAuth Callback] Successfully captured code for state '{state}': {code[:15]}...")
     
