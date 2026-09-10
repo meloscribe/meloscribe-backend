@@ -1,5 +1,80 @@
 [
   {
+    "id": "58",
+    "title": "River Flows in You",
+    "artist": "Yiruma",
+    "difficulty": "Original / Easy",
+    "price": "6 €",
+    "kofiId": "price_1UCmWLQ4cuBqoYoXGg0gy1NH",
+    "stripePriceId": "price_1UCmWLQ4cuBqoYoXGg0gy1NH",
+    "coverImage": "/covers/River Flows in You_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/River Flows in You.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm",
+    "previewStart": 110.3,
+    "hasEasy": true,
+    "hasOriginal": true,
+    "easyPrice": "6 €",
+    "easyStripePriceId": "price_1UCmWzQ4cuBqoYoXCuDpwsgr",
+    "easyKofiId": "price_1UCmWzQ4cuBqoYoXCuDpwsgr",
+    "easyId": "59"
+  },
+  {
+    "id": "56",
+    "title": "Golden Brown",
+    "artist": "The Stranglers",
+    "difficulty": "Original / Easy",
+    "price": "6 €",
+    "kofiId": "price_1U3LRrQ4cuBqoYoXxvdfc9K1",
+    "stripePriceId": "price_1U3LRrQ4cuBqoYoXxvdfc9K1",
+    "coverImage": "/covers/Golden Brown_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Golden Brown.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm",
+    "hasEasy": true,
+    "hasOriginal": true,
+    "easyPrice": "6 €",
+    "easyStripePriceId": "price_1U3LSpQ4cuBqoYoXkGdCg5cT",
+    "easyKofiId": "price_1U3LSpQ4cuBqoYoXkGdCg5cT",
+    "easyId": "57"
+  },
+  {
+    "id": "5",
+    "title": "Sweetest Rain",
+    "artist": "Abilene",
+    "difficulty": "Original",
+    "price": "6 €",
+    "kofiId": "price_1TxsyBQ4cuBqoYoXiqseMs2j",
+    "stripePriceId": "pri_01kwap7tcvw6s23pq44pbv60aq",
+    "coverImage": "/covers/Sweetest Rain_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/Sweetest Rain.mp3",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "theme": "warm",
+    "pinned": true
+  },
+  {
+    "id": "54",
+    "title": "I don't know",
+    "artist": "Erika",
+    "difficulty": "Original / Easy",
+    "price": "6 €",
+    "kofiId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
+    "stripePriceId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
+    "coverImage": "/covers/I don't know_clean.jpg",
+    "audioPreviewUrl": "/audio-previews/I don't know.mp3",
+    "gradient": "from-purple-500/20 via-dark-700 to-purple-500/5",
+    "theme": "violet",
+    "format": "full_arrangement",
+    "hasEasy": true,
+    "hasOriginal": true,
+    "easyPrice": "6 €",
+    "easyStripePriceId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
+    "easyKofiId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
+    "easyId": "55",
+    "arrangemeUrl": "",
+    "isArrangeMe": false
+  },
+  {
     "id": "global_settings",
     "title": "Global Settings",
     "artist": "",
@@ -36,7 +111,9 @@
     "stripePriceId": "pri_01kwap7psqhq1kadfgm1zvt17n",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Sonne.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "paymentsDisabled": true,
+    "isArrangeMe": false
   },
   {
     "id": "3",
@@ -49,7 +126,8 @@
     "stripePriceId": "pri_01kwap7r150vgfbnxjjekmr06j",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Je te laisserai des mots.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "pinned": false
   },
   {
     "id": "4",
@@ -65,19 +143,6 @@
     "theme": "warm"
   },
   {
-    "id": "5",
-    "title": "Sweetest Rain",
-    "artist": "Abilene",
-    "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/Sweetest Rain_clean.jpg",
-    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "stripePriceId": "pri_01kwap7tcvw6s23pq44pbv60aq",
-    "theme": "warm",
-    "audioPreviewUrl": "/audio-previews/Sweetest Rain.mp3",
-    "kofiId": "prod_dummy123"
-  },
-  {
     "id": "6",
     "title": "We Wish You a Merry Xmas",
     "artist": "Traditional",
@@ -87,7 +152,7 @@
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "stripePriceId": "pri_01kwap7vmg93500mvg8e0rj82a",
     "theme": "cold",
-    "format": "viral_part"
+    "format": "full_arrangement"
   },
   {
     "id": "9",
@@ -99,7 +164,7 @@
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3",
     "theme": "warm",
-    "format": "viral_part",
+    "format": "full_arrangement",
     "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
     "kofiId": "prod_dummy123"
   },
@@ -127,7 +192,9 @@
     "coverImage": "/covers/The Scientist_clean.jpg",
     "audioPreviewUrl": "/audio-previews/The Scientist.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "paymentsDisabled": true,
+    "isArrangeMe": false
   },
   {
     "id": "13",
@@ -140,7 +207,9 @@
     "coverImage": "/covers/Mockingbird_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Mockingbird.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "paymentsDisabled": true,
+    "isArrangeMe": false
   },
   {
     "id": "14",
@@ -205,7 +274,8 @@
     "coverImage": "/covers/God Rest Ye Merry_clean.jpg",
     "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "theme": "cold"
+    "theme": "cold",
+    "pinned": true
   },
   {
     "id": "19",
@@ -232,7 +302,7 @@
     "theme": "cold",
     "audioPreviewUrl": "/audio-previews/Silent Night.mp3",
     "kofiId": "prod_dummy123",
-    "format": "viral_part"
+    "format": "full_arrangement"
   },
   {
     "id": "22",
@@ -245,7 +315,9 @@
     "stripePriceId": "pri_01kwap8afx26p78hem1c2hz3n9",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "paymentsDisabled": true,
+    "isArrangeMe": false
   },
   {
     "id": "23",
@@ -272,21 +344,6 @@
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Your love is my drug.mp3",
     "kofiId": "prod_dummy123"
-  },
-  {
-    "id": "32",
-    "title": "River Flows in You",
-    "artist": "Yiruma",
-    "difficulty": "Original",
-    "price": "4 €",
-    "kofiId": "prod_dummy123",
-    "stripePriceId": "pri_01kwap8gs5btjdcesxb7k3acz4",
-    "coverImage": "/covers/River Flows in You_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/River Flows in You.mp3",
-    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm",
-    "hidden": false,
-    "paymentsDisabled": false
   },
   {
     "id": "37",
@@ -325,32 +382,8 @@
     "coverImage": "/covers/Believer_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Believer.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
-  },
-  {
-    "id": "54",
-    "title": "I don't know",
-    "artist": "Erika",
-    "difficulty": "Original",
-    "price": "Free",
-    "kofiId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
-    "stripePriceId": "price_1Tt8KpL8a9dEAmWsSp1oRmkZ",
-    "coverImage": "/covers/I don't know_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/I don't know.mp3",
-    "gradient": "from-purple-500/20 via-dark-700 to-purple-500/5",
-    "theme": "violet"
-  },
-  {
-    "id": "55",
-    "title": "I don't know",
-    "artist": "Erika",
-    "difficulty": "Easy",
-    "price": "Free",
-    "kofiId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
-    "stripePriceId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
-    "coverImage": "/covers/I don't know Easy_clean.jpg",
-    "audioPreviewUrl": "/audio-previews/I don't know.mp3",
-    "gradient": "from-purple-500/20 via-dark-700 to-purple-500/5",
-    "theme": "violet"
+    "theme": "warm",
+    "paymentsDisabled": true,
+    "isArrangeMe": false
   }
 ]
