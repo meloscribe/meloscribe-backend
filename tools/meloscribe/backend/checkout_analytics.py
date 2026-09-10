@@ -230,6 +230,21 @@ def get_checkout_analytics_data():
             "top_songs": top_songs
         })
 
+    website_views_unique_ips = 0
+    try:
+        from shared import db_path
+        if db_path.exists():
+            import sqlite3
+            conn = sqlite3.connect(str(db_path), timeout=5.0)
+            c = conn.cursor()
+            c.execute("SELECT SUM(profile_views) FROM channel_insights WHERE platform = 'website'")
+            r = c.fetchone()
+            if r and r[0]:
+                website_views_unique_ips = r[0]
+            conn.close()
+    except Exception as e:
+        print(f"[Checkout Analytics] Error getting website views: {e}")
+
     # Summary
     total_all = len(attempts)
     paid_all = sum(m["paid"] for m in monthly_list)
@@ -247,7 +262,8 @@ def get_checkout_analytics_data():
             "abandoned": abandoned_all,
             "open": open_all,
             "conversion_rate": total_cr,
-            "total_revenue": total_rev
+            "total_revenue": total_rev,
+            "website_unique_ips": website_views_unique_ips
         },
         "traffic_sources": traffic,
         "monthly": monthly_list,

@@ -291,10 +291,50 @@ async def instagram_sync_now():
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "ig_sync.py")
-        spec = importlib.util.spec_from_file_location("ig_sync", sync_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mod.sync_instagram()
+        if os.path.exists(sync_path):
+            try:
+                spec = importlib.util.spec_from_file_location("ig_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_instagram()
+            except Exception as e:
+                print(f"[Instagram Sync] Error: {e}")
+        if platform.system() == "Windows":
+            try:
+                from shared import get_server_api_key
+                headers = {}
+                api_key = get_server_api_key()
+                if api_key:
+                    headers["X-Meloscribe-Key"] = api_key
+                requests.post("https://api.meloscribe.dev/api/instagram/sync", headers=headers, timeout=15.0)
+            except Exception as e:
+                print(f"[Instagram Sync Remote] Error: {e}")
+    threading.Thread(target=_run, daemon=True).start()
+    return {"status": "sync started"}
+
+@router.post("/api/facebook/sync")
+async def facebook_sync_now():
+    def _run():
+        import importlib.util
+        sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "fb_sync.py")
+        if os.path.exists(sync_path):
+            try:
+                spec = importlib.util.spec_from_file_location("fb_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_facebook()
+            except Exception as e:
+                print(f"[Facebook Sync] Error: {e}")
+        if platform.system() == "Windows":
+            try:
+                from shared import get_server_api_key
+                headers = {}
+                api_key = get_server_api_key()
+                if api_key:
+                    headers["X-Meloscribe-Key"] = api_key
+                requests.post("https://api.meloscribe.dev/api/facebook/sync", headers=headers, timeout=15.0)
+            except Exception as e:
+                print(f"[Facebook Sync Remote] Error: {e}")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 

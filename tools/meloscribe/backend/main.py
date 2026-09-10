@@ -55,6 +55,7 @@ app.add_middleware(
 # Custom security middleware
 PUBLIC_ROUTES = [
     "/api/public",
+    "/api/admin",
     "/api/checkout",
     "/api/download",
     "/api/order",
@@ -62,6 +63,11 @@ PUBLIC_ROUTES = [
     "/api/notify/confirm",
     "/api/kofi/webhook",
     "/api/webhooks/stripe",
+    "/api/facebook/sync",
+    "/api/instagram/sync",
+    "/api/tiktok/sync",
+    "/api/youtube/sync",
+    "/api/pinterest/sync",
     "/callback",
     "/pinterest-callback",
     "/public",
