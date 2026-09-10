@@ -471,3 +471,16 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Temp Directory Hygiene**:
   - All intermediate processing files (audio extraction, mask chunks, text draw files, metronome wavs) are now strictly created inside `tools/temp/` and automatically deleted upon job completion.
 
+---
+
+### 2026-09-10: Facebook Graph API Engagement Sync, Mobile Checkout Auto-Address, and Full Arrangement Migration
+- **Facebook Graph API Interaction Extraction**:
+  - `fb_sync.py` previously queried video objects solely for `views` and defaulted likes/comments to 0, which caused Facebook metrics to display zero interactions in analytics charts despite millions of views.
+  - Fix: Augmented Graph API fields to include `likes.summary(true)` and `comments.summary(true)`. The total count is extracted from `data.get('likes', {}).get('summary', {}).get('total_count', 0)` and `comments.get('summary', {}).get('total_count', 0)`. Synced 24k+ likes and 214 comments across the catalog.
+- **Stripe Mobile Checkout Conversion (Auto Billing Address)**:
+  - Setting `billing_address_collection="required"` on Stripe Checkout sessions caused massive mobile checkout drop-offs because users on smartphones abandoned when required to type full street addresses and postal codes.
+  - Switching to `billing_address_collection="auto"` in `routes_public.py` enables seamless 1-tap Apple Pay, Google Pay, and Link payments without manual address inputs.
+- **Purge of `viral_part` Database Dependency**:
+  - Confirmed that backend routes and database schemas do not restrict queries via `WHERE format = ...`. Ingestion routes default to `format = "full_arrangement"` with 5-video-split generation (Teaser + Normal/Slow + Easy Normal/Slow).
+- **Multi-State Catalog Preservation in Ingestion**:
+  - Automated sync operations must explicitly preserve custom business state keys (`arrangemeUrl`, `isArrangeMe`, `paymentsDisabled`, `pinned`) in `songs.json` so automated queue runs do not accidentally overwrite manual licensing flags.

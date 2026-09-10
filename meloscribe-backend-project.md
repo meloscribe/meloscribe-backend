@@ -177,10 +177,12 @@ git add . && git commit -m "..." && git push
 - [x] Fixed mobile checkout abandonment: Removed billing_address_collection="required" and forced invoice_creation in routes_public.py, switching to billing_address_collection="auto" to allow 1-click Apple Pay/Google Pay/Card payments without physical street address entry. Deployed live to Oracle VM and restarted backend service.
 - [x] Implemented Checkout & Funnel Analytics: Added `checkout_analytics.py` and `/api/admin/checkout-analytics` in `routes_admin.py` with in-memory caching. Analyzes live Stripe Checkout sessions (monthly aggregates, status tracking, drop-offs) and Nginx social visitor attribution (TikTok: 719 / 70.1%, Facebook: 271 / 26.4%, Instagram: 23, Pinterest: 17). Deployed live to Oracle VM.
 - [x] Added `/api/facebook/sync` in `routes_settings.py` and synced Facebook Page video metrics (65 videos updated, Golden Brown 229k views, River Flows in You 281k views, Sweetest Rain 82k views). Consolidated website analytics into `WebsiteTab` with traffic transparency.
+- [x] Facebook Engagement Breakdown & Rich Metrics: Enhanced `fb_sync.py` to retrieve `likes.summary(true)` and `comments.summary(true)` via Graph API, recording 24,406 likes and 214 comments across 65 Facebook videos into SQLite and VM production DB.
+- [x] Supported Multi-State Catalog Management: Synchronized `songs.json` supporting direct sales, Sheet Music Direct external redirects (`arrangemeUrl`), and `paymentsDisabled: true`. Preserved metadata keys across automated bot operations.
+- [x] Complete Ecosystem Transition to Full Arrangements: Defaulted `format: 'full_arrangement'` in `routes_workflow.py` and `settings.py`, eliminating legacy `viral_part` dependencies. Verified all SQL queries across routes operate without format filters.
+- [x] Set High-Risk Major-Label Titles to Currently Unavailable: Flagged Sonne, Hallelujah, The Scientist, Mockingbird, and Believer with `paymentsDisabled: true` in production `songs.json` on Oracle VM pending official ArrangeMe/Sheet Music Direct approvals.
 
 ## Active Blockers / Next Steps
 
-- Keine aktiven Blockaden. Das Payment-Gateway wurde am 2. Juli vollständig auf Stripe Checkout (redirects via FastAPI-Sessions) migriert. Die Domain-Verifizierung läuft fehlerfrei.
+- Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert. Die Domain-Verifizierung läuft fehlerfrei.
 - End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification is active. Preview video R2 streaming logic is fully functional.
-
-
