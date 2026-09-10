@@ -91,7 +91,23 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
-
+    @router.get("/api/admin/checkout-analytics")
+    def get_local_checkout_analytics(request: Request):
+        try:
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.get(f"{VM_API_BASE}/api/admin/checkout-analytics", headers=headers, timeout=15.0)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        # Fallback locally if VM proxy is unavailable
+        try:
+            from checkout_analytics import get_checkout_analytics_data
+            return JSONResponse(content=get_checkout_analytics_data(), status_code=200)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Analytics error: {e}"}, status_code=500)
 
     @router.get("/api/todos")
     def get_local_todos(request: Request):
@@ -784,21 +800,60 @@ if platform.system() == "Windows":
             return {"status": "error", "message": str(e)}
 
     @router.get("/api/server/file")
-    def get_server_file(song: str, filename: str):
+    def get_server_file(song: str, filename: str, request: Request = None, folder: str = ""):
         is_video = filename.lower().endswith(".mp4")
         
         # 1. Resolve local path
-        if is_video:
+        if folder == "keysight":
+            local_dir = settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")
+            media_type = "video/mp4"
+        elif is_video:
             local_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
             media_type = "video/mp4"
         else:
             local_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
             media_type = "image/jpeg"
             
-        local_path = os.path.join(local_dir, filename)
-        if os.path.exists(local_path):
+        local_path = Path(local_dir) / filename
+        if folder == "keysight" and is_video:
+            web_path = Path(local_dir) / f"{local_path.stem}_web.mp4"
+            preview_path = Path(local_dir) / f"{local_path.stem}_preview.mp4"
+            if web_path.exists():
+                local_path = web_path
+            elif preview_path.exists():
+                local_path = preview_path
+            elif local_path.exists():
+                try:
+                    ffprobe_exe = os.path.join(settings.get("tools_dir", r"C:\Dev\meloscribe-app\tools"), "ffmpeg", "bin", "ffprobe.exe")
+                    if not os.path.exists(ffprobe_exe): ffprobe_exe = "ffprobe"
+                    probe_cmd = [
+                        ffprobe_exe, "-v", "error", "-select_streams", "v:0",
+                        "-show_entries", "stream=codec_name", "-of", "default=noprint_wrappers=1:nokey=1",
+                        str(local_path)
+                    ]
+                    res = subprocess.run(probe_cmd, capture_output=True, text=True)
+                    if "hevc" in res.stdout.lower() or "h265" in res.stdout.lower():
+                        ffmpeg_exe = os.path.join(settings.get("tools_dir", r"C:\Dev\meloscribe-app\tools"), "ffmpeg", "bin", "ffmpeg.exe")
+                        if not os.path.exists(ffmpeg_exe): ffmpeg_exe = "ffmpeg"
+                        cmd_web = [
+                            ffmpeg_exe, "-y", "-i", str(local_path),
+                            "-c:v", "h264_nvenc", "-preset", "p1", "-cq", "24",
+                            "-c:a", "copy", "-movflags", "+faststart", str(web_path)
+                        ]
+                        p = subprocess.run(cmd_web)
+                        if p.returncode == 0 and web_path.exists():
+                            local_path = web_path
+                except Exception as ex:
+                    print("Auto web-transcode error:", ex)
+
+        if local_path.exists():
             from fastapi.responses import FileResponse
-            return FileResponse(local_path, media_type=media_type)
+            headers = {
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-cache"
+            }
+            return FileResponse(str(local_path), media_type=media_type, headers=headers)
             
         # 2. If not local, stream from server
         key_path = r"C:\Dev\ssh-key-2026-05-07.key"
@@ -873,6 +928,16 @@ else:
             rows = [{"id": r[0], "song_name": r[1], "amount": r[2], "currency": r[3], "email": r[4], "created_at": r[5], "status": r[6]} for r in c.fetchall()]
             conn.close()
             return rows
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.get("/api/admin/checkout-analytics")
+    def get_server_checkout_analytics(request: Request):
+        verify_admin(request)
+        try:
+            from checkout_analytics import get_checkout_analytics_data
+            data = get_checkout_analytics_data()
+            return JSONResponse(content=data, status_code=200)
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
