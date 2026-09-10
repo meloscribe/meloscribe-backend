@@ -24,8 +24,8 @@ def get_gemini_key():
 GEMINI_API_KEY = get_gemini_key()
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Fallback to gemini-2.5-flash as gemini-3.1-pro-preview has a quota limit of 0 on the free tier
-model = genai.GenerativeModel('models/gemini-2.5-flash')
+# Use gemini-3.8-flash for high performance, low latency and reliable agent capabilities
+model = genai.GenerativeModel('models/gemini-3.8-flash')
 
 DB_PATH = Path(__file__).parent / "analytics.db"
 

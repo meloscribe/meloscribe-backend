@@ -484,3 +484,8 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Confirmed that backend routes and database schemas do not restrict queries via `WHERE format = ...`. Ingestion routes default to `format = "full_arrangement"` with 5-video-split generation (Teaser + Normal/Slow + Easy Normal/Slow).
 - **Multi-State Catalog Preservation in Ingestion**:
   - Automated sync operations must explicitly preserve custom business state keys (`arrangemeUrl`, `isArrangeMe`, `paymentsDisabled`, `pinned`) in `songs.json` so automated queue runs do not accidentally overwrite manual licensing flags.
+- **Dual Difficulty Catalog Schema & Dynamic Currency**:
+  - Single records for dual-difficulty songs use `difficulty: "Original / Easy"` with `hasEasy: true`, `easyPrice`, and `easyStripePriceId`.
+  - The public catalog endpoint (`/api/public/songs`) must convert currency symbols for both primary `price` and `easyPrice` fields dynamically based on the client's detected IP geolocation.
+- **English Error Logging Standard**:
+  - All backend loggers, exception handlers, and API error response payloads must consistently use English to maintain clean diagnostics across local and remote server environments.

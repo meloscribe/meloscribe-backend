@@ -30,6 +30,7 @@ ShopVideos/
 .vscode/
 .history/
 *.log
+tools/meloscribe/backend/backend_logs.txt
 
 # --- OS CLUTTER (Windows & OneDrive) ---
 Thumbs.db

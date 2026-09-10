@@ -181,6 +181,9 @@ git add . && git commit -m "..." && git push
 - [x] Supported Multi-State Catalog Management: Synchronized `songs.json` supporting direct sales, Sheet Music Direct external redirects (`arrangemeUrl`), and `paymentsDisabled: true`. Preserved metadata keys across automated bot operations.
 - [x] Complete Ecosystem Transition to Full Arrangements: Defaulted `format: 'full_arrangement'` in `routes_workflow.py` and `settings.py`, eliminating legacy `viral_part` dependencies. Verified all SQL queries across routes operate without format filters.
 - [x] Set High-Risk Major-Label Titles to Currently Unavailable: Flagged Sonne, Hallelujah, The Scientist, Mockingbird, and Believer with `paymentsDisabled: true` in production `songs.json` on Oracle VM pending official ArrangeMe/Sheet Music Direct approvals.
+- [x] Consolidated Single-Card Catalog Sync: Synced updated 27-item `songs.json` catalog with unified `hasEasy`, `easyPrice`, `easyStripePriceId`, and `difficulty: "Original / Easy"` to Oracle VM production and local backend, preserving existing Stripe Price IDs and R2 bucket storage paths.
+- [x] Automated Hal Leonard ArrangeMe Publishing Pipeline: Validated Playwright automation bot (`tools/arrangeme_bot.py`) for publishing high-risk copyrighted titles (*Sonne* by Rammstein) directly to Hal Leonard ArrangeMe, creating complete published drafts ready to replace `paymentsDisabled` flags with live Sheet Music Direct partner URLs once approved.
+- [x] Upgraded AI Engine to Gemini 3.8 Flash: Updated `ai_agent.py` to `models/gemini-3.8-flash` for lower latency, higher reasoning capacity, and reliable agentic capabilities.
 
 ## Active Blockers / Next Steps
 
