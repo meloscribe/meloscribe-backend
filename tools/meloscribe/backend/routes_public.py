@@ -539,10 +539,16 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         }
 
         if req.embedded:
+            # Payment methods: Card, PayPal, iDEAL, EPS (Bancontact only for Belgian IPs)
+            pm_types = ["card", "paypal", "ideal", "eps"]
+            cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
+            if cf_country == "BE":
+                pm_types.append("bancontact")
+
             intent = stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency=currency,
-                payment_method_types=["card", "paypal", "klarna", "ideal", "eps", "link", "bancontact", "revolut_pay"],
+                payment_method_types=pm_types,
                 metadata={
                     "song_title": song_name_meta,
                     "download_hash": download_hash,
