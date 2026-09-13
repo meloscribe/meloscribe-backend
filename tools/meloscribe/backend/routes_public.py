@@ -439,6 +439,11 @@ def get_currency_from_request(request: Request) -> str:
 # -------------------------------------------------------------------
 @router.post("/api/checkout/create-session")
 async def create_checkout_session(req: CheckoutRequest, request: Request):
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if is_rate_limited(client_ip, "create_checkout_session", 25, 600):
+        return JSONResponse(status_code=429, content={"error": "Too many checkout requests. Please wait a few minutes."})
     try:
         songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
         if not os.path.exists(songs_path):
@@ -539,11 +544,14 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         }
 
         if req.embedded:
-            # Payment methods: Card, PayPal, iDEAL, EPS (Bancontact only for Belgian IPs)
-            pm_types = ["card", "paypal", "ideal", "eps"]
-            cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
-            if cf_country == "BE":
-                pm_types.append("bancontact")
+            # Payment methods: Card, PayPal for all currencies; iDEAL and EPS only for EUR; Bancontact only for BE
+            if currency == "eur":
+                pm_types = ["card", "paypal", "ideal", "eps"]
+                cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
+                if cf_country == "BE":
+                    pm_types.append("bancontact")
+            else:
+                pm_types = ["card", "paypal"]
 
             intent = stripe.PaymentIntent.create(
                 amount=amount_cents,
@@ -644,12 +652,19 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     data_object = data_object_raw.to_dict() if hasattr(data_object_raw, "to_dict") else data_object_raw
 
     try:
-        if event_type == "checkout.session.completed":
+        if event_type in ("checkout.session.completed", "payment_intent.succeeded"):
+            is_pi = event_type == "payment_intent.succeeded"
             session_id = data_object.get("id")
-            payment_status = data_object.get("payment_status")
-            log_webhook(f"Processing checkout.session.completed. Payment status: {payment_status}. Session ID: {session_id}")
             
-            if payment_status == "paid":
+            if is_pi:
+                is_paid = data_object.get("status") == "succeeded"
+            else:
+                payment_status = data_object.get("payment_status")
+                is_paid = payment_status == "paid"
+                
+            log_webhook(f"Processing {event_type}. Status: {data_object.get('status') if is_pi else data_object.get('payment_status')}. ID: {session_id}")
+            
+            if is_paid:
                 metadata = data_object.get("metadata", {})
                 song_title = metadata.get("song_title") or "Unknown Song"
                 download_hash = metadata.get("download_hash")
@@ -673,11 +688,18 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 if not download_hash:
                     download_hash = uuid.uuid4().hex
 
-                customer_details = data_object.get("customer_details") or {}
-                email = customer_details.get("email") or "customer@example.com"
-                buyer_name = customer_details.get("name") or ""
+                if is_pi:
+                    charges = data_object.get("charges", {}).get("data", [])
+                    billing = charges[0].get("billing_details", {}) if charges else {}
+                    email = data_object.get("receipt_email") or billing.get("email") or "customer@example.com"
+                    buyer_name = billing.get("name") or ""
+                    amount_total = float(data_object.get("amount", 0)) / 100.0
+                else:
+                    customer_details = data_object.get("customer_details") or {}
+                    email = customer_details.get("email") or "customer@example.com"
+                    buyer_name = customer_details.get("name") or ""
+                    amount_total = float(data_object.get("amount_total", 0)) / 100.0
                 
-                amount_total = float(data_object.get("amount_total", 0)) / 100.0
                 currency = (data_object.get("currency") or "eur").upper()
 
                 log_webhook(f"Recording purchase in DB: Email={email}, Song={song_title}, Amount={amount_total} {currency}, Hash={download_hash}")
@@ -908,7 +930,12 @@ def get_hash_by_checkout(checkout_id: str):
     return JSONResponse(content={"error": "Transaction not found"}, status_code=404)
 
 @router.get("/api/order/details")
-def get_order_details(hash: str):
+def get_order_details(hash: str, request: Request):
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if is_rate_limited(client_ip, "order_details", 60, 600):
+        return JSONResponse(status_code=429, content={"error": "Too many requests. Please try again later."})
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
     c.execute("SELECT song_name, email, download_count, created_at, status FROM purchases WHERE download_hash = ?", (hash,))
@@ -943,6 +970,11 @@ def get_order_details(hash: str):
 # -------------------------------------------------------------------
 @router.get("/api/download/request")
 def request_download(hash: str, type: str, request: Request):
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if is_rate_limited(client_ip, "request_download", 60, 600):
+        return JSONResponse(status_code=429, content={"error": "Too many download requests. Please try again later."})
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
         return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
         
@@ -1676,6 +1708,12 @@ def get_public_songs(request: Request):
                         song["price"] = price.replace("€", "$")
                     elif currency == "gbp":
                         song["price"] = price.replace("€", "£")
+                easy_price = song.get("easyPrice", "")
+                if easy_price and "€" in easy_price:
+                    if currency == "usd":
+                        song["easyPrice"] = easy_price.replace("€", "$")
+                    elif currency == "gbp":
+                        song["easyPrice"] = easy_price.replace("€", "£")
                         
             return JSONResponse(
                 content=filtered_songs,
@@ -1788,7 +1826,7 @@ def update_public_stats(stats: StatsUpload):
 # -------------------------------------------------------------------
 @router.get("/api/public/preview-video")
 def get_preview_video(song_name: str):
-    clean_name = song_name
+    clean_name = re.sub(r'[/\\?%*:|"<>.]', '', song_name).strip()
     for suffix in (" (Easy Version)", " (Easy)", "(Easy Version)", "(Easy)"):
         if clean_name.endswith(suffix):
             clean_name = clean_name[:-len(suffix)].strip()
@@ -1857,6 +1895,7 @@ def get_preview_video(song_name: str):
 
 @router.get("/api/public/video-stream")
 def stream_preview_video(song_name: str, request: Request):
+    song_name = re.sub(r'[/\\?%*:|"<>.]', '', song_name).strip()
     if platform.system() == "Windows":
         try:
             req_headers = {}
@@ -1973,6 +2012,7 @@ def stream_preview_video(song_name: str, request: Request):
 
 @router.get("/api/public/audio-stream")
 def stream_preview_audio(song_name: str, request: Request):
+    song_name = re.sub(r'[/\\?%*:|"<>.]', '', song_name).strip()
     if platform.system() == "Windows":
         try:
             req_headers = {}

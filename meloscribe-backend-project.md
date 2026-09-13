@@ -183,9 +183,16 @@ git add . && git commit -m "..." && git push
 - [x] Set High-Risk Major-Label Titles to Currently Unavailable: Flagged Sonne, Hallelujah, The Scientist, Mockingbird, and Believer with `paymentsDisabled: true` in production `songs.json` on Oracle VM pending official ArrangeMe/Sheet Music Direct approvals.
 - [x] Consolidated Single-Card Catalog Sync: Synced updated 27-item `songs.json` catalog with unified `hasEasy`, `easyPrice`, `easyStripePriceId`, and `difficulty: "Original / Easy"` to Oracle VM production and local backend, preserving existing Stripe Price IDs and R2 bucket storage paths.
 - [x] Automated Hal Leonard ArrangeMe Publishing Pipeline: Validated Playwright automation bot (`tools/arrangeme_bot.py`) for publishing high-risk copyrighted titles (*Sonne* by Rammstein) directly to Hal Leonard ArrangeMe, creating complete published drafts ready to replace `paymentsDisabled` flags with live Sheet Music Direct partner URLs once approved.
-- [x] Upgraded AI Engine to Gemini 3.8 Flash: Updated `ai_agent.py` to `models/gemini-3.8-flash` for lower latency, higher reasoning capacity, and reliable agentic capabilities.
+- [x] Fixed critical Stripe PaymentIntent international currency restriction: isolated EUR-exclusive payment methods (`ideal`, `eps`, `bancontact`) to EUR transactions; USD and GBP checkout sessions now strictly request compatible payment methods (`card`, `paypal`), resolving live 500 errors for international visitors (Mexico, Thailand, etc.).
+- [x] Dynamically convert `easyPrice` alongside standard `price` on `/api/public/songs` catalog endpoint based on client IP country.
+- [x] Hardened public endpoints with IP-based rate limiting on checkout creation, order details, and download requests.
+- [x] Sanitized `song_name` parameter in audio/video streaming endpoints against path traversal attacks.
+- [x] Protected competitor endpoints in `routes_admin.py` with `verify_admin` authentication.
+- [x] Built native Linux automated database backup service (`backup_db.py`, `meloscribe-backup.service`, `meloscribe-backup.timer`) using online non-locking SQLite backup API with 30-day retention and automated packaging of configs, active databases, and tokens.
+- [x] Hardened Nginx on Oracle Cloud VM: disabled server tokens, added HTTP security headers (`nosniff`, `SAMEORIGIN`, `HSTS`, `Referrer-Policy`), and configured global request rate limiting (`30r/s`, `burst=60`).
+- [x] Switched demographics synchronization from brittle Playwright scraper to official YouTube Analytics and Instagram Graph APIs (`demographics_sync.py`).
 
 ## Active Blockers / Next Steps
 
-- Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert. Die Domain-Verifizierung läuft fehlerfrei.
+- Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.
 - End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification is active. Preview video R2 streaming logic is fully functional.

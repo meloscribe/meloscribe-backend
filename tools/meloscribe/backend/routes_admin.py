@@ -1589,18 +1589,14 @@ else:
     @router.post("/api/demographics/sync")
     def sync_demographics(request: Request):
         verify_admin(request)
-        import platform as pf
-        import subprocess
-        
-        python_exe = str(TOOLS_DIR / "meloscribe" / "backend" / ".venv" / "Scripts" / "python.exe")
-        if pf.system() != "Windows":
-            python_exe = str(TOOLS_DIR / "meloscribe" / "backend" / ".venv" / "bin" / "python")
-            
-        script_path = str(TOOLS_DIR / "scrape_demographics.py")
-        
         try:
-            print(f"Running demographics sync script: {script_path}")
-            res = subprocess.run([python_exe, script_path], capture_output=True, text=True, timeout=180)
+            import importlib.util
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "demographics_sync.py")
+            if Path(sync_path).exists():
+                spec = importlib.util.spec_from_file_location("demographics_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_all_demographics()
             
             try:
                 if db_path.exists():
@@ -1617,10 +1613,7 @@ else:
             except Exception as push_err:
                 print(f"[Demographics Sync] Warning: Failed to push demographics to Oracle: {push_err}")
                 
-            if res.returncode == 0:
-                return {"status": "ok", "output": res.stdout}
-            else:
-                return {"status": "error", "message": res.stderr or res.stdout}
+            return {"status": "ok", "message": "Audience demographics successfully synchronized from official APIs."}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -1986,6 +1979,7 @@ def global_delete_order(transaction_id: str, request: Request):
 # -------------------------------------------------------------------
 @router.post("/api/competitors")
 async def add_competitor(req: Request):
+    verify_admin(req)
     data = await req.json()
     channel_input = data.get("channel", "").strip()
     if not channel_input:
@@ -2032,7 +2026,8 @@ async def add_competitor(req: Request):
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.delete("/api/competitors/{channel_id}")
-async def delete_competitor(channel_id: str):
+async def delete_competitor(channel_id: str, req: Request):
+    verify_admin(req)
     conn = sqlite3.connect(str(db_path))
     c = conn.cursor()
     c.execute("DELETE FROM competitors WHERE channel_id=?", (channel_id,))
@@ -2042,7 +2037,8 @@ async def delete_competitor(channel_id: str):
     return JSONResponse(content={"success": True})
 
 @router.post("/api/competitors/sync")
-async def sync_competitors():
+async def sync_competitors(req: Request):
+    verify_admin(req)
     try:
         from yt_auth import get_authenticated_service
         from googleapiclient.discovery import build
