@@ -542,7 +542,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             intent = stripe.PaymentIntent.create(
                 amount=amount_cents,
                 currency=currency,
-                payment_method_types=["card", "paypal", "eps", "ideal"],
+                payment_method_types=["card", "paypal", "klarna", "ideal", "eps", "link"],
                 metadata={
                     "song_title": song_name_meta,
                     "download_hash": download_hash,
