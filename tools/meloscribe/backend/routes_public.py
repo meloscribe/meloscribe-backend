@@ -517,34 +517,40 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if req.difficulty == "Easy":
             song_name_meta = f"{song_name_meta} Easy"
 
+        excluded_methods = [
+            "amazon_pay",
+            "bancontact",
+            "blik",
+            "kakao_pay",
+            "naver_pay",
+            "payco",
+            "mb_way",
+            "satispay"
+        ]
+
+        branding = {
+            "background_color": "#0B0F17",
+            "button_color": "#00F5FF",
+            "font_family": "inter",
+            "border_style": "rounded"
+        }
+
         if req.embedded:
-            session = stripe.checkout.Session.create(
-                ui_mode="embedded_page",
-                mode="payment",
-                line_items=[{
-                    "price_data": {
-                        "currency": currency,
-                        "product_data": {
-                            "name": product_name,
-                            "description": product_desc,
-                            "images": [product_image] if product_image else [],
-                        },
-                        "unit_amount": amount_cents,
-                    },
-                    "quantity": 1,
-                }],
-                allow_promotion_codes=True,
-                billing_address_collection="auto",
-                return_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
+            intent = stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=currency,
+                payment_method_types=["card", "paypal", "klarna", "eps", "link"],
                 metadata={
                     "song_title": song_name_meta,
                     "download_hash": download_hash,
                     "locale": req.language
-                }
+                },
+                description=f"Meloscribe - {product_name}"
             )
             return {
-                "clientSecret": session.client_secret,
-                "publishableKey": publishable_key
+                "clientSecret": intent.client_secret,
+                "publishableKey": publishable_key,
+                "paymentIntentId": intent.id
             }
         else:
             session = stripe.checkout.Session.create(
@@ -563,6 +569,8 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 }],
                 allow_promotion_codes=True,
                 billing_address_collection="auto",
+                branding_settings=branding,
+                excluded_payment_method_types=excluded_methods,
                 success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
                 cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
                 metadata={
@@ -741,31 +749,58 @@ def get_hash_by_checkout(checkout_id: str):
     if checkout_id.startswith("demo_"):
         return {"download_hash": f"demo_hash_{checkout_id}"}
         
-    if checkout_id.startswith("cs_"):
+    if checkout_id.startswith("cs_") or checkout_id.startswith("pi_"):
         try:
             s_settings = load_settings()
-            if checkout_id.startswith("cs_test_"):
-                stripe.api_key = s_settings.get("stripe_sandbox_secret_key") or get_stripe_api_key()
-            else:
-                stripe.api_key = get_stripe_api_key()
-            if stripe.api_key:
-                session_raw = stripe.checkout.Session.retrieve(checkout_id)
-                session = session_raw.to_dict() if hasattr(session_raw, "to_dict") else session_raw
-                if session.get("payment_status") == "paid":
+            is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
+            sandbox_key = s_settings.get("stripe_sandbox_secret_key")
+            live_key = get_stripe_api_key() or s_settings.get("stripe_live_secret_key")
+
+            def retrieve_stripe_object(key):
+                if not key:
+                    raise ValueError("No Stripe key available")
+                stripe.api_key = key
+                if checkout_id.startswith("pi_"):
+                    return "pi", stripe.PaymentIntent.retrieve(checkout_id)
+                else:
+                    return "cs", stripe.checkout.Session.retrieve(checkout_id)
+
+            primary_key = sandbox_key if (is_sandbox or checkout_id.startswith("cs_test_") or "_test_" in checkout_id) else (live_key or sandbox_key)
+            fallback_key = live_key if primary_key == sandbox_key else sandbox_key
+
+            obj_type = None
+            obj = None
+            try:
+                obj_type, obj = retrieve_stripe_object(primary_key)
+            except Exception:
+                if fallback_key and fallback_key != primary_key:
+                    obj_type, obj = retrieve_stripe_object(fallback_key)
+
+            if obj:
+                if obj_type == "pi":
+                    pi = obj.to_dict() if hasattr(obj, "to_dict") else obj
+                    is_paid = pi.get("status") == "succeeded"
+                    metadata = pi.get("metadata") or {}
+                    amount_total = float(pi.get("amount") or 0) / 100.0
+                    currency = (pi.get("currency") or "eur").upper()
+                    charges = pi.get("charges", {}).get("data", [])
+                    billing = charges[0].get("billing_details", {}) if charges else {}
+                    email = pi.get("receipt_email") or billing.get("email") or "customer@example.com"
+                    buyer_name = billing.get("name") or ""
+                else:
+                    session = obj.to_dict() if hasattr(obj, "to_dict") else obj
+                    is_paid = session.get("payment_status") == "paid"
                     metadata = session.get("metadata") or {}
-                    song_title = metadata.get("song_title") or "Unknown Song"
-                    download_hash = metadata.get("download_hash")
-                    locale = metadata.get("locale") or "en"
-                    
-                    if not download_hash:
-                        download_hash = uuid.uuid4().hex
-                    
+                    amount_total = float(session.get("amount_total") or 0) / 100.0
+                    currency = (session.get("currency") or "eur").upper()
                     customer_details = session.get("customer_details") or {}
                     email = customer_details.get("email") or "customer@example.com"
                     buyer_name = customer_details.get("name") or ""
-                    
-                    amount_total = float(session.get("amount_total") or 0) / 100.0
-                    currency = (session.get("currency") or "eur").upper()
+
+                if is_paid:
+                    song_title = metadata.get("song_title") or "Unknown Song"
+                    download_hash = metadata.get("download_hash") or uuid.uuid4().hex
+                    locale = metadata.get("locale") or "de"
                     
                     conn = sqlite3.connect(str(db_path), timeout=30.0)
                     c = conn.cursor()
