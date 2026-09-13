@@ -2286,6 +2286,23 @@ def public_free_download_internal(song_id: str, type: str, request: Request):
             config=boto3.session.Config(signature_version='s3v4')
         )
 
+        # Dynamic fallback verification: make sure key exists in R2
+        try:
+            s3.head_object(Bucket=r2_bucket, Key=file_key)
+        except Exception:
+            ext = ".pdf" if type == "pdf" else (".mid" if "midi" in type else (".mp4" if "video" in type else ".zip"))
+            is_slow = "slow" in type
+            res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{song_name}/")
+            for obj in res_objs.get("Contents", []):
+                k = obj["Key"]
+                if k.endswith(ext):
+                    if is_slow and ("slow" in k.lower() or "tuto" in k.lower()):
+                        file_key = k
+                        break
+                    elif not is_slow and "slow" not in k.lower() and "preview" not in k.lower():
+                        file_key = k
+                        break
+
         filename = file_key.split('/')[-1]
         presigned_url = s3.generate_presigned_url(
             ClientMethod='get_object',
