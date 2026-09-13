@@ -689,14 +689,51 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     download_hash = uuid.uuid4().hex
 
                 if is_pi:
-                    charges = data_object.get("charges", {}).get("data", [])
-                    billing = charges[0].get("billing_details", {}) if charges else {}
-                    email = data_object.get("receipt_email") or billing.get("email") or "customer@example.com"
-                    buyer_name = billing.get("name") or ""
+                    email = data_object.get("receipt_email")
+                    buyer_name = ""
+                    charges_obj = data_object.get("charges")
+                    charges = charges_obj.get("data", []) if isinstance(charges_obj, dict) else []
+                    if charges:
+                        ch = charges[0]
+                        billing = ch.get("billing_details") or {}
+                        if not email:
+                            email = billing.get("email") or ch.get("receipt_email")
+                        if not email:
+                            pm_details = ch.get("payment_method_details") or {}
+                            email = pm_details.get("paypal", {}).get("payer_email")
+                        if not buyer_name:
+                            buyer_name = billing.get("name") or ""
+
+                    latest_charge = data_object.get("latest_charge")
+                    if (not email or "@" not in email) and latest_charge and stripe:
+                        try:
+                            ch = stripe.Charge.retrieve(latest_charge)
+                            ch_dict = ch.to_dict() if hasattr(ch, "to_dict") else ch
+                            billing = ch_dict.get("billing_details") or {}
+                            email = ch_dict.get("receipt_email") or billing.get("email")
+                            if not email:
+                                pm_details = ch_dict.get("payment_method_details") or {}
+                                email = pm_details.get("paypal", {}).get("payer_email")
+                            if not buyer_name:
+                                buyer_name = billing.get("name") or ""
+                        except Exception as ch_err:
+                            log_webhook(f"[Stripe Webhook] Error fetching latest_charge {latest_charge}: {ch_err}")
+
+                    if (not email or "@" not in email) and data_object.get("customer") and stripe:
+                        try:
+                            cust = stripe.Customer.retrieve(data_object.get("customer"))
+                            cust_dict = cust.to_dict() if hasattr(cust, "to_dict") else cust
+                            email = cust_dict.get("email")
+                            if not buyer_name:
+                                buyer_name = cust_dict.get("name") or ""
+                        except Exception:
+                            pass
+
+                    email = email or "customer@example.com"
                     amount_total = float(data_object.get("amount", 0)) / 100.0
                 else:
                     customer_details = data_object.get("customer_details") or {}
-                    email = customer_details.get("email") or "customer@example.com"
+                    email = customer_details.get("email") or data_object.get("customer_email") or "customer@example.com"
                     buyer_name = customer_details.get("name") or ""
                     amount_total = float(data_object.get("amount_total", 0)) / 100.0
                 
@@ -814,10 +851,47 @@ def get_hash_by_checkout(checkout_id: str):
                     metadata = pi.get("metadata") or {}
                     amount_total = float(pi.get("amount") or 0) / 100.0
                     currency = (pi.get("currency") or "eur").upper()
-                    charges = pi.get("charges", {}).get("data", [])
-                    billing = charges[0].get("billing_details", {}) if charges else {}
-                    email = pi.get("receipt_email") or billing.get("email") or "customer@example.com"
-                    buyer_name = billing.get("name") or ""
+                    email = pi.get("receipt_email")
+                    buyer_name = ""
+                    charges_obj = pi.get("charges")
+                    charges = charges_obj.get("data", []) if isinstance(charges_obj, dict) else []
+                    if charges:
+                        ch = charges[0]
+                        billing = ch.get("billing_details") or {}
+                        if not email:
+                            email = billing.get("email") or ch.get("receipt_email")
+                        if not email:
+                            pm_details = ch.get("payment_method_details") or {}
+                            email = pm_details.get("paypal", {}).get("payer_email")
+                        if not buyer_name:
+                            buyer_name = billing.get("name") or ""
+
+                    latest_charge = pi.get("latest_charge")
+                    if (not email or "@" not in email) and latest_charge and stripe:
+                        try:
+                            ch = stripe.Charge.retrieve(latest_charge)
+                            ch_dict = ch.to_dict() if hasattr(ch, "to_dict") else ch
+                            billing = ch_dict.get("billing_details") or {}
+                            email = ch_dict.get("receipt_email") or billing.get("email")
+                            if not email:
+                                pm_details = ch_dict.get("payment_method_details") or {}
+                                email = pm_details.get("paypal", {}).get("payer_email")
+                            if not buyer_name:
+                                buyer_name = billing.get("name") or ""
+                        except Exception as ch_err:
+                            print(f"[Order Details] Error fetching latest_charge {latest_charge}: {ch_err}")
+
+                    if (not email or "@" not in email) and pi.get("customer") and stripe:
+                        try:
+                            cust = stripe.Customer.retrieve(pi.get("customer"))
+                            cust_dict = cust.to_dict() if hasattr(cust, "to_dict") else cust
+                            email = cust_dict.get("email")
+                            if not buyer_name:
+                                buyer_name = cust_dict.get("name") or ""
+                        except Exception:
+                            pass
+
+                    email = email or "customer@example.com"
                 else:
                     session = obj.to_dict() if hasattr(obj, "to_dict") else obj
                     is_paid = session.get("payment_status") == "paid"
@@ -825,7 +899,7 @@ def get_hash_by_checkout(checkout_id: str):
                     amount_total = float(session.get("amount_total") or 0) / 100.0
                     currency = (session.get("currency") or "eur").upper()
                     customer_details = session.get("customer_details") or {}
-                    email = customer_details.get("email") or "customer@example.com"
+                    email = customer_details.get("email") or session.get("customer_email") or "customer@example.com"
                     buyer_name = customer_details.get("name") or ""
 
                 if is_paid:
