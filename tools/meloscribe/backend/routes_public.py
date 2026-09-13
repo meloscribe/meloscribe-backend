@@ -36,6 +36,7 @@ class CheckoutRequest(BaseModel):
     format: str = "full_arrangement"
     difficulty: str = "Original"
     language: str = "en"
+    embedded: bool = False
 
 class NewSuggestion(BaseModel):
     title: str
@@ -478,7 +479,18 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if origin == "https://meloscribe.dev":
             origin = "https://www.meloscribe.dev"
         
-        stripe.api_key = get_stripe_api_key()
+        s_settings = load_settings()
+        is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
+        is_local_origin = any(origin.startswith(h) for h in ("http://localhost", "http://127.0.0.1"))
+        use_sandbox = is_sandbox or (is_local_origin and bool(s_settings.get("stripe_sandbox_secret_key")))
+
+        if use_sandbox:
+            stripe.api_key = s_settings.get("stripe_sandbox_secret_key")
+            publishable_key = s_settings.get("stripe_sandbox_publishable_key")
+        else:
+            stripe.api_key = s_settings.get("stripe_live_secret_key") or get_stripe_api_key()
+            publishable_key = s_settings.get("stripe_live_publishable_key")
+
         if not stripe.api_key:
             raise HTTPException(status_code=500, detail="Stripe API key is not configured")
             
@@ -505,31 +517,61 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if req.difficulty == "Easy":
             song_name_meta = f"{song_name_meta} Easy"
 
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
-                "price_data": {
-                    "currency": currency,
-                    "product_data": {
-                        "name": product_name,
-                        "description": product_desc,
-                        "images": [product_image] if product_image else [],
+        if req.embedded:
+            session = stripe.checkout.Session.create(
+                ui_mode="embedded_page",
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": currency,
+                        "product_data": {
+                            "name": product_name,
+                            "description": product_desc,
+                            "images": [product_image] if product_image else [],
+                        },
+                        "unit_amount": amount_cents,
                     },
-                    "unit_amount": amount_cents,
-                },
-                "quantity": 1,
-            }],
-            allow_promotion_codes=True,
-            billing_address_collection="auto",
-            success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
-            metadata={
-                "song_title": song_name_meta,
-                "download_hash": download_hash,
-                "locale": req.language
+                    "quantity": 1,
+                }],
+                allow_promotion_codes=True,
+                billing_address_collection="auto",
+                return_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
+                metadata={
+                    "song_title": song_name_meta,
+                    "download_hash": download_hash,
+                    "locale": req.language
+                }
+            )
+            return {
+                "clientSecret": session.client_secret,
+                "publishableKey": publishable_key
             }
-        )
-        return {"url": session.url}
+        else:
+            session = stripe.checkout.Session.create(
+                mode="payment",
+                line_items=[{
+                    "price_data": {
+                        "currency": currency,
+                        "product_data": {
+                            "name": product_name,
+                            "description": product_desc,
+                            "images": [product_image] if product_image else [],
+                        },
+                        "unit_amount": amount_cents,
+                    },
+                    "quantity": 1,
+                }],
+                allow_promotion_codes=True,
+                billing_address_collection="auto",
+                success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
+                metadata={
+                    "song_title": song_name_meta,
+                    "download_hash": download_hash,
+                    "locale": req.language
+                }
+            )
+            return {"url": session.url}
     except Exception as e:
         print(f"[Stripe Checkout] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -701,7 +743,11 @@ def get_hash_by_checkout(checkout_id: str):
         
     if checkout_id.startswith("cs_"):
         try:
-            stripe.api_key = get_stripe_api_key()
+            s_settings = load_settings()
+            if checkout_id.startswith("cs_test_"):
+                stripe.api_key = s_settings.get("stripe_sandbox_secret_key") or get_stripe_api_key()
+            else:
+                stripe.api_key = get_stripe_api_key()
             if stripe.api_key:
                 session_raw = stripe.checkout.Session.retrieve(checkout_id)
                 session = session_raw.to_dict() if hasattr(session_raw, "to_dict") else session_raw
