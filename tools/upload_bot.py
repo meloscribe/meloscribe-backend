@@ -928,8 +928,8 @@ def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg
     hashtag_name = base_song.lower()
     hashtag_name = re.sub(r'[^a-z0-9]', '', hashtag_name)
     
-    version_param = "easy" if is_easy else "original"
-    song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+    version_suffix = "&version=easy" if is_easy else ""
+    song_link = f"https://meloscribe.dev/sheets?song={slug}{version_suffix}"
     
     res = tpl
     res = re.sub(r'#\s*\{song\}', f"#{hashtag_name}", res)
@@ -1070,8 +1070,8 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
         slug = base_song.lower()
         slug = re.sub(r'[^a-z0-9]+', '-', slug)
         slug = slug.strip('-')
-        version_param = "easy" if is_easy else "original"
-        song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+        version_suffix = "&version=easy" if is_easy else ""
+        song_link = f"https://meloscribe.dev/sheets?song={slug}{version_suffix}"
         
         # Pin data structure
         pin_data = {
@@ -2211,8 +2211,8 @@ if __name__ == "__main__":
         
         # Build direct sheet music link & comment text
         slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
-        version_param = "easy" if is_easy else "original"
-        song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+        version_suffix = "&version=easy" if is_easy else ""
+        song_link = f"https://meloscribe.dev/sheets?song={slug}{version_suffix}"
         default_fb_comment = f"Sheet Music (Easy): {song_link}" if is_easy else f"Sheet Music: {song_link}"
         fb_comment_tpl = settings.get("comment_template_facebook")
         fb_comment = fb_comment_tpl.replace("{song_link}", song_link) if fb_comment_tpl else default_fb_comment
@@ -2267,8 +2267,8 @@ if __name__ == "__main__":
         
         # Build direct sheet music link & comment text
         slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
-        version_param = "easy" if is_easy else "original"
-        song_link = f"https://meloscribe.dev/sheets?song={slug}&version={version_param}"
+        version_suffix = "&version=easy" if is_easy else ""
+        song_link = f"https://meloscribe.dev/sheets?song={slug}{version_suffix}"
         default_th_comment = f"Sheet Music (Easy): {song_link}" if is_easy else f"Sheet Music: {song_link}"
         th_comment_tpl = settings.get("comment_template_threads")
         th_comment = th_comment_tpl.replace("{song_link}", song_link) if th_comment_tpl else default_th_comment

@@ -102,6 +102,8 @@ def main():
     raw_name = os.path.splitext(os.path.basename(args.video))[0]
     clean_name = raw_name[:-4] if raw_name.lower().endswith("_raw") else raw_name
     out_base = args.title.strip() if (args.title and args.title.strip()) else clean_name
+    if args.type == "tutorial" and not out_base.lower().endswith(" slow"):
+        out_base = f"{out_base} slow"
     output_name = f"{out_base}_wide.mp4" if args.wide else (f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base)
     output_path = os.path.join(tiktok_dir, output_name)
     cache_path = os.path.join(tiktok_dir, ".render_cache.json")
@@ -173,6 +175,15 @@ def main():
     uid = uuid.uuid4().hex[:8]
     temp_dir = os.path.join(tools_dir, "temp")
     os.makedirs(temp_dir, exist_ok=True)
+    try:
+        now_ts = time.time()
+        for f in os.listdir(temp_dir):
+            if f.startswith(("waves_mask_", "metronome_", "title_", "author_", "outro", "sheets_", "morph_", "watermark_")) or f.endswith(".txt"):
+                fp = os.path.join(temp_dir, f)
+                if os.path.isfile(fp) and (now_ts - os.path.getmtime(fp)) > 900:
+                    try: os.remove(fp)
+                    except: pass
+    except: pass
 
     mask_path = os.path.join(temp_dir, f"waves_mask_{uid}.mp4")
     metronome_path = os.path.join(temp_dir, f"metronome_{uid}.wav")
@@ -317,7 +328,7 @@ def main():
         new_duration = duration
         fade_start = new_duration - 1.5
         
-        title_text = re.sub(r'(?i)\beasy\b', '', args.title).strip()
+        title_text = re.sub(r'(?i)\b(easy|slow)\b', '', args.title).strip()
         title_text = re.sub(r'\s+', ' ', title_text)
         
         if args.subtitle and args.subtitle.strip(" -"):
@@ -345,18 +356,16 @@ def main():
         with open(outro1_txt, "w", encoding="utf-8") as f: f.write(outro1_text)
         with open(outro2_txt, "w", encoding="utf-8") as f: f.write(outro2_text)
         with open(sheets_txt, "w", encoding="utf-8") as f: f.write("Sheets in bio ↓")
-        with open(watermark_txt, "w", encoding="utf-8") as f: f.write("@meloscribe")
         
         t_title_esc = escape_path_for_ffmpeg(title_txt)
         t_author_esc = escape_path_for_ffmpeg(author_txt)
         t_outro1_esc = escape_path_for_ffmpeg(outro1_txt)
         t_outro2_esc = escape_path_for_ffmpeg(outro2_txt)
         t_sheets_esc = escape_path_for_ffmpeg(sheets_txt)
-        t_wm_esc = escape_path_for_ffmpeg(watermark_txt)
         
         # Widescreen: keep native 16:9 resolution, no crop, no zoom, no shift
         # Title + Author + Sheets visible for 3s then fade out over 1s (visible 0-3, fade 3-4)
-        # Outro text visible near the end. No watermark.
+        # Outro text visible near the end. Subtle icon watermark in corner.
         v_stream = "v_src"
         pre_filters = f"[0:v]setpts=PTS-STARTPTS[v_src]; "
         
@@ -368,6 +377,16 @@ def main():
             pre_filters += f"[v_src]format=gbrp[v_rgb]; [{mask_idx}:v]setpts=PTS-STARTPTS,format=gbrp[mask_rgb]; [v_rgb][mask_rgb]blend=all_mode=screen,format=yuv420p[v_blended]; "
             v_stream = "v_blended"
             
+        icon_wm_path = os.path.join(tools_dir, "pfps", "monogram-transparent.png")
+        if os.path.exists(icon_wm_path):
+            extra_inputs.extend(["-i", icon_wm_path])
+            wm_idx = current_input_idx
+            current_input_idx += 1
+            pre_filters += f"[{wm_idx}:v]scale=68:-1,format=yuva420p,colorchannelmixer=aa=0.18[icon_wm_wide]; "
+            wm_filter_wide = "[t3][icon_wm_wide]overlay=x=w-overlay_w-70:y=60[t_wm]; "
+        else:
+            wm_filter_wide = "[t3]null[t_wm]; "
+
         a_stream = "a_src"
         if args.metronome and args.type == 'tutorial':
             if use_custom_metronome:
@@ -402,8 +421,8 @@ def main():
             f":x=(w-text_w)/2:y=h-120"
             f":alpha='if(lt(t,3),1,if(lt(t,4),4-t,0))'[t3]; "
             
-            # Watermark (top right, lower opacity)
-            f"[t3]drawtext=fontfile='fonts/montserrat.ttf':textfile='{t_wm_esc}':fontcolor=white@0.15:fontsize=44:x=w-text_w-80:y=60:alpha='1'[t_wm]; "
+            # Subtle Icon Watermark (top right)
+            + wm_filter_wide +
             
             # Outro gets drawn as two separate centered lines to ensure perfect alignment
             f"[t_wm]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)-60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t4]; "
@@ -417,15 +436,17 @@ def main():
         
         output_dir = tiktok_dir
         os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(args.video))[0]
-        output_name = f"{base_name}_wide.mp4"
+        output_name = f"{out_base}_wide.mp4"
         output_path = os.path.join(output_dir, output_name)
     
     # ==================== STANDARD PORTRAIT MODE ====================
     else:
         if args.start_time is not None and args.end_time is not None and float(args.end_time) > float(args.start_time):
-            trim_start = float(args.start_time)
-            trim_end = float(args.end_time)
+            # args.start_time and args.end_time are selected in the UI preview player (which plays the 9:16 portrait video).
+            # The standard portrait video cuts 2.5s off the raw Keysight video lead-in (trim_start = 2.5).
+            # Because video_generator.py takes the raw Keysight video as input, we must add +2.5s to align exactly with the UI player selection.
+            trim_start = float(args.start_time) + 2.5
+            trim_end = float(args.end_time) + 2.5
             new_duration = trim_end - trim_start
         else:
             trim_start = 2.5
@@ -442,12 +463,8 @@ def main():
         is_teaser = "teaser" in args.title.lower() or "teaser" in os.path.basename(args.video).lower() or (args.start_time is not None and args.end_time is not None)
         
         title_text = args.title
-        if is_easy:
-            title_text = re.sub(r'(?i)\beasy\b', '', title_text).strip()
-            title_text = re.sub(r'\s+', ' ', title_text)
-        elif is_teaser:
-            title_text = re.sub(r'(?i)\bteaser\b', '', title_text).strip()
-            title_text = re.sub(r'\s+', ' ', title_text)
+        title_text = re.sub(r'(?i)\b(easy|teaser|slow)\b', '', title_text).strip()
+        title_text = re.sub(r'\s+', ' ', title_text)
 
         if args.subtitle is not None:
             author_text = args.subtitle.strip(" -")
@@ -480,7 +497,6 @@ def main():
         with open(outro2_txt, "w", encoding="utf-8") as f: f.write(outro2_text)
         with open(sheets_txt, "w", encoding="utf-8") as f: f.write("Sheets in bio →")
         with open(morph_txt, "w", encoding="utf-8") as f: f.write(morph_text)
-        with open(watermark_txt, "w", encoding="utf-8") as f: f.write("@meloscribe")
         
         t_title_esc = escape_path_for_ffmpeg(title_txt)
         t_author_esc = escape_path_for_ffmpeg(author_txt)
@@ -488,7 +504,6 @@ def main():
         t_outro2_esc = escape_path_for_ffmpeg(outro2_txt)
         t_sheets_esc = escape_path_for_ffmpeg(sheets_txt)
         t_morph_esc = escape_path_for_ffmpeg(morph_txt)
-        t_wm_esc = escape_path_for_ffmpeg(watermark_txt)
 
         
         scale_w = int(1440 * args.zoom)
@@ -524,8 +539,8 @@ def main():
                 extra_inputs.extend(["-i", metronome_path])
                 metronome_idx = current_input_idx
                 current_input_idx += 1
-                # Must trim custom metronome by 2.5s since main video is also trimmed
-                pre_filters += f"[{metronome_idx}:a]atrim=start=2.5:end={trim_end},asetpts=PTS-STARTPTS[click_track]; "
+                # Must trim custom metronome to match trim_start since main video is also trimmed
+                pre_filters += f"[{metronome_idx}:a]atrim=start={trim_start}:end={trim_end},asetpts=PTS-STARTPTS[click_track]; "
             else:
                 # Failsafe if midi metronome failed: fallback silent track
                 pre_filters += f"anullsrc=r=44100:cl=stereo:d={new_duration}[click_track]; "
@@ -537,7 +552,7 @@ def main():
             extra_inputs.extend(["-i", mask_path])
             mask_idx = current_input_idx
             current_input_idx += 1
-            pre_filters += f"[{mask_idx}:v]trim=start=2.5:end={trim_end},setpts=PTS-STARTPTS,scale={scale_w}:500,crop=1440:500:{x_crop}:0,format=yuva420p,colorchannelmixer=1:0:0:0:0:1:0:0:0:0:1:0:0.3:0.59:0.11:0[mask_alpha]; "
+            pre_filters += f"[{mask_idx}:v]trim=start={trim_start}:end={trim_end},setpts=PTS-STARTPTS,scale={scale_w}:500,crop=1440:500:{x_crop}:0,format=yuva420p,colorchannelmixer=1:0:0:0:0:1:0:0:0:0:1:0:0.3:0.59:0.11:0[mask_alpha]; "
             
             pre_filters += f"[fg_orig]scale={scale_w}:{scale_h},crop=1440:{scale_h}:{x_crop}:0[fg_scaled]; "
             post_merge = f"[merged][mask_alpha]overlay=x=0:y=0:eof_action=repeat[merged_vis]; "
@@ -565,6 +580,17 @@ def main():
                 addon_merge_str = f"[merged_base][addon_cropped]overlay=0:{addon_y}[merged]; "
                 base_merged = "merged_base"
 
+        # Subtle brand icon watermark overlay (bottom right corner)
+        icon_wm_path = os.path.join(tools_dir, "pfps", "monogram-transparent.png")
+        if os.path.exists(icon_wm_path):
+            extra_inputs.extend(["-i", icon_wm_path])
+            wm_idx = current_input_idx
+            current_input_idx += 1
+            pre_filters += f"[{wm_idx}:v]scale=76:-1,format=yuva420p,colorchannelmixer=aa=0.22[icon_wm_scaled]; "
+            wm_overlay_portrait = "[t3][icon_wm_scaled]overlay=x=w-overlay_w-75:y=h-overlay_h-80[t4]; "
+        else:
+            wm_overlay_portrait = "[t3]null[t4]; "
+
         filter_complex = (
             pre_filters + 
             f"[bg_orig]scale=360:640,boxblur=10:3,scale=1440:2560:flags=bicubic,colorchannelmixer=rr=0.5:gg=0.5:bb=0.5,drawbox=x=0:y={bg_black_start_y}:w=1440:h=2560:color=black:t=fill[bg_blur]; "
@@ -577,8 +603,7 @@ def main():
             f"[t1]drawtext=fontfile='fonts/montserrat.ttf':textfile='{t_author_esc}':fontcolor=white:fontsize=65:x=(w-text_w)/2:y={author_y}:alpha='1'[t2]; "
             f"[t2]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_sheets_esc}':fontcolor=white:fontsize=78:x=(w-text_w)/2:y=2150:alpha='if(lt(t,3),0,if(lt(t,4),t-3,if(lt(t,5.8),1,if(lt(t,6.3),(6.3-t)/0.5,0))))'[{'t2_sheets' if morph_text else 't3'}]; "
             + (f"[t2_sheets]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_morph_esc}':fontcolor=white:fontsize=78:x=(w-text_w)/2:y=2150:alpha='if(lt(t,6.3),0,if(lt(t,6.8),(t-6.3)/0.5,if(lt(t,8.8),1,if(lt(t,9.3),(9.3-t)/0.5,0))))'[t3]; " if morph_text else "") +
-            f"[t3]drawtext=fontfile='fonts/montserrat.ttf':textfile='{t_wm_esc}':fontcolor=white@0.25:fontsize=48:x=(w-text_w)/2:y=h-text_h-100:alpha='1'[t4]; "
-
+            wm_overlay_portrait +
             
             # Outro gets drawn as two separate centered lines to ensure perfect alignment
             f"[t4]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=80:x=(w-text_w)/2:y=1000:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t5]; "
@@ -591,9 +616,6 @@ def main():
         
         output_dir = tiktok_dir
         os.makedirs(output_dir, exist_ok=True)
-        raw_name = os.path.splitext(os.path.basename(args.video))[0]
-        clean_name = raw_name[:-4] if raw_name.lower().endswith("_raw") else raw_name
-        out_base = args.title.strip() if (args.title and args.title.strip()) else clean_name
         output_name = f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base
         output_path = os.path.join(output_dir, output_name)
         
@@ -615,28 +637,48 @@ def main():
     try:
         nv_check = subprocess.run([get_ffmpeg_exe(), "-h", "encoder=h264_nvenc"], capture_output=True, text=True)
         if "h264_nvenc" in nv_check.stdout:
-            target_br = "6.5M" if args.wide else "5M"
-            max_br = "9M" if args.wide else "7M"
-            buf_sz = "18M" if args.wide else "14M"
+            target_br = "8M" if args.wide else "6M"
+            max_br = "15M" if args.wide else "12M"
+            buf_sz = "30M" if args.wide else "24M"
             print(f"Rendering with GPU NVENC h264_nvenc (High-Quality P6, Target {target_br}, MaxBitrate {max_br})...")
             vcodec_args = [
                 "-c:v", "h264_nvenc",
                 "-preset", "p6",
                 "-tune", "hq",
                 "-rc", "vbr",
-                "-cq", "22",
+                "-cq", "20",
                 "-b:v", target_br,
                 "-maxrate:v", max_br,
                 "-bufsize:v", buf_sz,
                 "-spatial-aq", "1",
-                "-temporal-aq", "1",
+                "-temporal-aq", "0",
+                "-g", "120",
+                "-keyint_min", "60",
+                "-forced-idr", "1",
+                "-flags", "+cgop",
                 "-pix_fmt", "yuv420p"
             ]
         else:
-            print("Rendering with multi-threaded CPU libx264 CRF 20 (yuv420p)...")
-            vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+            print("Rendering with multi-threaded CPU libx264 CRF 19 (yuv420p)...")
+            vcodec_args = [
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "19",
+                "-g", "120",
+                "-keyint_min", "60",
+                "-flags", "+cgop",
+                "-pix_fmt", "yuv420p"
+            ]
     except Exception:
-        vcodec_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+        vcodec_args = [
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "19",
+            "-g", "120",
+            "-keyint_min", "60",
+            "-flags", "+cgop",
+            "-pix_fmt", "yuv420p"
+        ]
 
     # Build ffmpeg command directly as a list
     cmd = [
@@ -646,6 +688,8 @@ def main():
         "-filter_complex", filter_complex,
         "-map", "[final_v]", "-map", "[final_a]"
     ] + vcodec_args + [
+        "-fps_mode", "cfr",
+        "-r", "60",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         tmp_output_path

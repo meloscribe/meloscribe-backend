@@ -1,3 +1,4 @@
+import re
 import os
 import sys
 import json
@@ -31,6 +32,164 @@ def get_proxy_headers():
     if api_key:
         headers["X-Meloscribe-Key"] = api_key
     return headers
+
+
+def execute_todos_sync_and_query(conn):
+    published_songs = []
+    songs_path = TOOLS_DIR / "meloscribe" / "backend" / "songs.json"
+    if not os.path.exists(songs_path):
+        songs_path = Path("/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json")
+        
+    if os.path.exists(songs_path):
+        try:
+            with open(songs_path, "r", encoding="utf-8") as f:
+                songs_list = json.load(f)
+                for s in songs_list:
+                    if isinstance(s, dict) and "title" in s and not s.get("hidden"):
+                        published_songs.append(s)
+        except Exception as e:
+            print(f"[Todo Auto-Complete] Error reading songs.json: {e}")
+
+    def clean_str(val):
+        if not val:
+            return ""
+        return "".join(c for c in str(val).lower() if c.isalnum())
+
+    c = conn.cursor()
+    
+    # Ensure tables exist
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS todos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            song_name TEXT,
+            status TEXT DEFAULT 'pending',
+            added_date TEXT
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS suggestions (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            artist TEXT NOT NULL,
+            votes INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'open'
+        )
+    """)
+    try:
+        c.execute("ALTER TABLE suggestions ADD COLUMN status TEXT DEFAULT 'open'")
+    except Exception:
+        pass
+    conn.commit()
+    
+    # 1. AUTO-IMPORT & SYNC: Community suggestions into To-Do list
+    open_suggs = c.execute("SELECT id, title, artist, votes FROM suggestions WHERE status != 'completed' OR status IS NULL").fetchall()
+    existing_pending = c.execute("SELECT id, song_name FROM todos WHERE status='pending'").fetchall()
+    
+    for sug in open_suggs:
+        s_title = sug["title"].strip() if sug["title"] else ""
+        s_artist = sug["artist"].strip() if sug["artist"] else ""
+        s_votes = sug["votes"] or 1
+        s_clean = clean_str(f"{s_title} {s_artist}")
+        s_title_clean = clean_str(s_title)
+        
+        found_todo = None
+        for t in existing_pending:
+            t_raw = t["song_name"]
+            t_clean = clean_str(t_raw)
+            if (s_clean and s_clean in t_clean) or (s_title_clean and s_title_clean in t_clean):
+                found_todo = t
+                break
+                
+        if not found_todo and s_title:
+            vote_label = f"[Wishlist • {s_votes} {'Votes' if s_votes != 1 else 'Vote'}] {s_title} - {s_artist}" if s_artist else f"[Wishlist • {s_votes} {'Votes' if s_votes != 1 else 'Vote'}] {s_title}"
+            c.execute("INSERT INTO todos (song_name, added_date, status) VALUES (?, ?, 'pending')",
+                      (vote_label, datetime.datetime.now().isoformat()))
+            conn.commit()
+        elif found_todo and "[Wishlist" in found_todo["song_name"]:
+            current_label = found_todo["song_name"]
+            new_prefix = f"[Wishlist • {s_votes} {'Votes' if s_votes != 1 else 'Vote'}]"
+            updated_label = re.sub(r"^\[Wishlist[^\]]*\]", new_prefix, current_label).strip()
+            if updated_label != current_label:
+                c.execute("UPDATE todos SET song_name=? WHERE id=?", (updated_label, found_todo["id"]))
+                conn.commit()
+
+    # Re-query all pending todos
+    todos_raw_db = [dict(r) for r in c.execute("SELECT * FROM todos WHERE status='pending'").fetchall()]
+    
+    # 2. INTELLIGENT AUTO-COMPLETE against published catalog
+    completed_ids = []
+    todos_raw = []
+    
+    for t in todos_raw_db:
+        todo_name = t["song_name"]
+        
+        # Explicit reworks are NOT auto-completed based on older arrangements!
+        if re.search(r'\b(rework|re-work|v2|neuaufnahme)\b', todo_name, re.I):
+            todos_raw.append(t)
+            continue
+            
+        is_full_request = bool(re.search(r'\b(full|ganzer|ganze)\b', todo_name, re.I))
+        is_easy_request = bool(re.search(r'\b(easy|einfach|leichte)\b', todo_name, re.I))
+        
+        clean_t = todo_name
+        for prefix in ["[PRIORITY] ", "[FORMAT-SHIFT] ", "[RE-PURPOSE] "]:
+            if clean_t.startswith(prefix):
+                clean_t = clean_t[len(prefix):]
+        clean_t = re.sub(r"^\[Wishlist[^\]]*\]\s*", "", clean_t)
+        t_alnum = clean_str(clean_t)
+        
+        is_completed = False
+        matched_catalog_song = None
+        
+        for pub in published_songs:
+            pub_title_clean = clean_str(pub.get("title", ""))
+            if pub_title_clean and (pub_title_clean == t_alnum or pub_title_clean in t_alnum or t_alnum in pub_title_clean):
+                # Differentiations:
+                if is_full_request and pub.get("format") != "full_arrangement":
+                    continue
+                if is_easy_request and not (pub.get("hasEasy") or "easy" in pub.get("difficulty", "").lower()):
+                    continue
+                
+                is_completed = True
+                matched_catalog_song = pub
+                break
+        
+        if is_completed:
+            completed_ids.append(t["id"])
+            if matched_catalog_song:
+                m_title = matched_catalog_song.get("title", "").strip()
+                c.execute("UPDATE suggestions SET status='completed' WHERE LOWER(title) = LOWER(?)", (m_title,))
+        else:
+            todos_raw.append(t)
+            
+    if completed_ids:
+        c.executemany("UPDATE todos SET status='completed' WHERE id=?", [(tid,) for tid in completed_ids])
+        conn.commit()
+        print(f"[Todo Auto-Complete] Auto-completed {len(completed_ids)} todos: {completed_ids}")
+    
+    for t in todos_raw:
+        song = t["song_name"].replace("[PRIORITY] ", "").replace("[FORMAT-SHIFT] ", "").replace("[RE-PURPOSE] ", "")
+        song = re.sub(r"^\[Wishlist[^\]]*\]\s*", "", song)
+        try:
+            row = c.execute("SELECT AVG(views) as avg_v FROM videos WHERE song_name LIKE ?", (f"%{song.split(' - ')[0].strip()}%",)).fetchone()
+            t["_score"] = row["avg_v"] if row and row["avg_v"] else 0
+        except Exception:
+            t["_score"] = 0
+        
+        if "[PRIORITY]" in t["song_name"]:
+            t["_score"] = (t["_score"] or 0) + 999999
+        elif "[Wishlist" in t["song_name"]:
+            m = re.search(r"\[Wishlist\s*•\s*(\d+)", t["song_name"])
+            votes = int(m.group(1)) if m else 1
+            t["_score"] = (t["_score"] or 0) + (votes * 50000)
+    
+    todos_raw.sort(key=lambda x: x.get("_score", 0), reverse=True)
+    
+    for t in todos_raw:
+        t.pop("_score", None)
+    
+    return todos_raw
 
 if platform.system() == "Windows":
     # -------------------------------------------------------------------
@@ -116,23 +275,47 @@ if platform.system() == "Windows":
             if "x-admin-passcode" in request.headers:
                 headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
             r = requests.get(f"{VM_API_BASE}/api/todos", headers=headers, timeout=10.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            res = execute_todos_sync_and_query(conn)
+            conn.close()
+            return JSONResponse(content=res)
         except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+            return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @router.post("/api/todos")
     async def add_local_todo(request: Request):
+        body = await request.body()
         try:
             headers = get_proxy_headers()
             if "x-admin-passcode" in request.headers:
                 headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
             if "content-type" in request.headers:
                 headers["content-type"] = request.headers["content-type"]
-            body = await request.body()
             r = requests.post(f"{VM_API_BASE}/api/todos", data=body, headers=headers, timeout=10.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        try:
+            data = json.loads(body.decode("utf-8")) if body else {}
+            song_name = data.get("song_name")
+            if not song_name:
+                return JSONResponse(content={"error": "No song_name provided"}, status_code=400)
+            conn = sqlite3.connect(str(db_path))
+            c = conn.cursor()
+            c.execute("INSERT INTO todos (song_name, added_date) VALUES (?, ?)", (song_name, datetime.datetime.now().isoformat()))
+            conn.commit()
+            new_id = c.lastrowid
+            conn.close()
+            return JSONResponse(content={"success": True, "id": new_id, "song_name": song_name, "status": "pending"})
         except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+            return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @router.delete("/api/todos/{todo_id}")
     def delete_local_todo(todo_id: int, request: Request):
@@ -141,9 +324,54 @@ if platform.system() == "Windows":
             if "x-admin-passcode" in request.headers:
                 headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
             r = requests.delete(f"{VM_API_BASE}/api/todos/{todo_id}", headers=headers, timeout=10.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            row = c.execute("SELECT song_name FROM todos WHERE id=?", (todo_id,)).fetchone()
+            if row:
+                raw_name = row["song_name"]
+                clean_title = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", raw_name).strip()
+                song_base = clean_title.split(" - ")[0].strip()
+                c.execute("UPDATE suggestions SET status='completed' WHERE LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)", (clean_title, song_base))
+            c.execute("DELETE FROM todos WHERE id=?", (todo_id,))
+            conn.commit()
+            conn.close()
+            return JSONResponse(content={"success": True})
         except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.patch("/api/todos/{todo_id}/complete")
+    def complete_local_todo(todo_id: int, request: Request):
+        try:
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.patch(f"{VM_API_BASE}/api/todos/{todo_id}/complete", headers=headers, timeout=10.0)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        try:
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            row = c.execute("SELECT song_name FROM todos WHERE id=?", (todo_id,)).fetchone()
+            if row:
+                raw_name = row["song_name"]
+                clean_title = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", raw_name).strip()
+                song_base = clean_title.split(" - ")[0].strip()
+                c.execute("UPDATE suggestions SET status='completed' WHERE LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)", (clean_title, song_base))
+                c.execute("UPDATE todos SET status='completed' WHERE id=?", (todo_id,))
+                conn.commit()
+            conn.close()
+            return JSONResponse(content={"success": True})
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
 
     @router.get("/api/dismissed-suggestions")
     def get_local_dismissed(request: Request):
@@ -173,6 +401,14 @@ if platform.system() == "Windows":
     @router.get("/api/ai/briefing")
     def get_local_ai_briefing(request: Request):
         try:
+            from ai_agent import get_latest_briefing
+            briefing = get_latest_briefing()
+            if briefing:
+                return JSONResponse(content=briefing)
+        except Exception as local_e:
+            print(f"[API] Local briefing failed, trying proxy: {local_e}")
+            
+        try:
             headers = get_proxy_headers()
             if "x-admin-passcode" in request.headers:
                 headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
@@ -183,6 +419,14 @@ if platform.system() == "Windows":
 
     @router.post("/api/ai/briefing/force")
     def force_local_ai_briefing(request: Request):
+        try:
+            from ai_agent import generate_daily_briefing
+            briefing = generate_daily_briefing()
+            if briefing:
+                return JSONResponse(content=briefing)
+        except Exception as local_e:
+            print(f"[API] Local force briefing failed, trying proxy: {local_e}")
+            
         try:
             headers = get_proxy_headers()
             if "x-admin-passcode" in request.headers:
@@ -195,16 +439,21 @@ if platform.system() == "Windows":
     @router.post("/api/ai/chat")
     async def chat_local_with_ai(request: Request):
         try:
-            headers = get_proxy_headers()
-            if "x-admin-passcode" in request.headers:
-                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
-            if "content-type" in request.headers:
-                headers["content-type"] = request.headers["content-type"]
-            body = await request.body()
-            r = requests.post(f"{VM_API_BASE}/api/ai/chat", data=body, headers=headers, timeout=60.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            data = await request.json()
+            message = data.get("message") or data.get("prompt")
+            history = data.get("history", [])
+            current_tab = data.get("current_tab") or data.get("activeTab")
+            if not message:
+                return JSONResponse(content={"error": "No message provided"}, status_code=400)
+                
+            from ai_agent import chat_with_agent
+            result = chat_with_agent(message, history, current_tab=current_tab)
+            if isinstance(result, dict):
+                return JSONResponse(content=result)
+            return JSONResponse(content={"reply": result, "actions": []})
         except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+            print(f"[API] Agent chat error: {e}")
+            return JSONResponse(content={"error": f"Agent error: {e}"}, status_code=500)
 
     @router.post("/api/actions/run")
     def run_local_action_engine(request: Request):
@@ -800,7 +1049,7 @@ if platform.system() == "Windows":
             return {"status": "error", "message": str(e)}
 
     @router.get("/api/server/file")
-    def get_server_file(song: str, filename: str, request: Request = None, folder: str = ""):
+    def get_server_file(song: str, filename: str, request: Request, folder: str = ""):
         is_video = filename.lower().endswith(".mp4")
         
         # 1. Resolve local path
@@ -940,6 +1189,7 @@ else:
             return JSONResponse(content=data, status_code=200)
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
+
 
     @router.delete("/api/public/suggestions/{sug_id}")
     def delete_suggestion(sug_id: str, request: Request):
@@ -1587,7 +1837,9 @@ else:
     def admin_list_orders(request: Request):
         verify_admin(request)
         
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=30000;")
         c = conn.cursor()
         c.execute("SELECT transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, download_count, created_at FROM purchases ORDER BY created_at DESC")
         rows = c.fetchall()
@@ -1624,6 +1876,21 @@ else:
         c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
         conn.commit()
         conn.close()
+
+        if platform.system() == "Windows":
+            try:
+                import requests
+                admin_pass = settings.get("admin_passcode") or "579110"
+                requests.post(
+                    f"{VM_API_BASE}/api/admin/orders/reset",
+                    json={"transaction_id": transaction_id},
+                    headers={"x-admin-passcode": admin_pass},
+                    timeout=10
+                )
+                print(f"[Order Reset] Successfully synced reset for '{transaction_id}' to production VM.")
+            except Exception as e:
+                print(f"[Order Reset] Sync to VM failed: {e}")
+
         return {"success": True}
 
     class ManualOrderRequest(BaseModel):
@@ -1650,9 +1917,15 @@ else:
         email = req.email.strip() if req.email else ""
         buyer_name = req.buyer_name.strip() if req.buyer_name else ""
         
+        import re
+        is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', req.song_name, re.IGNORECASE))
+        song_clean = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', req.song_name, flags=re.IGNORECASE).strip()
+        song_clean = re.sub(r'\s+(Easy|Original)$', '', song_clean, flags=re.IGNORECASE).strip()
+        saved_song_name = f"{song_clean} Easy" if is_easy else song_clean
+
         c.execute(
             "INSERT INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, created_at, download_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (transaction_id, email, req.song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, buyer_name, created_at)
+            (transaction_id, email, saved_song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, buyer_name, created_at)
         )
         conn.commit()
         conn.close()
@@ -1828,72 +2101,11 @@ async def sync_competitors():
 @router.get("/api/todos")
 async def get_todos(request: Request):
     verify_admin(request)
-    published_titles = set()
-    songs_path = TOOLS_DIR / "meloscribe" / "backend" / "songs.json"
-    if not os.path.exists(songs_path):
-        songs_path = Path("/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json")
-        
-    if os.path.exists(songs_path):
-        try:
-            with open(songs_path, "r", encoding="utf-8") as f:
-                songs_list = json.load(f)
-                for s in songs_list:
-                    if isinstance(s, dict) and "title" in s:
-                        published_titles.add(s["title"])
-        except Exception as e:
-            print(f"[Todo Auto-Complete] Error reading songs.json: {e}")
-
-    def clean_name(todo_name):
-        name = todo_name
-        for prefix in ["[PRIORITY] ", "[FORMAT-SHIFT] ", "[RE-PURPOSE] "]:
-            if name.startswith(prefix):
-                name = name[len(prefix):]
-        return "".join(c for c in name.lower() if c.isalnum())
-
-    published_cleaned = {clean_name(t) for t in published_titles}
-
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    
-    todos_raw_db = [dict(r) for r in c.execute("SELECT * FROM todos WHERE status='pending'").fetchall()]
-    
-    completed_ids = []
-    todos_raw = []
-    
-    for t in todos_raw_db:
-        t_cleaned = clean_name(t["song_name"])
-        is_completed = False
-        for p_clean in published_cleaned:
-            if p_clean and (p_clean == t_cleaned or p_clean in t_cleaned or t_cleaned in p_clean):
-                is_completed = True
-                break
-        
-        if is_completed:
-            completed_ids.append(t["id"])
-        else:
-            todos_raw.append(t)
-            
-    if completed_ids:
-        c.executemany("UPDATE todos SET status='completed' WHERE id=?", [(tid,) for tid in completed_ids])
-        conn.commit()
-        print(f"[Todo Auto-Complete] Auto-completed {len(completed_ids)} todos: {completed_ids}")
-    
-    for t in todos_raw:
-        song = t["song_name"].replace("[PRIORITY] ", "").replace("[FORMAT-SHIFT] ", "").replace("[RE-PURPOSE] ", "")
-        row = c.execute("SELECT AVG(views) as avg_v FROM videos WHERE song_name LIKE ?", (f"%{song.split(' - ')[0].strip()}%",)).fetchone()
-        t["_score"] = row["avg_v"] if row and row["avg_v"] else 0
-        
-        if "[PRIORITY]" in t["song_name"]:
-            t["_score"] = (t["_score"] or 0) + 999999
-    
-    todos_raw.sort(key=lambda x: x.get("_score", 0), reverse=True)
-    
-    for t in todos_raw:
-        t.pop("_score", None)
-    
+    res = execute_todos_sync_and_query(conn)
     conn.close()
-    return JSONResponse(content=todos_raw)
+    return JSONResponse(content=res)
 
 @router.post("/api/todos")
 async def add_todo(req: Request):
@@ -1905,8 +2117,8 @@ async def add_todo(req: Request):
     
     conn = sqlite3.connect(str(db_path))
     c = conn.cursor()
-    import datetime as _dt
-    c.execute("INSERT INTO todos (song_name, added_date) VALUES (?, ?)", (song_name, _dt.datetime.now().isoformat()))
+    c.execute("INSERT INTO todos (song_name, added_date, status) VALUES (?, ?, 'pending')",
+              (song_name, datetime.datetime.now().isoformat()))
     conn.commit()
     new_id = c.lastrowid
     conn.close()
@@ -1916,9 +2128,33 @@ async def add_todo(req: Request):
 async def delete_todo(todo_id: int, req: Request):
     verify_admin(req)
     conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
+    row = c.execute("SELECT song_name FROM todos WHERE id=?", (todo_id,)).fetchone()
+    if row:
+        raw_name = row["song_name"]
+        clean_title = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", raw_name).strip()
+        song_base = clean_title.split(" - ")[0].strip()
+        c.execute("UPDATE suggestions SET status='completed' WHERE LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)", (clean_title, song_base))
     c.execute("DELETE FROM todos WHERE id=?", (todo_id,))
     conn.commit()
+    conn.close()
+    return JSONResponse(content={"success": True})
+
+@router.patch("/api/todos/{todo_id}/complete")
+async def complete_todo(todo_id: int, req: Request):
+    verify_admin(req)
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    row = c.execute("SELECT song_name FROM todos WHERE id=?", (todo_id,)).fetchone()
+    if row:
+        raw_name = row["song_name"]
+        clean_title = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", raw_name).strip()
+        song_base = clean_title.split(" - ")[0].strip()
+        c.execute("UPDATE suggestions SET status='completed' WHERE LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)", (clean_title, song_base))
+        c.execute("UPDATE todos SET status='completed' WHERE id=?", (todo_id,))
+        conn.commit()
     conn.close()
     return JSONResponse(content={"success": True})
 
@@ -1984,21 +2220,25 @@ async def force_ai_briefing(request: Request):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@router.post("/api/ai/chat")
-async def chat_with_ai(req: Request):
-    verify_admin(req)
-    data = await req.json()
-    message = data.get("message")
-    history = data.get("history", [])
-    if not message:
-        return JSONResponse(content={"error": "No message provided"}, status_code=400)
-        
-    try:
-        from ai_agent import chat_with_agent
-        reply = chat_with_agent(message, history)
-        return JSONResponse(content={"reply": reply})
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+if platform.system() != "Windows":
+    @router.post("/api/ai/chat")
+    async def chat_with_ai(req: Request):
+        verify_admin(req)
+        data = await req.json()
+        message = data.get("message") or data.get("prompt")
+        history = data.get("history", [])
+        current_tab = data.get("current_tab") or data.get("activeTab")
+        if not message:
+            return JSONResponse(content={"error": "No message provided"}, status_code=400)
+            
+        try:
+            from ai_agent import chat_with_agent
+            result = chat_with_agent(message, history, current_tab=current_tab)
+            if isinstance(result, dict):
+                return JSONResponse(content=result)
+            return JSONResponse(content={"reply": result, "actions": []})
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/actions/run")
 async def run_action_engine(request: Request):

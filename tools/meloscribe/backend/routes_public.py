@@ -931,19 +931,21 @@ def request_download(hash: str, type: str, request: Request):
             try:
                 import boto3, re
                 from botocore.config import Config
-                clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+                clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
                 clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+                is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+                r2_base = f"{clean_base} Easy" if is_easy else clean_base
                 
                 if type == "midi":
-                    file_key = f"{clean_base}/{clean_base}.mid"
+                    file_key = f"{r2_base}/{r2_base}.mid"
                 elif type == "midi_slow":
-                    file_key = f"{clean_base}/{clean_base} slow.mid"
+                    file_key = f"{r2_base}/{r2_base} slow.mid"
                 elif type == "video":
-                    file_key = f"{clean_base}/{clean_base}.mp4"
+                    file_key = f"{r2_base}/{r2_base}.mp4"
                 elif type == "video_slow":
-                    file_key = f"{clean_base}/{clean_base} slow.mp4"
+                    file_key = f"{r2_base}/{r2_base} slow.mp4"
                 else:
-                    file_key = f"{clean_base} Full Package.zip"
+                    file_key = f"{r2_base} Full Package.zip"
 
                 s3 = boto3.client(
                     's3',
@@ -1049,21 +1051,23 @@ def download_file(hash: str, type: str, request: Request):
         from botocore.config import Config
         
         import re
-        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
         clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+        is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+        r2_base = f"{clean_base} Easy" if is_easy else clean_base
 
         if type == "pdf":
-            file_key = f"{clean_base}/{clean_base}.pdf"
+            file_key = f"{r2_base}/{r2_base}.pdf"
         elif type == "midi":
-            file_key = f"{clean_base}/{clean_base}.mid"
+            file_key = f"{r2_base}/{r2_base}.mid"
         elif type == "midi_slow":
-            file_key = f"{clean_base}/{clean_base} slow.mid"
+            file_key = f"{r2_base}/{r2_base} slow.mid"
         elif type == "video":
-            file_key = f"{clean_base}/{clean_base}.mp4"
+            file_key = f"{r2_base}/{r2_base}.mp4"
         elif type == "video_slow":
-            file_key = f"{clean_base}/{clean_base} slow.mp4"
+            file_key = f"{r2_base}/{r2_base} slow.mp4"
         else:
-            file_key = f"{clean_base} Full Package.zip"
+            file_key = f"{r2_base} Full Package.zip"
             
         s3 = boto3.client(
             's3',
@@ -1078,10 +1082,10 @@ def download_file(hash: str, type: str, request: Request):
         try:
             s3.head_object(Bucket=r2_bucket, Key=file_key)
         except Exception:
-            print(f"[Download File] Key '{file_key}' not found directly, resolving dynamically under '{clean_base}/'...")
+            print(f"[Download File] Key '{file_key}' not found directly, resolving dynamically under '{r2_base}/'...")
             ext = ".pdf" if type == "pdf" else (".mid" if "midi" in type else (".mp4" if "video" in type else ".zip"))
             is_slow = "slow" in type
-            res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{clean_base}/")
+            res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{r2_base}/")
             found_key = None
             for obj in res_objs.get("Contents", []):
                 k = obj["Key"]
@@ -1173,15 +1177,17 @@ def verify_download(checkout_id: str):
         )
 
         import re
-        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+)\)', '', song_name, flags=re.IGNORECASE).strip()
+        clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
         clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
+        is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+        r2_base = f"{clean_base} Easy" if is_easy else clean_base
 
         file_specs = [
-            {"key": f"{clean_base}/{clean_base}.pdf",       "label": "Sheet Music (PDF)",          "type": "pdf"},
-            {"key": f"{clean_base}/{clean_base}.mid",       "label": "MIDI – Normal Speed",         "type": "midi"},
-            {"key": f"{clean_base}/{clean_base} slow.mid",  "label": "MIDI – Slow Practice",        "type": "midi"},
-            {"key": f"{clean_base}/{clean_base}.mp4",       "label": "Practice Video – Normal Speed", "type": "video"},
-            {"key": f"{clean_base}/{clean_base} slow.mp4",  "label": "Practice Video – Slow",       "type": "video"},
+            {"key": f"{r2_base}/{r2_base}.pdf",       "label": "Sheet Music (PDF)",          "type": "pdf"},
+            {"key": f"{r2_base}/{r2_base}.mid",       "label": "MIDI – Normal Speed",         "type": "midi"},
+            {"key": f"{r2_base}/{r2_base} slow.mid",  "label": "MIDI – Slow Practice",        "type": "midi"},
+            {"key": f"{r2_base}/{r2_base}.mp4",       "label": "Practice Video – Normal Speed", "type": "video"},
+            {"key": f"{r2_base}/{r2_base} slow.mp4",  "label": "Practice Video – Slow",       "type": "video"},
         ]
 
         files = []
@@ -1445,12 +1451,17 @@ def get_suggestions():
                     title TEXT,
                     artist TEXT,
                     votes INTEGER DEFAULT 0,
-                    created_at TEXT
+                    created_at TEXT,
+                    status TEXT DEFAULT 'open'
                 )
             """)
+            try:
+                c.execute("ALTER TABLE suggestions ADD COLUMN status TEXT DEFAULT 'open'")
+            except Exception:
+                pass
             conn.commit()
-            c.execute("SELECT id, title, artist, votes, created_at FROM suggestions ORDER BY votes DESC, created_at DESC")
-            rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4]} for r in c.fetchall()]
+            c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions ORDER BY votes DESC, created_at DESC")
+            rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4], "status": r[5]} for r in c.fetchall()]
             conn.close()
             return rows
         except Exception as e:
