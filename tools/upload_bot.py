@@ -2220,15 +2220,6 @@ if __name__ == "__main__":
             thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
             thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
         
-        fb_tpl = settings.get("desc_template_facebook") or (
-            "🎹 {song} - {author}{label}\n\n"
-            "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
-            "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
-        )
-        if is_tut:
-            fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
-        desc = format_description_template(fb_tpl, args.song, args.author, label, medium_arg='reel' if format_mode == "viral_part" else 'video')
-        
         # Build direct sheet music link & comment text
         slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
         version_suffix = "&version=easy" if is_easy else ""
@@ -2236,6 +2227,33 @@ if __name__ == "__main__":
         default_fb_comment = f"Sheet Music (Easy): {song_link}" if is_easy else f"Sheet Music: {song_link}"
         fb_comment_tpl = settings.get("comment_template_facebook")
         fb_comment = fb_comment_tpl.replace("{song_link}", song_link) if fb_comment_tpl else default_fb_comment
+
+        if format_mode == "full_arrangement":
+            # Long-form video (> 90s): Links right at the top so they are NOT hidden under "See more" / "Mehr anzeigen"
+            default_fb_tpl = (
+                "🎹 {song} - {author}{label}\n"
+                "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+                "🌐 Website: https://meloscribesheets.com\n\n"
+                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+                "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
+            )
+            preserve_fb_links = True
+        else:
+            # Reel (<= 90s): Keep description clean for maximum organic Reels reach; link in pinned comment
+            default_fb_tpl = (
+                "🎹 {song} - {author}{label}\n\n"
+                "Sheet Music & MIDI → Pinned Comment 👇\n\n"
+                "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
+            )
+            preserve_fb_links = False
+
+        fb_tpl = settings.get("desc_template_facebook") or default_fb_tpl
+        if "{song_link}" not in fb_tpl and format_mode == "full_arrangement":
+            fb_tpl = default_fb_tpl
+
+        if is_tut:
+            fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
+        desc = format_description_template(fb_tpl, args.song, args.author, label, medium_arg='reel' if format_mode == "viral_part" else 'video', preserve_links=preserve_fb_links)
 
         success = post_video(video_path, f"{base_song} - {args.author}{label}", desc,
                    format=format_mode, thumbnail_path=thumbnail_path,
