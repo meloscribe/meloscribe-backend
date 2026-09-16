@@ -1039,7 +1039,7 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
             
         # Build image URL
         encoded_name = urllib.parse.quote(base_song)
-        cover_url = f"https://meloscribesheets.com/covers/{encoded_name}_clean.jpg"
+        cover_url = f"https://www.meloscribesheets.com/covers/{encoded_name}_clean.jpg"
         
         # Build Title
         is_tut = "tutorial" in profile.lower() or "slow" in profile.lower()
@@ -1096,9 +1096,8 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
         url = "https://api.pinterest.com/v5/pins"
         resp = requests.post(url, json=pin_data, headers=headers, timeout=15)
         if resp.status_code == 403 and "use API Sandbox" in resp.text:
-            print("[Pinterest Bot] App is in Trial mode. Retrying with Pinterest Sandbox API...")
-            url = "https://api-sandbox.pinterest.com/v5/pins"
-            resp = requests.post(url, json=pin_data, headers=headers, timeout=15)
+            print("[Pinterest Bot] Error: App is in Trial mode. Please request Standard Access in the Pinterest Developer Portal (https://developers.pinterest.com/apps/1582487/) to create production pins.")
+            return False
 
         if resp.status_code in [200, 201]:
             pin_info = resp.json()
