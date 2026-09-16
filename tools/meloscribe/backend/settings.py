@@ -32,10 +32,27 @@ DEFAULT_SETTINGS = {
     "subtitle_easy_normal": "",
     "subtitle_easy_slow": "",
     "manual_crop": False,
-    "desc_template_youtube": (
+    "desc_template_youtube_video": (
+        "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+        "🌐 Website: https://meloscribesheets.com\n\n"
         "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
+        "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
+        "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+    ),
+    "desc_template_youtube_shorts": (
+        "🎹 {song} - {author}{label}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "🎼 Sheet Music & MIDI → Link in Bio / Description\n"
+        "🌐 meloscribesheets.com\n\n"
+        "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
+        "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+    ),
+    "desc_template_youtube": (
+        "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+        "🌐 Website: https://meloscribesheets.com\n\n"
+        "🎹 {song} - {author}{label}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
     ),
@@ -46,11 +63,23 @@ DEFAULT_SETTINGS = {
         "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #synthesia #music #pianomusic #{song}"
     ),
-    "desc_template_facebook": (
+    "desc_template_facebook_post": (
+        "🎼 Sheet Music (PDF): {song_link}\n"
+        "🌐 Website: https://meloscribesheets.com\n\n"
         "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
-        "Check out my page for more aesthetic piano covers and tutorials!\n\n"
+        "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
+    ),
+    "desc_template_facebook_reel": (
+        "🎹 {song} - {author}{label}\n\n"
+        "Sheet Music (PDF) → Pinned Comment 👇\n\n"
+        "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
+    ),
+    "desc_template_facebook": (
+        "🎼 Sheet Music (PDF): {song_link}\n"
+        "🌐 Website: https://meloscribesheets.com\n\n"
+        "🎹 {song} - {author}{label}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_threads": (
@@ -156,11 +185,27 @@ def load_settings():
                 settings = DEFAULT_SETTINGS.copy()
                 settings.update(data)
                 
-                # Self-healing check to write missing Pinterest template to disk
-                if "desc_template_pinterest" not in data:
-                    data["desc_template_pinterest"] = DEFAULT_SETTINGS["desc_template_pinterest"]
+                # Self-healing / migration checks for description templates
+                needs_save = False
+                for k in ["desc_template_youtube_video", "desc_template_youtube_shorts",
+                          "desc_template_facebook_post", "desc_template_facebook_reel", "desc_template_pinterest"]:
+                    if k not in data:
+                        data[k] = DEFAULT_SETTINGS[k]
+                        settings[k] = DEFAULT_SETTINGS[k]
+                        needs_save = True
+
+                # Upgrade legacy templates if still containing outdated "Link in Bio"
+                if "Link in Bio" in data.get("desc_template_facebook", ""):
+                    data["desc_template_facebook"] = DEFAULT_SETTINGS["desc_template_facebook"]
+                    settings["desc_template_facebook"] = DEFAULT_SETTINGS["desc_template_facebook"]
+                    needs_save = True
+                if "Link in Bio" in data.get("desc_template_youtube", ""):
+                    data["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
+                    settings["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
+                    needs_save = True
+
+                if needs_save:
                     save_settings(data)
-                    settings["desc_template_pinterest"] = DEFAULT_SETTINGS["desc_template_pinterest"]
         except Exception:
             settings = DEFAULT_SETTINGS
 

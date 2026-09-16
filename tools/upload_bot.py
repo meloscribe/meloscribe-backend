@@ -2071,19 +2071,19 @@ if __name__ == "__main__":
                 "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
                 "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
             )
+            yt_tpl = settings.get("desc_template_youtube_video") or settings.get("desc_template_youtube") or default_yt_tpl
+            if "{song_link}" not in yt_tpl:
+                yt_tpl = default_yt_tpl
         else:
             default_yt_tpl = (
                 "🎹 {song} - {author}{label}\n\n"
                 "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-                "🎼 Sheet Music & MIDI → Link in Bio\n"
+                "🎼 Sheet Music & MIDI → Link in Bio / Description\n"
                 "🌐 meloscribesheets.com\n\n"
                 "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
                 "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
             )
-            
-        yt_tpl = settings.get("desc_template_youtube") or default_yt_tpl
-        if "{song_link}" not in yt_tpl and format_mode == "full_arrangement":
-            yt_tpl = default_yt_tpl
+            yt_tpl = settings.get("desc_template_youtube_shorts") or settings.get("desc_template_youtube") or default_yt_tpl
             
         if is_tut:
             yt_tpl = yt_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
@@ -2238,6 +2238,9 @@ if __name__ == "__main__":
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
             preserve_fb_links = True
+            fb_tpl = settings.get("desc_template_facebook_post") or settings.get("desc_template_facebook") or default_fb_tpl
+            if "{song_link}" not in fb_tpl:
+                fb_tpl = default_fb_tpl
         else:
             # Reel (<= 90s): Keep description clean for maximum organic Reels reach; link in pinned comment
             default_fb_tpl = (
@@ -2246,10 +2249,7 @@ if __name__ == "__main__":
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
             preserve_fb_links = False
-
-        fb_tpl = settings.get("desc_template_facebook") or default_fb_tpl
-        if "{song_link}" not in fb_tpl and format_mode == "full_arrangement":
-            fb_tpl = default_fb_tpl
+            fb_tpl = settings.get("desc_template_facebook_reel") or settings.get("desc_template_facebook") or default_fb_tpl
 
         if is_tut:
             fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
