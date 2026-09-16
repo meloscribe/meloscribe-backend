@@ -2231,7 +2231,7 @@ if __name__ == "__main__":
         if format_mode == "full_arrangement":
             # Long-form video (> 90s): Links right at the very top so they are NEVER hidden under "See more" / "Mehr anzeigen"
             default_fb_tpl = (
-                "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+                "🎼 Sheet Music (PDF): {song_link}\n"
                 "🌐 Website: https://meloscribesheets.com\n\n"
                 "🎹 {song} - {author}{label}\n\n"
                 "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
@@ -2242,7 +2242,7 @@ if __name__ == "__main__":
             # Reel (<= 90s): Keep description clean for maximum organic Reels reach; link in pinned comment
             default_fb_tpl = (
                 "🎹 {song} - {author}{label}\n\n"
-                "Sheet Music & MIDI → Pinned Comment 👇\n\n"
+                "Sheet Music (PDF) → Pinned Comment 👇\n\n"
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
             preserve_fb_links = False
