@@ -15,7 +15,7 @@ Living documentation for the meloscribe public API backend (`C:\Dev\meloscribe-b
 ## Architecture
 
 ```
-Client (meloscribe.dev)
+Client (meloscribesheets.com / meloscribe.dev redirect)
     │
     ▼ HTTPS (443)
 Nginx (reverse proxy on Oracle VM)
@@ -84,9 +84,11 @@ git add . && git commit -m "..." && git push
 ## Infrastructure & Networking
 
 ### DNS (Cloudflare — DNS Only, no proxy)
-- `meloscribe.dev` → `A` → `76.76.21.21` (Vercel)
-- `www.meloscribe.dev` → `CNAME` → `cname.vercel-dns.com`
-- `api.meloscribe.dev` → `A` → `152.70.23.171` (Oracle VM)
+- `meloscribesheets.com` → `A` → `76.76.21.21` (Vercel, Primary Domain)
+- `www.meloscribesheets.com` → `CNAME` → `cname.vercel-dns.com` (Vercel)
+- `meloscribe.dev` → `A` → `76.76.21.21` (Vercel, 308 Permanent Redirect)
+- `www.meloscribe.dev` → `CNAME` → `cname.vercel-dns.com` (Vercel, 308 Permanent Redirect)
+- `api.meloscribe.dev` → `A` → `152.70.23.171` (Oracle VM FastAPI Backend)
 
 ### SSL (Let's Encrypt via Certbot)
 - Full chain: `/etc/letsencrypt/live/api.meloscribe.dev/fullchain.pem`
@@ -192,7 +194,14 @@ git add . && git commit -m "..." && git push
 - [x] Hardened Nginx on Oracle Cloud VM: disabled server tokens, added HTTP security headers (`nosniff`, `SAMEORIGIN`, `HSTS`, `Referrer-Policy`), and configured global request rate limiting (`30r/s`, `burst=60`).
 - [x] Switched demographics synchronization from brittle Playwright scraper to official YouTube Analytics and Instagram Graph APIs (`demographics_sync.py`).
 
+- [x] Domain Migration auf `meloscribesheets.com`:
+  - `main.py`: `CORSMiddleware` `allow_origin_regex` erweitert um `https://(.*\.)?meloscribesheets\.com`, damit alle Frontend-Anfragen der neuen Domain zugelassen werden.
+  - `routes_public.py`: E-Mail-Lieferlinks (`download_url`), Footer-Links, Opt-in-Texte, Stripe Checkout Origin-Normalisierung und Produkt-Vorschaubilder auf `meloscribesheets.com` aktualisiert.
+  - `routes_admin.py`: Manuelle Bestellerstellung (`download_url`) auf `meloscribesheets.com` aktualisiert.
+  - `upload_bot.py`: Social Media Links & Pinterest Cover-URLs auf `meloscribesheets.com` umgestellt.
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.
 - End-to-end sandbox checkout flows have been fully verified with client event redirection and direct transaction lookup fallback; live webhook sign verification is active. Preview video R2 streaming logic is fully functional.
+

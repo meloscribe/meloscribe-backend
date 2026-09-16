@@ -123,7 +123,7 @@ def watermark_video(original_video_bytes: bytes, song_name: str, type: str) -> b
         if os.name == 'nt' or not os.path.exists(font_path):
             font_path = "Arial"
             
-        filter_str = f"drawtext=text='meloscribe.dev':fontfile='{font_path}':fontcolor=white@0.25:fontsize=24:x=w-tw-30:y=30"
+        filter_str = f"drawtext=text='meloscribesheets.com':fontfile='{font_path}':fontcolor=white@0.25:fontsize=24:x=w-tw-30:y=30"
         
         cmd = [
             ffmpeg_executable, "-y",
@@ -239,7 +239,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
         log_webhook("[Notify] WARNING: resend_api_key not set in settings.json. Skipping purchase email.")
         return False
         
-    download_url = f"https://meloscribe.dev/order/{download_hash}"
+    download_url = f"https://meloscribesheets.com/order/{download_hash}"
     
     lang = locale.lower()[:2] if locale else "en"
     if lang not in EMAIL_TEMPLATES:
@@ -288,7 +288,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
     <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">{tpl["happy_practicing"]}<br>meloscribe</p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
-    {tpl["help_text"]} <a href="https://meloscribe.dev" style="color: #00f5d4;">meloscribe.dev</a>
+    {tpl["help_text"]} <a href="https://meloscribesheets.com" style="color: #00f5d4;">meloscribesheets.com</a>
   </p>
 </body>
 </html>
@@ -343,7 +343,7 @@ def _send_confirmation_email(email: str, token: str):
     <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
     <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
       Thanks for your interest! Please confirm that you want to receive email notifications
-      whenever new sheet music or practice assets are dropped on meloscribe.dev.
+      whenever new sheet music or practice assets are dropped on meloscribesheets.com.
     </p>
     <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the link below to confirm your email:</p>
     <div style="text-align: center; margin: 28px 0;">
@@ -483,9 +483,11 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             amount_cents = 600
             
         download_hash = uuid.uuid4().hex
-        origin = request.headers.get("origin") or "https://www.meloscribe.dev"
-        if origin == "https://meloscribe.dev":
-            origin = "https://www.meloscribe.dev"
+        origin = request.headers.get("origin") or "https://www.meloscribesheets.com"
+        if origin in ("https://meloscribe.dev", "https://meloscribesheets.com"):
+            origin = "https://www.meloscribesheets.com"
+        elif origin == "https://www.meloscribe.dev":
+            origin = "https://www.meloscribesheets.com"
         
         s_settings = load_settings()
         is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
@@ -513,7 +515,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if cover_image_path:
             import urllib.parse
             quoted_path = urllib.parse.quote(cover_image_path)
-            product_image = f"https://www.meloscribe.dev{quoted_path}"
+            product_image = f"https://www.meloscribesheets.com{quoted_path}"
             
         def to_slug(text):
             s = text.lower()
@@ -1543,8 +1545,8 @@ def notify_confirm(token: str):
     </svg>
     <div class="badge">Success</div>
     <div class="title">You're in!</div>
-    <div class="desc">You'll be notified when new sheet music and practice assets drop on meloscribe.dev.</div>
-    <a href="https://meloscribe.dev" class="btn">Go to meloscribe.dev</a>
+    <div class="desc">You'll be notified when new sheet music and practice assets drop on meloscribesheets.com.</div>
+    <a href="https://meloscribesheets.com" class="btn">Go to meloscribesheets.com</a>
   </div>
 </body>
 </html>""")
@@ -1609,7 +1611,7 @@ def notify_unsubscribe(token: str):
     <div class="badge">{badge_text}</div>
     <div class="title">{title_text}</div>
     <div class="desc">{desc_text}</div>
-    <a href="https://meloscribe.dev" class="btn">Go to meloscribe.dev</a>
+    <a href="https://meloscribesheets.com" class="btn">Go to meloscribesheets.com</a>
   </div>
 </body>
 </html>""")

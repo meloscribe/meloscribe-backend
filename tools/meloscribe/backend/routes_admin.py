@@ -1935,7 +1935,7 @@ else:
             "success": True, 
             "transaction_id": transaction_id, 
             "download_hash": download_hash,
-            "download_url": f"https://meloscribe.dev/order/{download_hash}",
+            "download_url": f"https://meloscribesheets.com/order/{download_hash}",
             "email_sent": email_sent
         }
 
