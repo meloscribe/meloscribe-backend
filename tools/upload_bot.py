@@ -912,7 +912,7 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
         print(f"[Website Sync] Error syncing song to website: {e}")
         return False
 
-def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg=None):
+def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg=None, preserve_links=False):
     is_easy = song_arg.lower().endswith(" easy")
     
     base_song = song_arg
@@ -930,19 +930,22 @@ def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg
     
     version_suffix = "&version=easy" if is_easy else ""
     song_link = f"https://meloscribesheets.com/sheets?song={slug}{version_suffix}"
+    website_link = "https://meloscribesheets.com"
     
     res = tpl
     res = re.sub(r'#\s*\{song\}', f"#{hashtag_name}", res)
     res = res.replace("{song_hashtag}", f"#{hashtag_name}")
     res = res.replace("{song_link}", song_link)
+    res = res.replace("{website_link}", website_link)
     res = res.replace("{song}", base_song)
     res = res.replace("{label}", label_arg)
     res = res.replace("{author}", author_arg)
     if medium_arg:
         res = res.replace("{medium}", medium_arg)
         
-    # Strip any http/https links to ensure no description contains links
-    res = re.sub(r'https?://\S+', '', res).strip()
+    if not preserve_links:
+        # Strip any http/https links to ensure no description contains links on platforms where disallowed
+        res = re.sub(r'https?://\S+', '', res).strip()
     # Normalize multiple newlines/spaces at the end
     res = re.sub(r'\n{3,}', '\n\n', res)
     return res
@@ -2058,16 +2061,33 @@ if __name__ == "__main__":
             
         thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
         thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
-        yt_tpl = settings.get("desc_template_youtube") or (
-            "🎹 {song} - {author}{label}\n\n"
-            "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-            "Sheet Music (PDF) & MIDI files -> Link in Bio\n\n"
-            "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
-            "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
-        )
+        
+        if format_mode == "full_arrangement":
+            default_yt_tpl = (
+                "🎹 {song} - {author}{label}\n\n"
+                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+                "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+                "🌐 Website: https://meloscribesheets.com\n\n"
+                "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
+                "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+            )
+        else:
+            default_yt_tpl = (
+                "🎹 {song} - {author}{label}\n\n"
+                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+                "🎼 Sheet Music & MIDI → Link in Bio\n"
+                "🌐 meloscribesheets.com\n\n"
+                "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
+                "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+            )
+            
+        yt_tpl = settings.get("desc_template_youtube") or default_yt_tpl
+        if "{song_link}" not in yt_tpl and format_mode == "full_arrangement":
+            yt_tpl = default_yt_tpl
+            
         if is_tut:
             yt_tpl = yt_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
-        desc = format_description_template(yt_tpl, args.song, args.author, label)
+        desc = format_description_template(yt_tpl, args.song, args.author, label, preserve_links=True)
         tags = ["piano", "tutorial", "synthesia", "cover", base_song, args.author, "music", "piano cover"]
         yt_url = post_video(video_path, f"{base_song} - {args.author}{label} | Piano Cover", desc, tags,
                    publish_at_dt=dt_obj, privacy="public", format=format_mode,
