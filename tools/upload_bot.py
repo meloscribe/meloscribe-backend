@@ -2064,10 +2064,10 @@ if __name__ == "__main__":
         
         if format_mode == "full_arrangement":
             default_yt_tpl = (
-                "🎹 {song} - {author}{label}\n\n"
-                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
                 "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
                 "🌐 Website: https://meloscribesheets.com\n\n"
+                "🎹 {song} - {author}{label}\n\n"
+                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
                 "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
                 "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
             )
@@ -2229,11 +2229,11 @@ if __name__ == "__main__":
         fb_comment = fb_comment_tpl.replace("{song_link}", song_link) if fb_comment_tpl else default_fb_comment
 
         if format_mode == "full_arrangement":
-            # Long-form video (> 90s): Links right at the top so they are NOT hidden under "See more" / "Mehr anzeigen"
+            # Long-form video (> 90s): Links right at the very top so they are NEVER hidden under "See more" / "Mehr anzeigen"
             default_fb_tpl = (
-                "🎹 {song} - {author}{label}\n"
                 "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
                 "🌐 Website: https://meloscribesheets.com\n\n"
+                "🎹 {song} - {author}{label}\n\n"
                 "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
