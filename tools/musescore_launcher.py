@@ -173,6 +173,8 @@ def populate_musescore_metadata(mscz_path, title, composer, midi_path=None):
             content = set_meta_tag(content, "composer", composer)
             content = set_meta_tag(content, "arranger", composer)
                 
+            content = set_meta_tag(content, "copyright", "© 2026 meloscribe")
+
             # 3. Update VBox Title Text
             content = re.sub(
                 r'(<style>title</style>\s*<text>).*?(</text>)',
@@ -232,29 +234,41 @@ def populate_musescore_metadata(mscz_path, title, composer, midi_path=None):
                 content
             )
 
-            # 9a. Enforce Staff Space = 1.4 mm (Spatium)
+            # 9a. Enforce Staff Space = 1.8 mm (Spatium for professional engraving)
             if '<spatium>' in content:
-                content = re.sub(r'<spatium>.*?</spatium>', '<spatium>1.4</spatium>', content)
+                content = re.sub(r'<spatium>.*?</spatium>', '<spatium>1.8</spatium>', content)
             elif '<Style>' in content:
-                content = content.replace('<Style>', '<Style>\n    <spatium>1.4</spatium>')
+                content = content.replace('<Style>', '<Style>\n    <spatium>1.8</spatium>')
 
             # 9b. Clear Top Headers (remove duplicate top page numbers)
             for h_tag in ['evenHeaderL', 'evenHeaderC', 'evenHeaderR', 'oddHeaderL', 'oddHeaderC', 'oddHeaderR',
                         'headerEvenLeft', 'headerEvenCenter', 'headerEvenRight', 'headerOddLeft', 'headerOddCenter', 'headerOddRight']:
                 content = re.sub(rf'<{h_tag}>.*?</{h_tag}>', f'<{h_tag}></{h_tag}>', content)
 
-            # 9c. Enforce Page Numbers on Bottom-Center Only
+            # 9c. Enforce Page Numbers on Bottom-Center Only & Copyright Bottom-Left
             if '<footerEvenCenter>' in content:
-                content = re.sub(r'<footerEvenCenter>.*?</footerEvenCenter>', '<footerEvenCenter>$P</footerEvenCenter>', content)
+                content = re.sub(r'<footerEvenCenter>.*?</footerEvenCenter>', '<footerEvenCenter>$p</footerEvenCenter>', content)
             if '<footerOddCenter>' in content:
-                content = re.sub(r'<footerOddCenter>.*?</footerOddCenter>', '<footerOddCenter>$P</footerOddCenter>', content)
+                content = re.sub(r'<footerOddCenter>.*?</footerOddCenter>', '<footerOddCenter>$p</footerOddCenter>', content)
             if '<evenFooterC>' in content:
                 content = re.sub(r'<evenFooterC>.*?</evenFooterC>', '<evenFooterC>$p</evenFooterC>', content)
             if '<oddFooterC>' in content:
                 content = re.sub(r'<oddFooterC>.*?</oddFooterC>', '<oddFooterC>$p</oddFooterC>', content)
+            if '<evenFooterL>' in content:
+                content = re.sub(r'<evenFooterL>.*?</evenFooterL>', '<evenFooterL>$C</evenFooterL>', content)
+            if '<oddFooterL>' in content:
+                content = re.sub(r'<oddFooterL>.*?</oddFooterL>', '<oddFooterL>$C</oddFooterL>', content)
+            if '<showPageNumberOne>' in content:
+                content = re.sub(r'<showPageNumberOne>.*?</showPageNumberOne>', '<showPageNumberOne>0</showPageNumberOne>', content)
+            if '<showPageNumber>' in content:
+                content = re.sub(r'<showPageNumber>.*?</showPageNumber>', '<showPageNumber>1</showPageNumber>', content)
+            if '<showFooter>' in content:
+                content = re.sub(r'<showFooter>.*?</showFooter>', '<showFooter>1</showFooter>', content)
+            if '<footerFirstPage>' in content:
+                content = re.sub(r'<footerFirstPage>.*?</footerFirstPage>', '<footerFirstPage>1</footerFirstPage>', content)
 
-            # 10. Enforce strict 4 measures per system (Takte-Lock) across Staff 1
-            # Remove any existing line breaks to start completely clean
+            # 10. Enforce strict 4 measures per system and 5 systems per page (20 measures per page) across Staff 1
+            # Remove any existing line / page breaks to start completely clean
             content = re.sub(r'<LayoutBreak>\s*(?:<[^>]+>\s*)*<subtype>.*?</subtype>\s*</LayoutBreak>', '', content, flags=re.DOTALL)
             content = re.sub(r'<LayoutBreak>.*?</LayoutBreak>', '', content, flags=re.DOTALL)
 
@@ -279,16 +293,29 @@ def populate_musescore_metadata(mscz_path, title, composer, midi_path=None):
                         m_inner = match.group(2)
                         m_close = match.group(3)
                         
-                        # Every 4th measure gets a line break, except the final measure
-                        if idx % 4 == 0 and idx < len(measure_matches):
-                            layout_break = "\n        <LayoutBreak>\n          <subtype>line</subtype>\n        </LayoutBreak>"
-                            eid_match = re.search(r'^\s*<eid>[^<]+</eid>', m_inner)
-                            if eid_match:
-                                eid_end = eid_match.end()
-                                mod_inner = m_inner[:eid_end] + layout_break + m_inner[eid_end:]
+                        # Every 20th measure gets a page break (5 systems of 4 measures),
+                        # every other 4th measure gets a line break, except the final measure
+                        if idx < len(measure_matches):
+                            if idx % 20 == 0:
+                                layout_break = "\n        <LayoutBreak>\n          <subtype>page</subtype>\n        </LayoutBreak>"
+                                eid_match = re.search(r'^\s*<eid>[^<]+</eid>', m_inner)
+                                if eid_match:
+                                    eid_end = eid_match.end()
+                                    mod_inner = m_inner[:eid_end] + layout_break + m_inner[eid_end:]
+                                else:
+                                    mod_inner = layout_break + m_inner
+                                new_body_chunks.append(f"{m_open}{mod_inner}{m_close}")
+                            elif idx % 4 == 0:
+                                layout_break = "\n        <LayoutBreak>\n          <subtype>line</subtype>\n        </LayoutBreak>"
+                                eid_match = re.search(r'^\s*<eid>[^<]+</eid>', m_inner)
+                                if eid_match:
+                                    eid_end = eid_match.end()
+                                    mod_inner = m_inner[:eid_end] + layout_break + m_inner[eid_end:]
+                                else:
+                                    mod_inner = layout_break + m_inner
+                                new_body_chunks.append(f"{m_open}{mod_inner}{m_close}")
                             else:
-                                mod_inner = layout_break + m_inner
-                            new_body_chunks.append(f"{m_open}{mod_inner}{m_close}")
+                                new_body_chunks.append(f"{m_open}{m_inner}{m_close}")
                         else:
                             new_body_chunks.append(f"{m_open}{m_inner}{m_close}")
                         last_pos = m_end
@@ -296,7 +323,39 @@ def populate_musescore_metadata(mscz_path, title, composer, midi_path=None):
                     new_body_chunks.append(staff1_body[last_pos:])
                     rebuilt_staff1 = pfx + "".join(new_body_chunks) + sfx
                     content = content[:staff1_match.start()] + rebuilt_staff1 + content[staff1_match.end():]
-                
+
+            # 11. Enforce "con pedale" in Staff 2 (left hand), Measure 1 below the staff
+            if 'con pedale' not in content:
+                staff2_match = re.search(r'(<Staff id="2">)(.*?)(</Staff>)', content, flags=re.DOTALL)
+                if staff2_match:
+                    s2_pfx = staff2_match.group(1)
+                    s2_body = staff2_match.group(2)
+                    s2_sfx = staff2_match.group(3)
+                    
+                    m1_match = re.search(r'(<Measure(?:\s+[^>]*)?>)(.*?)(</Measure>)', s2_body, flags=re.DOTALL)
+                    if m1_match:
+                        m1_pfx = m1_match.group(1)
+                        m1_inner = m1_match.group(2)
+                        m1_sfx = m1_match.group(3)
+                        
+                        pedal_elem = (
+                            '\n          <StaffText>'
+                            '\n            <placement>below</placement>'
+                            '\n            <italic>1</italic>'
+                            '\n            <text><i>con pedale</i></text>'
+                            '\n          </StaffText>'
+                        )
+                        note_match = re.search(r'(\s*<(?:Rest|Chord)[^>]*>)', m1_inner)
+                        if note_match:
+                            insert_idx = note_match.start()
+                            mod_m1_inner = m1_inner[:insert_idx] + pedal_elem + m1_inner[insert_idx:]
+                        else:
+                            mod_m1_inner = m1_inner + pedal_elem
+                        
+                        mod_m1 = m1_pfx + mod_m1_inner + m1_sfx
+                        s2_body = s2_body[:m1_match.start()] + mod_m1 + s2_body[m1_match.end():]
+                        content = content[:staff2_match.start()] + s2_pfx + s2_body + s2_sfx + content[staff2_match.end():]
+
             with open(fpath, 'w', encoding='utf-8') as file:
                 file.write(content)
                 
@@ -359,6 +418,8 @@ def main():
         os.path.expanduser(r"~\Documents\MuseScore4\Templates\meloscribe.mscz"),
         os.path.expanduser(r"~\Documents\MuseScore4\Templates\meloscribe_template.mscz"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "musescore cfg", "meloscribe.mscz"),
+        os.path.join(r"C:\Dev\meloscribe\musescore cfg", "meloscribe.mscz"),
+        os.path.expanduser(r"~\Documents\MuseScore4\Scores\meloscribe.mscz"),
     ]
 
     if not os.path.exists(score_path):

@@ -18,6 +18,7 @@ from shared import (
     db_path,
     verify_admin,
     get_server_api_key,
+    load_settings,
     TOOLS_DIR,
     CREATION_FLAGS
 )
@@ -31,6 +32,9 @@ def get_proxy_headers():
     api_key = get_server_api_key()
     if api_key:
         headers["X-Meloscribe-Key"] = api_key
+    admin_passcode = load_settings().get("admin_passcode", "579110")
+    if admin_passcode:
+        headers["x-admin-passcode"] = str(admin_passcode)
     return headers
 
 
@@ -265,6 +269,23 @@ if platform.system() == "Windows":
         try:
             from checkout_analytics import get_checkout_analytics_data
             return JSONResponse(content=get_checkout_analytics_data(), status_code=200)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Analytics error: {e}"}, status_code=500)
+
+    @router.post("/api/admin/checkout-analytics/clear")
+    def clear_local_checkout_analytics(request: Request):
+        try:
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.post(f"{VM_API_BASE}/api/admin/checkout-analytics/clear", headers=headers, timeout=15.0)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception:
+            pass
+        try:
+            from checkout_analytics import clear_checkout_analytics
+            return JSONResponse(content=clear_checkout_analytics(), status_code=200)
         except Exception as e:
             return JSONResponse(content={"error": f"Analytics error: {e}"}, status_code=500)
 
@@ -1056,6 +1077,9 @@ if platform.system() == "Windows":
         if folder == "keysight":
             local_dir = settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")
             media_type = "video/mp4"
+        elif folder == "recycling":
+            local_dir = settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling")
+            media_type = "video/mp4"
         elif is_video:
             local_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
             media_type = "video/mp4"
@@ -1066,11 +1090,8 @@ if platform.system() == "Windows":
         local_path = Path(local_dir) / filename
         if folder == "keysight" and is_video:
             web_path = Path(local_dir) / f"{local_path.stem}_web.mp4"
-            preview_path = Path(local_dir) / f"{local_path.stem}_preview.mp4"
             if web_path.exists():
                 local_path = web_path
-            elif preview_path.exists():
-                local_path = preview_path
             elif local_path.exists():
                 try:
                     ffprobe_exe = os.path.join(settings.get("tools_dir", r"C:\Dev\meloscribe-app\tools"), "ffmpeg", "bin", "ffprobe.exe")
@@ -1187,6 +1208,16 @@ else:
             from checkout_analytics import get_checkout_analytics_data
             data = get_checkout_analytics_data()
             return JSONResponse(content=data, status_code=200)
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.post("/api/admin/checkout-analytics/clear")
+    def clear_server_checkout_analytics(request: Request):
+        verify_admin(request)
+        try:
+            from checkout_analytics import clear_checkout_analytics
+            res = clear_checkout_analytics()
+            return JSONResponse(content=res, status_code=200)
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 

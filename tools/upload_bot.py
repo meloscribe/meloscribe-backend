@@ -504,7 +504,18 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
                 
                 hook_sub = kwargs.get("subtitle_hook")
                 if hook_sub is None:
-                    hook_sub = settings.get("subtitle_hook", "Short Preview")
+                    hook_sub = settings.get("subtitle_hook", "Best Part")
+                if settings.get("ai_subtitles_enabled", True) and (not hook_sub or hook_sub in ["Best Part", "Short Preview"]):
+                    try:
+                        backend_dir = os.path.join(tools_dir, "meloscribe", "backend")
+                        if backend_dir not in sys.path:
+                            sys.path.append(backend_dir)
+                        from content_brain import generate_content_copy
+                        c_res = generate_content_copy("hook_teaser", song_name, author)
+                        if c_res.get("subtitle"):
+                            hook_sub = c_res["subtitle"]
+                    except Exception:
+                        pass
                 if hook_sub is None:
                     hook_sub = ""
                     
@@ -916,6 +927,8 @@ def format_description_template(tpl, song_arg, author_arg, label_arg, medium_arg
     is_easy = song_arg.lower().endswith(" easy")
     
     base_song = song_arg
+    if base_song.lower().endswith(" recycled"):
+        base_song = base_song[:-9].strip()
     if base_song.lower().endswith(" easy"):
         base_song = base_song[:-5].strip()
     if base_song.lower().endswith(" teaser"):
@@ -1034,6 +1047,8 @@ def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None
             
         # Clean song name for assets and hashtags
         base_song = song_name
+        if base_song.lower().endswith(" recycled"):
+            base_song = base_song[:-9].strip()
         if base_song.lower().endswith(" easy"):
             base_song = base_song[:-5].strip()
             
@@ -1606,6 +1621,8 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
     is_tut = profile == "tutorial" or "tutorial" in profile.lower()
     
     base_song = song_name
+    if base_song.lower().endswith(" recycled"):
+        base_song = base_song[:-9].strip()
     if base_song.lower().endswith(" easy"):
         base_song = base_song[:-5].strip()
     elif base_song.lower().endswith(" teaser"):
@@ -1633,16 +1650,32 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
         sys.exit(1)
 
     # 2. Build Caption Text
-    tiktok_tpl = settings.get("desc_template_tiktok") or (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
-        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #music #synthesia #cover"
-    )
-    if is_tut:
-        tiktok_tpl = tiktok_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
-    full_title = format_description_template(tiktok_tpl, song_name, author_name, label)
+    use_ai_caption = settings.get("ai_captions_enabled", True)
+    full_title = ""
+    if use_ai_caption:
+        try:
+            backend_dir = os.path.join(tools_dir, "meloscribe", "backend")
+            if backend_dir not in sys.path:
+                sys.path.append(backend_dir)
+            from content_brain import generate_content_copy
+            f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
+            c_res = generate_content_copy(f_type, song_name, author_name, platform="tiktok")
+            if c_res.get("caption"):
+                full_title = f"{c_res['caption']}\n\n{c_res.get('hashtags', '')}".strip()
+        except Exception as ex_ai:
+            print(f"[UploadBot] AI Caption fallback due to: {ex_ai}")
+
+    if not full_title:
+        tiktok_tpl = settings.get("desc_template_tiktok") or (
+            "🎹 {song} - {author}{label}\n\n"
+            "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+            "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
+            "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
+            "#piano #pianocover #pianotutorial #music #synthesia #cover"
+        )
+        if is_tut:
+            tiktok_tpl = tiktok_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
+        full_title = format_description_template(tiktok_tpl, song_name, author_name, label)
     
     # Resolve cover image path with full fallbacks (including hook.jpg for Teasers)
     covers_dir = settings.get("covers_dir")
@@ -2019,6 +2052,8 @@ if __name__ == "__main__":
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
+        if base_song.lower().endswith(" recycled"):
+            base_song = base_song[:-9].strip()
         if base_song.lower().endswith(" easy"):
             base_song = base_song[:-5].strip()
         elif base_song.lower().endswith(" teaser"):
@@ -2115,6 +2150,8 @@ if __name__ == "__main__":
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
+        if base_song.lower().endswith(" recycled"):
+            base_song = base_song[:-9].strip()
         if base_song.lower().endswith(" easy"):
             base_song = base_song[:-5].strip()
         elif base_song.lower().endswith(" teaser"):
@@ -2170,7 +2207,7 @@ if __name__ == "__main__":
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
-        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial)\b', '', base_song).strip()
+        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial|recycled)\b', '', base_song).strip()
         base_song = re.sub(r'\s+', ' ', base_song).strip()
             
         label_parts = []
@@ -2228,27 +2265,25 @@ if __name__ == "__main__":
         fb_comment = fb_comment_tpl.replace("{song_link}", song_link) if fb_comment_tpl else default_fb_comment
 
         if format_mode == "full_arrangement":
-            # Long-form video (> 90s): Links right at the very top so they are NEVER hidden under "See more" / "Mehr anzeigen"
             default_fb_tpl = (
-                "🎼 Sheet Music (PDF): {song_link}\n"
-                "🌐 Website: https://meloscribesheets.com\n\n"
                 "🎹 {song} - {author}{label}\n\n"
                 "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+                "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
-            preserve_fb_links = True
             fb_tpl = settings.get("desc_template_facebook_post") or settings.get("desc_template_facebook") or default_fb_tpl
-            if "{song_link}" not in fb_tpl:
-                fb_tpl = default_fb_tpl
         else:
-            # Reel (<= 90s): Keep description clean for maximum organic Reels reach; link in pinned comment
+            # Reel (<= 90s)
             default_fb_tpl = (
                 "🎹 {song} - {author}{label}\n\n"
-                "Sheet Music (PDF) → Pinned Comment 👇\n\n"
+                "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
                 "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
             )
-            preserve_fb_links = False
             fb_tpl = settings.get("desc_template_facebook_reel") or settings.get("desc_template_facebook") or default_fb_tpl
+
+        preserve_fb_links = False
+        # Remove any residual direct URLs or link placeholders from Facebook template, keeping Link in Bio
+        fb_tpl = re.sub(r'(?i)[^\n]*(?:{song_link}|meloscribesheets|https?://)[^\n]*\n*', '', fb_tpl)
 
         if is_tut:
             fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
@@ -2273,7 +2308,7 @@ if __name__ == "__main__":
         is_tut = args.profile == "tutorial"
         
         base_song = args.song
-        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial)\b', '', base_song).strip()
+        base_song = re.sub(r'(?i)\b(easy|teaser|tutorial|recycled)\b', '', base_song).strip()
         base_song = re.sub(r'\s+', ' ', base_song).strip()
             
         label_parts = []

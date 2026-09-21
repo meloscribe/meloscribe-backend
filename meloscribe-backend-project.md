@@ -199,6 +199,12 @@ git add . && git commit -m "..." && git push
   - `routes_public.py`: E-Mail-Lieferlinks (`download_url`), Footer-Links, Opt-in-Texte, Stripe Checkout Origin-Normalisierung und Produkt-Vorschaubilder auf `meloscribesheets.com` aktualisiert.
   - `routes_admin.py`: Manuelle Bestellerstellung (`download_url`) auf `meloscribesheets.com` aktualisiert.
   - `upload_bot.py`: Social Media Links & Pinterest Cover-URLs auf `meloscribesheets.com` umgestellt.
+- [x] Checkout Conversion & Funnel Sanierung:
+  - Auto-Prefetch bei bloßer Song-/Modal-Öffnung in `PaddleModal.tsx` deaktiviert (beseitigt 92% Phantom-Abbrüche auf Stripe).
+  - 206 unvollständige Phantom-PaymentIntents auf Stripe storniert.
+  - `checkout_analytics.py` und `routes_admin.py` für Dual-Tracking aufgerüstet: Erfasst ab sofort sowohl Hosted Checkout Sessions als auch Embedded PaymentIntents nahtlos mit automatischer Deduplizierung.
+  - Reset-Mechanismus (`POST /api/admin/checkout-analytics/clear`) implementiert, um verfälschte Phantome aus dem aktuellen Monat zu löschen und historische Monate (Juli, August) zu erhalten.
+  - Live auf Oracle Cloud VM deployed und Backend-Service neu gestartet.
 
 ## Active Blockers / Next Steps
 

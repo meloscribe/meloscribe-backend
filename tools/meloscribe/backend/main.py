@@ -61,6 +61,7 @@ PUBLIC_ROUTES = [
     "/api/order",
     "/api/notify/subscribe",
     "/api/notify/confirm",
+    "/api/notify/unsubscribe",
     "/api/kofi/webhook",
     "/api/webhooks/stripe",
     "/api/facebook/sync",
@@ -70,6 +71,7 @@ PUBLIC_ROUTES = [
     "/api/pinterest/sync",
     "/callback",
     "/pinterest-callback",
+    "/api/oauth/code",
     "/public",
     "/ws/logs"
 ]

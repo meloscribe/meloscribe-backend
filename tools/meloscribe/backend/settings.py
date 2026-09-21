@@ -12,6 +12,7 @@ DEFAULT_SETTINGS = {
     "tiktok_dir": r"C:\Dev\meloscribe\TikToks",
     "covers_dir": r"C:\Dev\meloscribe\Covers",
     "packages_dir": r"C:\Dev\meloscribe\packages",
+    "recycling_dir": r"C:\Dev\meloscribe\Recycling",
     "keysight_exe": r"C:\Program Files (x86)\Steam\steamapps\common\Keysight\Keysight\Binaries\Win64\Keysight-Win64-Shipping.exe",
     "browser_exec": r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
     "browser_user_data": os.path.expanduser(r"~\AppData\Local\BraveSoftware\Brave-Browser\User Data"),
@@ -26,11 +27,17 @@ DEFAULT_SETTINGS = {
     "r2_bucket": "meloscribe-assets",
     "schedule_interval_days": 3,
     "localUpload": False,
-    "subtitle_normal": "",
-    "subtitle_slow": "",
-    "subtitle_hook": "",
-    "subtitle_easy_normal": "",
-    "subtitle_easy_slow": "",
+    "ai_subtitles_enabled": False,
+    "ai_captions_enabled": False,
+    "ai_hashtags_enabled": True,
+    "ai_outro_enabled": False,
+    "auto_hook_detection": True,
+    "default_outro_text": "Rate this 1-10 👇",
+    "subtitle_normal": "Full Cover",
+    "subtitle_slow": "Full Tutorial",
+    "subtitle_hook": "Best Part",
+    "subtitle_easy_normal": "Easy Version",
+    "subtitle_easy_slow": "Easy Tutorial",
     "manual_crop": False,
     "desc_template_youtube_video": (
         "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
@@ -64,22 +71,20 @@ DEFAULT_SETTINGS = {
         "#piano #pianocover #pianotutorial #synthesia #music #pianomusic #{song}"
     ),
     "desc_template_facebook_post": (
-        "🎼 Sheet Music (PDF): {song_link}\n"
-        "🌐 Website: https://meloscribesheets.com\n\n"
         "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_facebook_reel": (
         "🎹 {song} - {author}{label}\n\n"
-        "Sheet Music (PDF) → Pinned Comment 👇\n\n"
+        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_facebook": (
-        "🎼 Sheet Music (PDF): {song_link}\n"
-        "🌐 Website: https://meloscribesheets.com\n\n"
         "🎹 {song} - {author}{label}\n\n"
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_threads": (
@@ -194,11 +199,13 @@ def load_settings():
                         settings[k] = DEFAULT_SETTINGS[k]
                         needs_save = True
 
-                # Upgrade legacy templates if still containing outdated "Link in Bio"
-                if "Link in Bio" in data.get("desc_template_facebook", ""):
-                    data["desc_template_facebook"] = DEFAULT_SETTINGS["desc_template_facebook"]
-                    settings["desc_template_facebook"] = DEFAULT_SETTINGS["desc_template_facebook"]
-                    needs_save = True
+                # Upgrade legacy Facebook templates if containing URLs/links (Link in Bio is kept)
+                for fb_k in ["desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel"]:
+                    val = data.get(fb_k, "")
+                    if any(x in val for x in ["http://", "https://", "{song_link}", "meloscribesheets"]):
+                        data[fb_k] = DEFAULT_SETTINGS[fb_k]
+                        settings[fb_k] = DEFAULT_SETTINGS[fb_k]
+                        needs_save = True
                 if "Link in Bio" in data.get("desc_template_youtube", ""):
                     data["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
                     settings["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]

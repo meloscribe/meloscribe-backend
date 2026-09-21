@@ -86,6 +86,9 @@ def main():
     parser.add_argument('--subtitle', type=str, default=None, help='Custom subtitle text displayed below title in portrait video. If empty/unset, no subtitle is displayed.')
     parser.add_argument('--start_time', type=float, default=None, help='Optional clip start time in seconds')
     parser.add_argument('--end_time', type=float, default=None, help='Optional clip end time in seconds')
+    parser.add_argument('--output_dir', type=str, default=None, help='Custom output directory for generated video')
+    parser.add_argument('--time_offset', type=float, default=2.5, help='Lead-in offset in seconds between preview player and raw Keysight input')
+    parser.add_argument('--outro_text', type=str, default=None, help='Custom outro/end text to display during final fadeout')
     args = parser.parse_args()
 
     
@@ -105,8 +108,9 @@ def main():
     if args.type == "tutorial" and not out_base.lower().endswith(" slow"):
         out_base = f"{out_base} slow"
     output_name = f"{out_base}_wide.mp4" if args.wide else (f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base)
-    output_path = os.path.join(tiktok_dir, output_name)
-    cache_path = os.path.join(tiktok_dir, ".render_cache.json")
+    active_out_dir = args.output_dir if args.output_dir else tiktok_dir
+    output_path = os.path.join(active_out_dir, output_name)
+    cache_path = os.path.join(active_out_dir, ".render_cache.json")
     params_match = False
     current_params = {
         "zoom": args.zoom,
@@ -424,13 +428,12 @@ def main():
             # Subtle Icon Watermark (top right)
             + wm_filter_wide +
             
-            # Outro gets drawn as two separate centered lines to ensure perfect alignment
-            f"[t_wm]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)-60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t4]; "
+            # Fade out video canvas behind the outro text
+            f"[t_wm]fade=t=out:st={fade_start}:d=1.5[v_faded]; "
+            f"[v_faded]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)-60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t4]; "
             f"[t4]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro2_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)+60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[with_outro]; "
             
-            # Final video fade out at the very end and force SAR 1:1 and yuv420p
-            f"[with_outro]fade=t=out:st={fade_start}:d=1.5[v_fade]; "
-            f"[v_fade]setsar=1,format=yuv420p[final_v]; "
+            f"[with_outro]setsar=1,format=yuv420p[final_v]; "
             f"[{a_stream}]afade=t=out:st={fade_start}:d=1.5[final_a]"
         )
         
@@ -442,11 +445,11 @@ def main():
     # ==================== STANDARD PORTRAIT MODE ====================
     else:
         if args.start_time is not None and args.end_time is not None and float(args.end_time) > float(args.start_time):
-            # args.start_time and args.end_time are selected in the UI preview player (which plays the 9:16 portrait video).
-            # The standard portrait video cuts 2.5s off the raw Keysight video lead-in (trim_start = 2.5).
-            # Because video_generator.py takes the raw Keysight video as input, we must add +2.5s to align exactly with the UI player selection.
-            trim_start = float(args.start_time) + 2.5
-            trim_end = float(args.end_time) + 2.5
+            # args.start_time and args.end_time are selected in the UI preview player.
+            # args.time_offset compensates for the lead-in difference between preview player and raw Keysight input (default 2.5s for TikTok preview, 0.0s for raw Keysight).
+            offset = float(getattr(args, 'time_offset', 2.5))
+            trim_start = float(args.start_time) + offset
+            trim_end = float(args.end_time) + offset
             new_duration = trim_end - trim_start
         else:
             trim_start = 2.5
@@ -463,23 +466,50 @@ def main():
         is_teaser = "teaser" in args.title.lower() or "teaser" in os.path.basename(args.video).lower() or (args.start_time is not None and args.end_time is not None)
         
         title_text = args.title
-        title_text = re.sub(r'(?i)\b(easy|teaser|slow)\b', '', title_text).strip()
+        title_text = re.sub(r'(?i)\b(easy|teaser|slow|recycled(\s+\d+)?)\b', '', title_text).strip()
         title_text = re.sub(r'\s+', ' ', title_text)
 
-        if args.subtitle is not None:
+        if args.subtitle is not None and args.subtitle.strip(" -"):
             author_text = args.subtitle.strip(" -")
+        elif args.author and args.author.strip(" -"):
+            author_text = args.author.strip(" -")
         else:
             author_text = ""
         
-        if is_teaser:
-            outro1_text = "Full video coming soon"
-            outro2_text = "Follow me <3"
+        is_recycling = bool(args.output_dir and "recycling" in args.output_dir.lower()) or (args.outro_text is not None)
+        
+        if args.outro_text:
+            outro_raw = args.outro_text.strip()
+        elif is_recycling:
+            outro_raw = "Rate this 1-10 👇"
+        elif is_teaser:
+            outro_raw = "Full video coming soon\nFollow me <3"
         elif args.type == 'normal':
-            outro1_text = "Don't miss the tutorial"
-            outro2_text = "Follow me <3"
+            outro_raw = "Don't miss the tutorial\nFollow me <3"
         else:
-            outro1_text = "Support me with"
-            outro2_text = "a follow <3"
+            outro_raw = "Support me with\na follow <3"
+
+        # Sanitize: remove any 'or suggest a song'
+        outro_raw = re.sub(r'(?i)\s+or\s+suggest\s+a\s+song', '', outro_raw).strip()
+
+        if "\n" in outro_raw:
+            parts = outro_raw.split("\n", 1)
+            outro1_text = parts[0].strip()
+            outro2_text = parts[1].strip()
+        elif " or " in outro_raw and len(outro_raw) > 24:
+            parts = outro_raw.split(" or ", 1)
+            outro1_text = parts[0].strip() + " or"
+            outro2_text = parts[1].strip()
+        else:
+            outro1_text = outro_raw
+            outro2_text = ""
+            
+        has_emoji = any(ord(c) > 127 for c in (outro1_text + outro2_text))
+        segui_font = "C:/Windows/Fonts/seguiemj.ttf"
+        if has_emoji and os.path.exists(segui_font):
+            outro_font = segui_font
+        else:
+            outro_font = "fonts/arno_pro.ttf"
             
         if args.type == 'tutorial':
             morph_text = "save to practice later"
@@ -504,6 +534,7 @@ def main():
         t_outro2_esc = escape_path_for_ffmpeg(outro2_txt)
         t_sheets_esc = escape_path_for_ffmpeg(sheets_txt)
         t_morph_esc = escape_path_for_ffmpeg(morph_txt)
+        f_outro_esc = escape_path_for_ffmpeg(outro_font)
 
         
         scale_w = int(1440 * args.zoom)
@@ -605,16 +636,18 @@ def main():
             + (f"[t2_sheets]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_morph_esc}':fontcolor=white:fontsize=78:x=(w-text_w)/2:y=2150:alpha='if(lt(t,6.3),0,if(lt(t,6.8),(t-6.3)/0.5,if(lt(t,8.8),1,if(lt(t,9.3),(9.3-t)/0.5,0))))'[t3]; " if morph_text else "") +
             wm_overlay_portrait +
             
-            # Outro gets drawn as two separate centered lines to ensure perfect alignment
-            f"[t4]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=80:x=(w-text_w)/2:y=1000:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t5]; "
-            f"[t5]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro2_esc}':fontcolor=white:fontsize=80:x=(w-text_w)/2:y=1120:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[with_outro]; "
+            # Fade out the background video canvas behind the outro text
+            f"[t4]fade=t=out:st={fade_start}:d=1.5[v_faded]; "
             
-            f"[with_outro]fade=t=out:st={fade_start}:d=1.5[v_fade]; "
-            f"[v_fade]setsar=1,format=yuv420p[final_v]; "
+            # Outro gets drawn as centered text on top of the faded video canvas (text stays solid white)
+            f"[v_faded]drawtext=fontfile='{f_outro_esc}':textfile='{t_outro1_esc}':fontcolor=white:fontsize=80:x=(w-text_w)/2:y={1060 if not outro2_text else 1000}:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/0.5))'[t5]; "
+            f"[t5]drawtext=fontfile='{f_outro_esc}':textfile='{t_outro2_esc}':fontcolor=white:fontsize=80:x=(w-text_w)/2:y=1120:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/0.5))'[with_outro]; "
+            
+            f"[with_outro]setsar=1,format=yuv420p[final_v]; "
             f"[{a_stream}]afade=t=out:st={fade_start}:d=1.5[final_a]"
         )
         
-        output_dir = tiktok_dir
+        output_dir = args.output_dir if args.output_dir else tiktok_dir
         os.makedirs(output_dir, exist_ok=True)
         output_name = f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base
         output_path = os.path.join(output_dir, output_name)

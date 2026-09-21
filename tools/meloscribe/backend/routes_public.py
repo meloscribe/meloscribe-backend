@@ -9,10 +9,13 @@ import stripe
 import boto3
 import re
 import threading
+from typing import Optional
 from pathlib import Path
 from pydantic import BaseModel
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse, FileResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
+from mail_verifier import validate_email_deliverability
 
 from shared import (
     settings,
@@ -47,6 +50,10 @@ class StatsUpload(BaseModel):
 
 class NotifySubscribeRequest(BaseModel):
     email: str
+    song_id: Optional[str] = None
+    song_title: Optional[str] = None
+    difficulty: Optional[str] = "Original"
+    locale: Optional[str] = "en"
 
 # -------------------------------------------------------------------
 # Helper functions
@@ -234,7 +241,7 @@ EMAIL_TEMPLATES = {
 }
 
 def send_purchase_delivery_email(email: str, song_name: str, download_hash: str, locale: str = "en", is_gift: bool = False, buyer_name: str = ""):
-    api_key = load_settings().get("resend_api_key", "")
+    api_key = load_settings().get("resend_api_key") or settings.get("resend_api_key", "")
     if not api_key:
         log_webhook("[Notify] WARNING: resend_api_key not set in settings.json. Skipping purchase email.")
         return False
@@ -294,6 +301,24 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 </html>
 """
 
+    text_body = f"""{heading}
+
+{intro}
+
+{body}
+
+{tpl["action"]}
+
+Download Sheet Music: {download_url}
+
+{tpl["footer"]}
+
+{tpl["happy_practicing"]}
+meloscribe
+
+{tpl["help_text"]} https://meloscribesheets.com
+"""
+
     try:
         resp = requests.post(
             "https://api.resend.com/emails",
@@ -302,7 +327,8 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
                 "from": "meloscribe <info@meloscribe.dev>",
                 "to": [email],
                 "subject": subject,
-                "html": html_body
+                "html": html_body,
+                "text": text_body
             },
             timeout=10.0
         )
@@ -316,8 +342,8 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
         log_webhook(f"[Notify] Resend exception: {err}")
         return False
 
-def _send_confirmation_email(email: str, token: str):
-    api_key = settings.get("resend_api_key", "")
+def _send_confirmation_email(email: str, token: str, song_name: str = None, locale: str = "en"):
+    api_key = load_settings().get("resend_api_key") or settings.get("resend_api_key", "")
     if not api_key:
         print("[Notify] WARNING: resend_api_key not set in settings.json. Skipping email.")
         return False
@@ -325,40 +351,71 @@ def _send_confirmation_email(email: str, token: str):
     confirm_url = f"https://api.meloscribe.dev/api/notify/confirm?token={token}"
     unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
     
+    if song_name:
+        subject = f"Download your sheet music: {song_name} — meloscribe"
+        message_intro = f"Here is the confirmation link for your sheet music arrangement of <strong>{song_name}</strong>."
+        message_body = "Click the button below to confirm your request and download your files (PDF, MIDI, and video tutorials)."
+        cta_text = f"Download {song_name}"
+        disclaimer = "You will also receive notifications when new piano arrangements are released. You can unsubscribe at any time using the link below. If you didn't request this, you can safely ignore this email."
+        plain_intro = f"Here is the confirmation link for your sheet music arrangement of {song_name}."
+        plain_body = "Confirm your request and download your files (PDF, MIDI, and video tutorials) using the link below:"
+    else:
+        subject = "Confirm your subscription — meloscribe"
+        message_intro = "Welcome to meloscribe!"
+        message_body = "Please confirm your email address to receive notifications whenever new piano sheet music and tutorials are released."
+        cta_text = "Confirm Subscription"
+        disclaimer = "If you didn't request this, you can safely ignore this email. You will not be subscribed unless you click the link above."
+        plain_intro = "Welcome to meloscribe!"
+        plain_body = "Please confirm your email address to receive notifications whenever new piano sheet music and tutorials are released:"
+
     html_body = f"""
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 24px; background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 24px 16px;">
     <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: collapse;">
       <tr>
-        <td style="font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 32px; font-weight: 900; color: #00f5ff; letter-spacing: 3px; text-transform: lowercase; padding: 0 0 4px 0; border-bottom: 3px solid #00f5ff; text-align: right;">melo</td>
-        <td style="font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 32px; font-weight: 900; color: #ff2d92; letter-spacing: 3px; text-transform: lowercase; padding: 0 0 4px 0; border-bottom: 3px solid #ff2d92; text-align: left;">scribe</td>
+        <td style="font-size: 30px; font-weight: 900; color: #00f5ff; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: right;">melo</td>
+        <td style="font-size: 30px; font-weight: 900; color: #ff2d92; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: left;">scribe</td>
       </tr>
     </table>
-    <p style="color: #888899; font-size: 12px; margin: 12px 0 0 0; letter-spacing: 1px; font-style: italic;">Arranged by ear. Played by you.</p>
+    <p style="color: #94a3b8; font-size: 13px; margin: 10px 0 0 0; font-style: italic;">Arranged by ear. Played by you.</p>
   </div>
-  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">Hey!</p>
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">
-      Thanks for your interest! Please confirm that you want to receive email notifications
-      whenever new sheet music or practice assets are dropped on meloscribesheets.com.
+  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
+    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">Hi,</p>
+    <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
+      {message_intro} {message_body}
     </p>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">Click the link below to confirm your email:</p>
     <div style="text-align: center; margin: 28px 0;">
-      <a href="{confirm_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">Confirm Subscription</a>
+      <a href="{confirm_url}" style="display: inline-block; background-color: #00f5d4; color: #050508; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none;">{cta_text}</a>
     </div>
-    <p style="color: #888; font-size: 13px; text-align: center;">
-      If you didn&apos;t request this, you can safely ignore this email. You won&apos;t be subscribed unless you click the link above.
+    <p style="color: #94a3b8; font-size: 13px; text-align: center; line-height: 1.6; margin-bottom: 0;">
+      {disclaimer}
     </p>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">Best,<br>meloscribe</p>
   </div>
-  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
-    Unsubscribe anytime: <a href="{unsubscribe_url}" style="color: #555;">click here</a>
+  <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; line-height: 1.6;">
+    meloscribe • Arranged by ear. Played by you.<br>
+    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
   </p>
 </body>
 </html>
+"""
+
+    text_body = f"""Hi,
+
+{plain_intro}
+{plain_body}
+
+{confirm_url}
+
+{disclaimer}
+
+meloscribe • Arranged by ear. Played by you.
+https://meloscribesheets.com
+
+Unsubscribe:
+{unsubscribe_url}
 """
 
     try:
@@ -368,8 +425,13 @@ def _send_confirmation_email(email: str, token: str):
             json={
                 "from": "meloscribe <info@meloscribe.dev>",
                 "to": [email],
-                "subject": "Confirm your sheet music notifications — meloscribe",
+                "subject": subject,
                 "html": html_body,
+                "text": text_body,
+                "headers": {
+                    "List-Unsubscribe": f"<{unsubscribe_url}>",
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+                }
             },
             timeout=10
         )
@@ -1415,36 +1477,85 @@ def verify_download(checkout_id: str):
 @router.post("/api/notify/subscribe")
 async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
     email = req.email.strip().lower()
-    if not email or "@" not in email or "." not in email.split("@")[-1]:
-        return JSONResponse(content={"error": "Invalid email address."}, status_code=400)
-        
-    if platform.system() != "Windows":
-        # Rate limit check on server: 5 subscription requests per hour
-        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
-        if is_rate_limited(client_ip, "notify_subscribe", 5, 3600):
-            return JSONResponse(content={"error": "Too many subscription attempts. Please wait a while."}, status_code=429)
     
+    # 1. Rate limit check (5 subscription requests per hour per IP)
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if is_rate_limited(client_ip, "notify_subscribe", 5, 3600):
+        return JSONResponse(content={"error": "Too many subscription attempts. Please wait a while."}, status_code=429)
+    
+    # 2. Async threadpool execution for email deliverability & anti-abuse validation
+    is_valid, err_msg = await run_in_threadpool(validate_email_deliverability, email)
+    if not is_valid:
+        return JSONResponse(content={"error": err_msg}, status_code=400)
+        
     token = uuid.uuid4().hex
+    song_name = req.song_title.strip() if req.song_title else None
+    song_id = req.song_id.strip() if req.song_id else None
+    locale = req.locale.strip() if req.locale else "en"
     
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        
+        # Ensure schema has song_id, song_name, locale columns
+        try:
+            c.execute("ALTER TABLE notify_subscribers ADD COLUMN song_id TEXT")
+        except Exception:
+            pass
+        try:
+            c.execute("ALTER TABLE notify_subscribers ADD COLUMN song_name TEXT")
+        except Exception:
+            pass
+        try:
+            c.execute("ALTER TABLE notify_subscribers ADD COLUMN locale TEXT DEFAULT 'en'")
+        except Exception:
+            pass
+            
         c.execute("SELECT status FROM notify_subscribers WHERE email = ?", (email,))
         row = c.fetchone()
         if row:
             if row[0] == "active":
+                # Already verified active subscriber!
+                # If a song was requested, create active purchase immediately so they can download it
+                if song_name:
+                    download_hash = uuid.uuid4().hex
+                    c.execute("SELECT download_hash FROM purchases WHERE email = ? AND song_name = ?", (email, song_name))
+                    p_row = c.fetchone()
+                    if not p_row or not p_row[0]:
+                        # Critical Rule: Pure string 'active' (NO emojis!)
+                        c.execute(
+                            "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, 0.0, 'EUR', 'active', ?, ?, '')",
+                            (f"free_{token}", email, song_name, download_hash, locale)
+                        )
+                        conn.commit()
+                    else:
+                        download_hash = p_row[0]
+                    conn.close()
+                    # Delivery-only via inbox: send single delivery email for already active subscriber
+                    send_purchase_delivery_email(email, song_name, download_hash, locale)
+                    return {"status": "active", "message": "Download link sent to your inbox!"}
+                
                 conn.close()
                 return {"status": "already_active", "message": "This email is already subscribed."}
             else:
-                c.execute("UPDATE notify_subscribers SET token = ?, status = 'pending' WHERE email = ?", (token, email))
+                c.execute(
+                    "UPDATE notify_subscribers SET token = ?, status = 'pending', song_id = ?, song_name = ?, locale = ? WHERE email = ?",
+                    (token, song_id, song_name, locale, email)
+                )
         else:
-            c.execute("INSERT INTO notify_subscribers (email, token, status) VALUES (?, ?, 'pending')", (email, token))
+            c.execute(
+                "INSERT INTO notify_subscribers (email, token, status, song_id, song_name, locale) VALUES (?, ?, 'pending', ?, ?, ?)",
+                (email, token, song_id, song_name, locale)
+            )
         conn.commit()
         conn.close()
     except Exception as e:
         return JSONResponse(content={"error": f"Database error: {str(e)}"}, status_code=500)
     
-    threading.Thread(target=lambda: _send_confirmation_email(email, token), daemon=True).start()
+    # Trigger single DOI confirmation email
+    threading.Thread(target=lambda: _send_confirmation_email(email, token, song_name, locale), daemon=True).start()
     return {"status": "pending", "message": "Confirmation email sent. Please check your inbox."}
 
 @router.get("/api/notify/confirm")
@@ -1452,12 +1563,11 @@ def notify_confirm(token: str):
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute("UPDATE notify_subscribers SET status = 'active', confirmed_at = CURRENT_TIMESTAMP WHERE token = ?", (token,))
-        row_count = c.rowcount
-        conn.commit()
-        conn.close()
+        c.execute("SELECT email, song_name, song_id, locale FROM notify_subscribers WHERE token = ?", (token,))
+        sub_row = c.fetchone()
         
-        if row_count == 0:
+        if not sub_row:
+            conn.close()
             return HTMLResponse(content="""
 <!DOCTYPE html>
 <html>
@@ -1500,6 +1610,31 @@ def notify_confirm(token: str):
 </body>
 </html>""")
             
+        email, song_name, song_id, locale = sub_row[0], sub_row[1], sub_row[2], sub_row[3] or "en"
+        c.execute("UPDATE notify_subscribers SET status = 'active', confirmed_at = CURRENT_TIMESTAMP WHERE token = ?", (token,))
+        conn.commit()
+        
+        # If this DOI confirmation was triggered for a free song, create an active purchase
+        if song_name:
+            download_hash = uuid.uuid4().hex
+            c.execute("SELECT download_hash FROM purchases WHERE email = ? AND song_name = ?", (email, song_name))
+            p_row = c.fetchone()
+            if p_row and p_row[0]:
+                download_hash = p_row[0]
+            else:
+                # Critical Rule: Pure string 'active' (NO emojis!)
+                c.execute(
+                    "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, 0.0, 'EUR', 'active', ?, ?, '')",
+                    (f"free_{token}", email, song_name, download_hash, locale)
+                )
+                conn.commit()
+            conn.close()
+            
+            # Quota-saving 302 Redirect directly to /order/{download_hash}: Zero second email!
+            frontend_url = "https://meloscribesheets.com" if platform.system() != "Windows" else "http://localhost:5173"
+            return RedirectResponse(url=f"{frontend_url}/order/{download_hash}", status_code=302)
+            
+        conn.close()
         return HTMLResponse(content="""
 <!DOCTYPE html>
 <html>
@@ -1553,7 +1688,7 @@ def notify_confirm(token: str):
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@router.get("/api/notify/unsubscribe")
+@router.api_route("/api/notify/unsubscribe", methods=["GET", "POST"])
 def notify_unsubscribe(token: str):
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -1636,7 +1771,31 @@ def get_suggestions():
     if platform.system() == "Windows":
         try:
             r = requests.get(f"{VM_API_BASE}/api/public/suggestions", headers=get_proxy_headers(), timeout=5.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
+            data = r.json()
+            if r.status_code == 200 and isinstance(data, list):
+                try:
+                    conn = sqlite3.connect(str(db_path), timeout=5.0)
+                    c = conn.cursor()
+                    c.execute("""
+                        CREATE TABLE IF NOT EXISTS suggestions (
+                            id TEXT PRIMARY KEY,
+                            title TEXT NOT NULL,
+                            artist TEXT NOT NULL,
+                            votes INTEGER DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            status TEXT DEFAULT 'open'
+                        )
+                    """)
+                    for sug in data:
+                        c.execute("""
+                            INSERT OR REPLACE INTO suggestions (id, title, artist, votes, created_at, status)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (sug.get("id"), sug.get("title"), sug.get("artist"), sug.get("votes", 1), sug.get("created_at"), sug.get("status", "open")))
+                    conn.commit()
+                    conn.close()
+                except Exception as sync_e:
+                    print(f"[Proxy] Error syncing suggestions to local db: {sync_e}")
+            return JSONResponse(content=data, status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
@@ -2209,34 +2368,10 @@ def public_free_download(song_id: str, type: str, request: Request):
     return public_free_download_internal(song_id, type, request)
 
 def public_free_download_internal(song_id: str, type: str, request: Request):
-    if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
-        return JSONResponse(content={"error": "Invalid download type"}, status_code=400)
-
-    songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
-    if not os.path.exists(songs_path):
-        songs_path = Path(__file__).resolve().parent / "songs.json"
-    
-    songs_list = []
-    if os.path.exists(songs_path):
-        with open(songs_path, "r", encoding="utf-8") as f:
-            songs_list = json.load(f)
-
-    target_song = None
-    for song in songs_list:
-        if str(song.get("id")) == str(song_id) or (song.get("easyId") and str(song.get("easyId")) == str(song_id)):
-            target_song = song
-            break
-
-    if not target_song:
-        return JSONResponse(content={"error": "Song not found"}, status_code=404)
-
-    price_str = str(target_song.get("price", "")).strip().lower()
-    is_free = False
-    if not price_str or "free" in price_str or price_str.startswith("0") or price_str == "0" or "0 €" in price_str or "0$" in price_str:
-        is_free = True
-
-    if not is_free:
-        return JSONResponse(content={"error": "This song is not free"}, status_code=403)
+    return JSONResponse(
+        content={"error": "Direct downloads are disabled. Please enter your email to receive the complete download package."},
+        status_code=403
+    )
 
     song_title = target_song.get("title")
     difficulty = target_song.get("difficulty", "Original")
@@ -2324,7 +2459,7 @@ def public_free_download_internal(song_id: str, type: str, request: Request):
 # OAuth Auth Callback URL
 # -------------------------------------------------------------------
 @router.get("/callback")
-def oauth_callback(code: str, state: str = "fb"):
+def oauth_callback(code: str = None, state: str = "fb", error: str = None, error_description: str = None):
     """
     Handle authorization callback codes (for Facebook Graph / Threads APIs).
     Renders a premium success HTML block with micro-animations.
@@ -2454,9 +2589,34 @@ def oauth_callback(code: str, state: str = "fb"):
       </svg>
     </div>
     <h1 class="title">Kanal Verbunden</h1>
-    <p class="desc">Dein Token für die Plattform <strong>{state.upper()}</strong> wurde erfolgreich erfasst. Du kannst dieses Browserfenster jetzt schließen und die Meloscribe Desktop App nutzen.</p>
+    <p class="desc">Dein Token für die Plattform <strong>{state.upper() if state else "APP"}</strong> wurde erfolgreich erfasst. Du kannst dieses Browserfenster jetzt schließen und die Meloscribe Desktop App nutzen.</p>
     <a href="javascript:window.close();" class="close-btn">Fenster Schließen</a>
   </div>
 </body>
 </html>
 """)
+
+
+@router.get("/api/oauth/code")
+def get_oauth_code(state: str):
+    """
+    Polled by desktop app to retrieve authorization code captured by public callback.
+    Deletes the code upon retrieval (one-time use).
+    """
+    try:
+        db_path = Path(__file__).resolve().parent / "analytics.db"
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT code FROM auth_codes WHERE state = ?", (state,))
+        row = c.fetchone()
+        if row:
+            code = row[0]
+            c.execute("DELETE FROM auth_codes WHERE state = ?", (state,))
+            conn.commit()
+            conn.close()
+            return {"status": "ok", "code": code}
+        conn.close()
+        return {"status": "pending", "code": None}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+

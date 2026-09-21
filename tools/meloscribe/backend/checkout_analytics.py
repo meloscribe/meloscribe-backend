@@ -33,17 +33,17 @@ def parse_traffic_sources():
     if log_files:
         for f in log_files:
             try:
-                with open(f, "r", errors="ignore") as fp:
+                import gzip
+                open_func = gzip.open if f.endswith(".gz") else open
+                with open_func(f, "rt", errors="ignore") as fp:
                     for line in fp:
                         if "/api/public/" in line or "/api/checkout/" in line:
-                            # Match date
                             m = re.search(r'\[\d{2}/([A-Za-z]{3})/(\d{4})', line)
                             m_str = "unknown"
                             if m:
                                 mon_num = month_map.get(m.group(1), '00')
                                 m_str = f"{m.group(2)}-{mon_num}"
                             
-                            # Match platform
                             platform = "desktop"
                             if "TikTok" in line or "ByteLocale" in line or "musical_ly" in line or "bytedance" in line:
                                 platform = "tiktok"
@@ -64,7 +64,6 @@ def parse_traffic_sources():
             except Exception:
                 pass
     else:
-        # Fallback data if running locally without Linux Nginx access logs
         overall = Counter({
             "tiktok": 719,
             "facebook": 271,
@@ -89,22 +88,52 @@ def parse_traffic_sources():
     return res
 
 
+def clear_checkout_analytics(reset_ts: int = None):
+    """Reset checkout analytics cutoff to current timestamp and clear in-memory cache."""
+    if reset_ts is None:
+        reset_ts = int(time.time())
+
+    for candidate in [
+        Path(__file__).resolve().parent / "settings.json",
+        Path(r"c:\Dev\meloscribe-backend\tools\meloscribe\backend\settings.json"),
+        Path(r"c:\Dev\meloscribe-app\tools\meloscribe\backend\settings.json")
+    ]:
+        if candidate.exists():
+            try:
+                with open(candidate, "r", encoding="utf-8") as f:
+                    s = json.load(f)
+                s["checkout_analytics_reset_at"] = reset_ts
+                with open(candidate, "w", encoding="utf-8") as f:
+                    json.dump(s, f, indent=2)
+            except Exception as e:
+                print(f"[Checkout Analytics] Error saving reset timestamp to {candidate}: {e}")
+
+    global _TRAFFIC_CACHE
+    _TRAFFIC_CACHE["data"] = None
+    _TRAFFIC_CACHE["timestamp"] = 0
+    return {"status": "success", "reset_at": reset_ts}
+
+
 def get_checkout_analytics_data():
-    """Query live Stripe Checkout sessions and aggregate monthly metrics, drop-offs, and logs."""
-    # Import settings to get Stripe Secret Key
+    """Query live Stripe Checkout sessions and PaymentIntents and aggregate monthly metrics, drop-offs, and logs."""
     try:
         from shared import settings
     except Exception:
         settings = {}
 
     if not settings:
-        try:
-            settings_path = Path(__file__).resolve().parent / "settings.json"
-            if settings_path.exists():
-                with open(settings_path, "r", encoding="utf-8") as f:
-                    settings = json.load(f)
-        except Exception:
-            settings = {}
+        for candidate in [
+            Path(__file__).resolve().parent / "settings.json",
+            Path(r"c:\Dev\meloscribe-backend\tools\meloscribe\backend\settings.json"),
+            Path(r"c:\Dev\meloscribe-app\tools\meloscribe\backend\settings.json")
+        ]:
+            if candidate.exists():
+                try:
+                    with open(candidate, "r", encoding="utf-8") as f:
+                        settings = json.load(f)
+                    break
+                except Exception:
+                    pass
 
     stripe_key = (
         settings.get("stripe_live_secret_key")
@@ -116,13 +145,32 @@ def get_checkout_analytics_data():
         raise ValueError("Stripe live secret key not configured in settings.json.")
 
     headers = {"Authorization": f"Bearer {stripe_key}"}
+    reset_at = settings.get("checkout_analytics_reset_at")
+    reset_ts = int(reset_at) if reset_at else None
     
-    # Query up to 100 most recent checkout sessions from Stripe API
-    resp = requests.get("https://api.stripe.com/v1/checkout/sessions?limit=100", headers=headers, timeout=12.0)
-    if resp.status_code != 200:
-        raise RuntimeError(f"Stripe API error ({resp.status_code}): {resp.text}")
+    # Bug window for prefetch ghost PaymentIntents (Sep 13 19:24 UTC to Sep 17 21:04 UTC)
+    BUG_START_TS = 1789315492
+    BUG_END_TS = 1789679050
 
-    raw_sessions = resp.json().get("data", [])
+    current_month_str = datetime.datetime.now().strftime('%Y-%m')
+
+    # 1. Query Checkout Sessions
+    raw_sessions = []
+    try:
+        resp = requests.get("https://api.stripe.com/v1/checkout/sessions?limit=100", headers=headers, timeout=12.0)
+        if resp.status_code == 200:
+            raw_sessions = resp.json().get("data", [])
+    except Exception as e:
+        print(f"[Checkout Analytics] Error fetching checkout sessions: {e}")
+
+    # 2. Query PaymentIntents (Embedded Checkouts)
+    raw_pis = []
+    try:
+        resp_pi = requests.get("https://api.stripe.com/v1/payment_intents?limit=100", headers=headers, timeout=12.0)
+        if resp_pi.status_code == 200:
+            raw_pis = resp_pi.json().get("data", [])
+    except Exception as e:
+        print(f"[Checkout Analytics] Error fetching payment intents: {e}")
 
     month_names = {
         "01": "Januar", "02": "Februar", "03": "März", "04": "April",
@@ -132,12 +180,22 @@ def get_checkout_analytics_data():
 
     monthly = {}
     attempts = []
+    seen_pi_ids = set()
 
+    # Process Checkout Sessions
     for s in raw_sessions:
         ts = s.get("created")
         dt = datetime.datetime.fromtimestamp(ts)
         month_str = dt.strftime('%Y-%m')
-        
+
+        pi_id = s.get("payment_intent")
+        if pi_id:
+            seen_pi_ids.add(pi_id)
+
+        # If reset_ts is active and this session was in the reset period of the current month, skip it
+        if reset_ts and month_str == current_month_str and ts < reset_ts:
+            continue
+
         meta = s.get("metadata") or {}
         song_title = meta.get("song_title") or meta.get("song_id") or "Unknown Song"
         locale = meta.get("locale") or "en"
@@ -164,6 +222,7 @@ def get_checkout_analytics_data():
 
         attempts.append({
             "id": s.get("id"),
+            "type": "checkout_session",
             "created_at": dt.isoformat(),
             "month": month_str,
             "song": song_title,
@@ -185,7 +244,7 @@ def get_checkout_analytics_data():
             monthly[month_str] = {
                 "month": month_str,
                 "label": m_name,
-                "is_current": month_str == datetime.datetime.now().strftime('%Y-%m'),
+                "is_current": month_str == current_month_str,
                 "fix_active": month_str >= "2026-09",
                 "total_initiated": 0,
                 "paid": 0,
@@ -209,6 +268,110 @@ def get_checkout_analytics_data():
             m_data["open"] += 1
         else:
             m_data["abandoned"] += 1
+
+    # Process PaymentIntents (Embedded Checkouts)
+    now_ts = int(time.time())
+    for pi in raw_pis:
+        pi_id = pi.get("id")
+        if pi_id in seen_pi_ids:
+            continue
+
+        ts = pi.get("created")
+        dt = datetime.datetime.fromtimestamp(ts)
+        month_str = dt.strftime('%Y-%m')
+
+        meta = pi.get("metadata") or {}
+        desc = pi.get("description") or ""
+
+        # Filter only Meloscribe checkouts
+        is_meloscribe = desc.startswith("Meloscribe") or bool(meta.get("download_hash")) or bool(meta.get("song_title"))
+        if not is_meloscribe:
+            continue
+
+        charges = pi.get("charges", {}).get("data", [])
+        status_raw = pi.get("status")
+
+        # Exclude phantom prefetch calls created during the bug window with 0 charges
+        if BUG_START_TS <= ts <= BUG_END_TS:
+            if status_raw in ("requires_payment_method", "canceled") and len(charges) == 0:
+                continue
+
+        # If reset_ts is active and this attempt was in the reset period of current month, skip
+        if reset_ts and month_str == current_month_str and ts < reset_ts:
+            continue
+
+        # Status determination
+        if status_raw == "succeeded":
+            status_label = "paid"
+        elif status_raw in ("requires_action", "requires_confirmation", "processing", "requires_payment_method"):
+            if (now_ts - ts) < 86400 and status_raw != "canceled":
+                status_label = "open"
+            else:
+                status_label = "abandoned"
+        else:
+            status_label = "abandoned"
+
+        amount = (pi.get("amount") or 0) / 100.0
+        currency = (pi.get("currency") or "eur").upper()
+        song_title = meta.get("song_title") or meta.get("song_id") or "Unknown Song"
+        locale = meta.get("locale") or "en"
+
+        charge_zero = charges[0] if charges else {}
+        billing = charge_zero.get("billing_details") or {}
+        email = pi.get("receipt_email") or billing.get("email") or ""
+        buyer_name = billing.get("name") or ""
+
+        attempts.append({
+            "id": pi_id,
+            "type": "payment_intent",
+            "created_at": dt.isoformat(),
+            "month": month_str,
+            "song": song_title,
+            "amount": amount,
+            "currency": currency,
+            "status": status_label,
+            "locale": locale,
+            "email": email,
+            "buyer_name": buyer_name,
+            "expires_at": None
+        })
+
+        if month_str not in monthly:
+            parts = month_str.split('-')
+            m_year = parts[0]
+            m_mon = parts[1] if len(parts) > 1 else ""
+            m_name = f"{month_names.get(m_mon, m_mon)} {m_year}"
+
+            monthly[month_str] = {
+                "month": month_str,
+                "label": m_name,
+                "is_current": month_str == current_month_str,
+                "fix_active": month_str >= "2026-09",
+                "total_initiated": 0,
+                "paid": 0,
+                "abandoned": 0,
+                "open": 0,
+                "revenue": 0.0,
+                "conversion_rate": 0.0,
+                "songs": Counter(),
+                "currencies": Counter()
+            }
+
+        m_data = monthly[month_str]
+        m_data["total_initiated"] += 1
+        m_data["currencies"][currency] += 1
+        m_data["songs"][song_title] += 1
+
+        if status_label == "paid":
+            m_data["paid"] += 1
+            m_data["revenue"] += amount
+        elif status_label == "open":
+            m_data["open"] += 1
+        else:
+            m_data["abandoned"] += 1
+
+    # Sort attempts newest first
+    attempts.sort(key=lambda x: x["created_at"], reverse=True)
 
     monthly_list = []
     for m in sorted(monthly.keys(), reverse=True):

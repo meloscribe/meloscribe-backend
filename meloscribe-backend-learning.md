@@ -487,5 +487,17 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Dual Difficulty Catalog Schema & Dynamic Currency**:
   - Single records for dual-difficulty songs use `difficulty: "Original / Easy"` with `hasEasy: true`, `easyPrice`, and `easyStripePriceId`.
   - The public catalog endpoint (`/api/public/songs`) must convert currency symbols for both primary `price` and `easyPrice` fields dynamically based on the client's detected IP geolocation.
-- **English Error Logging Standard**:
+- [x] English Error Logging Standard:
   - All backend loggers, exception handlers, and API error response payloads must consistently use English to maintain clean diagnostics across local and remote server environments.
+
+---
+
+### 2026-09-17: AI Operations Agent Autonomy, SQLite Locks, and Windows SSH Quoting
+- **SQLite DDL Locks on Uncommitted Read Cursors**:
+  - In Python's `sqlite3`, iterating a `cursor.execute("SELECT ...")` without an explicit transaction commit leaves a shared read lock open on the database file. Any subsequent DDL statement attempts to acquire an exclusive lock and immediately times out under Windows.
+  - Always invoke `conn.commit()` immediately after read queries and before executing schema DDL (`CREATE TABLE IF NOT EXISTS`) or inserting external synchronization records. Set `timeout=30.0` on connection creation.
+- **Windows PowerShell / CMD SSH Nested Quote Corruption**:
+  - Passing SSH one-liners executing remote Python scripts (`python3 -c "import sqlite3; ..."`) via `subprocess.run(..., shell=True)` on Windows corrupts nested quotes.
+  - Never invoke remote Python one-liners with complex quoting via `shell=True`. Pass SSH commands as explicit argument lists `["ssh", "-i", key_path, host, remote_script]` or use minimal SQL statements (`sqlite3 -separator '|' queue.db "SELECT ..."`), processing and filtering the resulting data locally in Python.
+- **Production VM API Authentication Headers**:
+  - Internal proxies and agents must always inject both `x-admin-passcode: 579110` and `X-Meloscribe-Key` from `api_key.txt` when querying `https://api.meloscribe.dev/api/public/suggestions`.

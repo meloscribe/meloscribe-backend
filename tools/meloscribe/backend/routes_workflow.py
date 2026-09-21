@@ -12,6 +12,8 @@ import uuid
 import re
 import tempfile
 import asyncio
+import datetime
+from typing import Optional, List, Dict, Any
 from pathlib import Path
 from pydantic import BaseModel
 from fastapi import APIRouter, Request, HTTPException, Form, UploadFile, File
@@ -28,6 +30,7 @@ from shared import (
     CREATION_FLAGS,
     TOOLS_DIR
 )
+from settings import save_settings
 
 router = APIRouter()
 
@@ -44,8 +47,8 @@ class WorkflowRequest(BaseModel):
     subtitle_easy_normal: str = ""
     subtitle_easy_slow: str = ""
     theme: str = "warm"
-    price: str = "4.00"
-    format: str = "viral_part"
+    price: str = "6.00"
+    format: str = "full_arrangement"
     shutdown: bool = False
     doR2: bool = True
     doKofi: bool = False
@@ -192,22 +195,25 @@ async def _run_workflow(req: WorkflowRequest):
     song = req.song
     author = req.author
 
+    fresh_settings = load_settings()
+    settings.update(fresh_settings)
+
     await manager.broadcast({"type": "status", "message": f"Starting workflow for '{song}'..."})
     await manager.broadcast({"type": "progress", "value": 0})
 
     for folder_key in ["tiktok_dir", "covers_dir", "packages_dir"]:
-        f_val = settings.get(folder_key)
+        f_val = fresh_settings.get(folder_key)
         if f_val:
             try:
                 os.makedirs(f_val, exist_ok=True)
             except Exception:
                 pass
 
-    cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
+    cakewalk_dir = fresh_settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
     
     has_easy = False
     easy_folder_name = f"{song} Easy"
-    is_easy_enabled = any(settings.get(f"{p}_upload_easy", True) for p in ["yt", "ig", "fb", "tt", "threads"])
+    is_easy_enabled = any(fresh_settings.get(f"{p}_upload_easy", True) for p in ["yt", "ig", "fb", "tt", "threads"])
     
     if is_easy_enabled and os.path.exists(cakewalk_dir):
         try:
@@ -286,6 +292,20 @@ async def _run_workflow(req: WorkflowRequest):
                 
             if not sub_text and req.subtitle:
                 sub_text = req.subtitle
+
+            # AI Subtitle Auto-Generation if enabled
+            if fresh_settings.get("ai_subtitles_enabled", False):
+                default_val = fresh_settings.get(f"subtitle_{'easy_' if is_easy else ''}{'normal' if vtype == 'normal' else 'slow'}")
+                if not sub_text or sub_text == default_val:
+                    try:
+                        sys.path.append(str(Path(__file__).parent))
+                        from content_brain import generate_content_copy
+                        ai_format = f"{'easy_' if is_easy else ''}{'normal' if vtype == 'normal' else 'slow_tutorial'}"
+                        copy_res = generate_content_copy(ai_format, song, author)
+                        if copy_res.get("subtitle"):
+                            sub_text = copy_res["subtitle"]
+                    except Exception as e:
+                        pass
                 
             if sub_text:
                 sub_text = sub_text.strip(" -")
@@ -337,10 +357,12 @@ async def _run_workflow(req: WorkflowRequest):
                 "--song", v_song,
                 "--author", author,
                 "--mode", "r2",
-                "--format", req.format,
+                "--format", req.format
+            ]
+            cmd.extend([
                 "--hook_start", str(req.hook_start),
                 "--hook_end", str(req.hook_end)
-            ]
+            ])
             if req.subtitle_hook is not None:
                 cmd.extend(["--subtitle_hook", req.subtitle_hook.strip()])
             if req.metro_offset:
@@ -581,7 +603,10 @@ async def _run_workflow(req: WorkflowRequest):
             except Exception as e:
                 print(f"[AutoCrop] Calculation error: {e}")
                 
-            if not req.manual_crop:
+            fresh_settings = load_settings()
+            is_unattended = req.shutdown or fresh_settings.get("shutdown", False)
+                
+            if not req.manual_crop or is_unattended:
                 await manager.broadcast({
                     "type": "log",
                     "message": f"🎯 Smart Auto-Crop: Zoom {auto_zoom:.2f}x, Shift {auto_shift:+d}px (1 key left, +4 keys right tolerance). Continuing automatically..."
@@ -622,6 +647,23 @@ async def _run_workflow(req: WorkflowRequest):
             continue
 
         if cmd == "WAIT_FOR_HOOK_CONFIRMATION":
+            fresh_settings = load_settings()
+            is_unattended = req.shutdown or fresh_settings.get("shutdown", False)
+            if is_unattended:
+                h_start = active_workflow_task.get("hook_start", req.hook_start if req.hook_start else fresh_settings.get("hook_start", 0.0))
+                h_end = active_workflow_task.get("hook_end", req.hook_end if req.hook_end else fresh_settings.get("hook_end", 60.0))
+                active_workflow_task["hook_start"] = h_start
+                active_workflow_task["hook_end"] = h_end
+                await manager.broadcast({
+                    "type": "log",
+                    "message": f"⚡ [Auto-Hook] 'Shutdown on finish' ist aktiv: Hook automatisch bestätigt ({h_start:.1f}s – {h_end:.1f}s). Fahre ohne Pause fort..."
+                })
+                ticker_stop = True
+                ticker_task.cancel()
+                workflow_global_progress = max(workflow_global_progress, base_progress + slice_weight)
+                await manager.broadcast({"type": "progress", "value": workflow_global_progress})
+                continue
+
             active_workflow_task["waiting_for_hook"] = True
             active_workflow_task["pause_requested"] = True
             await manager.broadcast({
@@ -813,6 +855,19 @@ async def _run_workflow(req: WorkflowRequest):
     done_msg = "🎉 Automation Workflow completed successfully! All files are rendered, packaged, uploaded, and synced!"
     await manager.broadcast({"type": "done", "message": done_msg})
 
+    # Check shutdown on finish toggle
+    fresh_settings = load_settings()
+    if req.shutdown or fresh_settings.get("shutdown", False):
+        log_msg = "🔌 [Shutdown] 'Shutdown on finish' ist aktiv. Rechner fährt in 60 Sekunden herunter (Abbruch in CMD mit 'shutdown /a')."
+        await manager.broadcast({"type": "log", "message": log_msg})
+        try:
+            fresh_settings["shutdown"] = False
+            save_settings(fresh_settings)
+            if sys.platform == "win32":
+                subprocess.run(["shutdown", "/s", "/t", "60", "/c", "Meloscribe Workflow abgeschlossen. Rechner fährt in 60 Sekunden herunter."])
+        except Exception as ex_sd:
+            log_error(f"[Shutdown] Fehler beim Ausführen des Shutdown-Befehls: {ex_sd}")
+
 # -------------------------------------------------------------------
 # Batch queue worker logic
 # -------------------------------------------------------------------
@@ -913,6 +968,21 @@ def batch_processor_worker():
                             sub_text = settings.get("subtitle_easy_normal", "") if vtype == "normal" else settings.get("subtitle_easy_slow", "")
                         if not sub_text and settings.get("subtitle", ""):
                             sub_text = settings.get("subtitle", "")
+
+                        # AI Subtitle Auto-Generation if enabled
+                        if settings.get("ai_subtitles_enabled", False):
+                            default_val = settings.get(f"subtitle_{'easy_' if is_easy else ''}{'normal' if vtype == 'normal' else 'slow'}")
+                            if not sub_text or sub_text == default_val:
+                                try:
+                                    sys.path.append(str(Path(__file__).parent))
+                                    from content_brain import generate_content_copy
+                                    ai_format = f"{'easy_' if is_easy else ''}{'normal' if vtype == 'normal' else 'slow_tutorial'}"
+                                    copy_res = generate_content_copy(ai_format, song_name, author)
+                                    if copy_res.get("subtitle"):
+                                        sub_text = copy_res["subtitle"]
+                                except Exception:
+                                    pass
+
                         if sub_text:
                             cmd_portrait.extend(["--subtitle", sub_text.strip()])
                             
@@ -1040,6 +1110,17 @@ def batch_processor_worker():
     finally:
         is_batch_processing = False
         log_error("[Batch Worker] Background processor loop stopped.")
+        if not should_abort_queue:
+            fresh_settings = load_settings()
+            if fresh_settings.get("shutdown", False):
+                log_error("[Batch Worker] 'Shutdown on finish' ist aktiv. Rechner fährt in 60 Sekunden herunter.")
+                try:
+                    fresh_settings["shutdown"] = False
+                    save_settings(fresh_settings)
+                    if sys.platform == "win32":
+                        subprocess.run(["shutdown", "/s", "/t", "60", "/c", "Meloscribe Batch Queue abgeschlossen. Rechner fährt in 60 Sekunden herunter."])
+                except Exception as ex_sd:
+                    log_error(f"[Batch Worker] Shutdown error: {ex_sd}")
 
 # -------------------------------------------------------------------
 # REST Endpoints
@@ -1155,10 +1236,41 @@ class ConfirmHookRequest(BaseModel):
 
 @router.post("/api/workflow/confirm-hook")
 def confirm_hook(req: ConfirmHookRequest):
-    active_workflow_task["hook_start"] = req.hook_start
-    active_workflow_task["hook_end"] = req.hook_end
+    fresh_settings = load_settings()
+    h_start = req.hook_start
+    h_end = req.hook_end
+    if (h_start == 0.0 and (h_end == 60.0 or h_end == 0.0)) and (fresh_settings.get("hook_start") or fresh_settings.get("hook_end")):
+        h_start = float(fresh_settings.get("hook_start", 0.0))
+        h_end = float(fresh_settings.get("hook_end", 60.0))
+
+    active_workflow_task["hook_start"] = h_start
+    active_workflow_task["hook_end"] = h_end
     active_workflow_task["waiting_for_hook"] = False
     active_workflow_task["pause_requested"] = False
+
+    # Persist in song_hooks table to prevent recycling overlap
+    song_name = active_workflow_task.get("song") or fresh_settings.get("song", "")
+    if song_name:
+        try:
+            db_path = Path(__file__).resolve().parent / "analytics.db"
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS song_hooks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        song_name TEXT UNIQUE NOT NULL,
+                        hook_start REAL NOT NULL,
+                        hook_end REAL NOT NULL,
+                        source TEXT DEFAULT 'teaser',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                conn.execute(
+                    "INSERT OR REPLACE INTO song_hooks (song_name, hook_start, hook_end, source) VALUES (?, ?, ?, ?)",
+                    (song_name.strip(), h_start, h_end, "master_tab")
+                )
+        except Exception as e:
+            logger.warning(f"Failed to persist hook into song_hooks: {e}")
+
     proc = active_workflow_task.get("current_process")
     if proc:
         try:
@@ -1169,7 +1281,7 @@ def confirm_hook(req: ConfirmHookRequest):
                 child.resume()
         except Exception as e:
             print(f"[Workflow] Error resuming process on hook confirm: {e}")
-    return {"status": "confirmed", "hook_start": req.hook_start, "hook_end": req.hook_end}
+    return {"status": "confirmed", "hook_start": h_start, "hook_end": h_end}
 
 @router.post("/api/module/{module}")
 def run_individual_module(module: str, req: dict):
@@ -1585,19 +1697,20 @@ def update_batch_metadata(req: UpdateMetadataRequest):
 def scan_cakewalk_songs():
     """
     Scan the Cakewalk Projects directory and return all detected song names.
-    A valid song folder must contain at least one .mid file matching the folder name.
+    Distinguishes Normal and Easy project folders cleanly without collision.
     """
     cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
     if not cakewalk_dir.exists():
         raise HTTPException(status_code=404, detail=f"Cakewalk directory not found: {cakewalk_dir}")
 
-    IGNORED_FOLDERS = {"_archive", "_backup", "_legacy", "test", "template"}
+    IGNORED_FOLDERS = {"_archive", "_backup", "_legacy", "test", "template", "audio data"}
     songs = []
 
     try:
-        for folder in sorted(cakewalk_dir.iterdir()):
-            if not folder.is_dir():
-                continue
+        all_dirs = [f for f in cakewalk_dir.iterdir() if f.is_dir()]
+        dir_names_lower = {f.name.lower(): f.name for f in all_dirs}
+
+        for folder in sorted(all_dirs):
             name = folder.name
             if name.lower().startswith("_") or name.lower() in IGNORED_FOLDERS:
                 continue
@@ -1621,8 +1734,25 @@ def scan_cakewalk_songs():
             has_normal_video = (keysight_dir / f"{name}.mp4").exists()
             has_slow_video   = (keysight_dir / f"{name} slow.mp4").exists()
 
+            # Detect variant separation (Original vs Easy folder rule)
+            is_easy = bool(re.search(r'\s*(?:-|–)?\s*(?:\(Easy\)|Easy)$', name, re.I))
+            base_name = re.sub(r'\s*(?:-|–)?\s*(?:\(Easy\)|Easy)$', '', name, flags=re.I).strip() if is_easy else name
+            
+            # Check if counterpart folder exists
+            if is_easy:
+                counterpart_exists = (cakewalk_dir / base_name).exists()
+            else:
+                counterpart_exists = any(
+                    (cakewalk_dir / f"{name}{suf}").exists()
+                    for suf in [" Easy", " easy", " (Easy)", " - Easy"]
+                )
+
             songs.append({
                 "name": name,
+                "baseName": base_name,
+                "isEasyVariant": is_easy,
+                "variant": "Easy" if is_easy else "Normal",
+                "hasPairedVariant": counterpart_exists,
                 "queueStatus": queue_status,
                 "hasNormalVideo": has_normal_video,
                 "hasSlowVideo": has_slow_video,
@@ -1632,6 +1762,94 @@ def scan_cakewalk_songs():
         raise HTTPException(status_code=500, detail=f"Error scanning Cakewalk directory: {str(e)}")
 
     return {"songs": songs, "total": len(songs), "cakewalkDir": str(cakewalk_dir)}
+
+@router.get("/api/workflow/cakewalk/recent")
+def get_recent_cakewalk_projects():
+    """
+    Scan Cakewalk Projects directory for .cwp, .mid, or Audio Export files modified recently.
+    Returns the top recent projects sorted by last modification timestamp.
+    """
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    if not cakewalk_dir.exists():
+        return {"projects": [], "total": 0}
+
+    IGNORED_FOLDERS = {"_archive", "_backup", "_legacy", "test", "template", "audio data"}
+    projects = []
+
+    try:
+        for folder in cakewalk_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            name = folder.name
+            if name.lower().startswith("_") or name.lower() in IGNORED_FOLDERS:
+                continue
+
+            newest_mtime = 0
+            newest_file = None
+
+            cwp_files = list(folder.glob("*.cwp"))
+            mid_files = list(folder.glob("*.mid"))
+            audio_files = list((folder / "Audio Export").glob("*.*")) if (folder / "Audio Export").exists() else []
+
+            for f in cwp_files + mid_files + audio_files:
+                try:
+                    m = f.stat().st_mtime
+                    if m > newest_mtime:
+                        newest_mtime = m
+                        newest_file = f.name
+                except Exception:
+                    pass
+
+            if newest_mtime > 0:
+                is_easy = bool(re.search(r'\s*(?:-|–)?\s*(?:\(Easy\)|Easy)$', name, re.I))
+                base_name = re.sub(r'\s*(?:-|–)?\s*(?:\(Easy\)|Easy)$', '', name, flags=re.I).strip() if is_easy else name
+
+                projects.append({
+                    "name": name,
+                    "baseName": base_name,
+                    "variant": "Easy" if is_easy else "Normal",
+                    "lastModified": datetime.datetime.fromtimestamp(newest_mtime).isoformat(),
+                    "mtime": newest_mtime,
+                    "recentFile": newest_file,
+                    "hasCwp": len(cwp_files) > 0,
+                    "hasMidi": len(mid_files) > 0,
+                    "hasAudio": len(audio_files) > 0,
+                })
+
+        projects.sort(key=lambda x: x["mtime"], reverse=True)
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    return {
+        "projects": projects[:10],
+        "mostRecent": projects[0] if projects else None,
+        "total": len(projects)
+    }
+
+class ArrangeMePublishRequest(BaseModel):
+    song: str
+    difficulty: str = "Original"
+    auto_publish: bool = False
+    headless: bool = False
+
+@router.post("/api/arrangeme/publish")
+def publish_to_arrangeme(req: ArrangeMePublishRequest):
+    """
+    Starts the ArrangeMe Playwright bot (tools/arrangeme_bot.py) for the given song.
+    """
+    try:
+        from ai_agent import trigger_arrangeme_upload
+        msg = trigger_arrangeme_upload(
+            song_name=req.song,
+            difficulty=req.difficulty,
+            auto_publish=req.auto_publish,
+            headless=req.headless
+        )
+        if "Fehler" in msg:
+            return JSONResponse(content={"status": "error", "message": msg}, status_code=500)
+        return {"status": "success", "message": msg}
+    except Exception as e:
+        return JSONResponse(content={"status": "error", "error": str(e)}, status_code=500)
 
 @router.get("/api/batch/queue")
 def get_batch_queue():
@@ -2028,3 +2246,565 @@ def kofi_messages():
 @router.post("/api/kofi/messages/{msg_id}/read")
 def kofi_messages_read(msg_id: str):
     return {"status": "success"}
+
+@router.post("/api/workflow/abort-shutdown")
+def abort_shutdown():
+    if sys.platform == "win32":
+        try:
+            res = subprocess.run(["shutdown", "/a"], capture_output=True, text=True)
+            if res.returncode == 0:
+                return {"status": "success", "message": "Geplanter Shutdown wurde abgebrochen."}
+            else:
+                return {"status": "error", "message": res.stderr.strip() or "Kein aktiver Shutdown gefunden."}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+    return {"status": "ignored", "message": "Nicht auf Windows"}
+
+
+# ==========================================
+# CONTENT RECYCLING PIPELINE ENDPOINTS
+# ==========================================
+
+class RecyclingRenderRequest(BaseModel):
+    song: str
+    author: str = "Dave Kerr"
+    start_time: float = 0.0
+    end_time: float = 60.0
+    time_offset: float = 0.0
+    zoom: float = 1.50
+    shift: int = 0
+    subtitle: str = ""
+    outro_text: str = "Rate this 1-10 or suggest a song 👇"
+
+class RecyclingStageRequest(BaseModel):
+    song: str
+    author: str = "Dave Kerr"
+    schedule_date: str
+    schedule_time: str
+    platforms: list[str]
+
+@router.get("/api/recycling/songs")
+def get_recycling_songs():
+    """Returns all available master songs from Keysight export directory for recycling with recycling counters."""
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+    tiktok_dir = Path(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"))
+    covers_dir = Path(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"))
+    recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    
+    if not keysight_dir.exists():
+        return {"songs": []}
+
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    recycling_counts = {}
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS recycling_events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        song_name TEXT NOT NULL,
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        start_time REAL,
+                        end_time REAL,
+                        platforms TEXT
+                    )
+                """)
+                cur.execute("SELECT song_name, COUNT(*) FROM recycling_events GROUP BY song_name")
+                for row in cur.fetchall():
+                    recycling_counts[row[0].lower()] = row[1]
+        except Exception as e:
+            print(f"[Recycling] DB count error: {e}")
+        
+    songs = []
+    for file in os.listdir(keysight_dir):
+        if not file.lower().endswith(".mp4"):
+            continue
+        if file.startswith(".") or file.lower().endswith(("_preview.mp4", "_web.mp4", "_raw.mp4", " slow.mp4")):
+            continue
+            
+        song_name = file[:-4]
+        has_tiktok = (tiktok_dir / f"{song_name}.mp4").exists()
+        has_cover = (covers_dir / f"{song_name}.jpg").exists()
+        has_recycled = (recycling_dir / f"{song_name}.mp4").exists() or (recycling_dir / f"{song_name} Recycled.mp4").exists()
+        db_count = recycling_counts.get(song_name.lower(), 0)
+        recycled_count = max(db_count, 1 if has_recycled else 0)
+        
+        # Check MIDI
+        base_name = song_name[:-5].strip() if song_name.lower().endswith(" easy") else song_name
+        has_midi = (cakewalk_dir / song_name / f"{song_name}.mid").exists() or (cakewalk_dir / base_name / f"{song_name}.mid").exists() or (cakewalk_dir / base_name / f"{base_name}.mid").exists()
+        
+        songs.append({
+            "name": song_name,
+            "filename": file,
+            "hasTikTok": has_tiktok,
+            "hasCover": has_cover,
+            "hasRecycled": has_recycled,
+            "recycledCount": recycled_count,
+            "hasMidi": has_midi
+        })
+        
+    songs.sort(key=lambda x: x["name"].lower())
+    return {"songs": songs}
+
+@router.get("/api/recycling/auto-crop")
+def get_recycling_auto_crop(song: str = "", jitter: bool = True):
+    """Calculates optimal zoom & shift with safe micro-jitter for recycling."""
+    if not song:
+        return {"zoom": 1.50, "shift": 0, "base_zoom": 1.50, "base_shift": 0}
+        
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    base_name = song[:-5].strip() if song.lower().endswith(" easy") else song
+    midi_path = cakewalk_dir / song / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{base_name}.mid"
+        
+    try:
+        sys.path.append(str(TOOLS_DIR))
+        from auto_crop import calculate_recycling_crop
+        zoom, shift, b_zoom, b_shift = calculate_recycling_crop(str(midi_path), jitter=jitter)
+        return {"zoom": zoom, "shift": shift, "base_zoom": b_zoom, "base_shift": b_shift}
+    except Exception as e:
+        return {"zoom": 1.50, "shift": 0, "base_zoom": 1.50, "base_shift": 0, "error": str(e)}
+
+@router.get("/api/recycling/hook-info")
+def get_recycling_hook_info(song: str):
+    """
+    Returns known hook/teaser boundaries for a song from song_hooks or fallback sources,
+    allowing the frontend to clearly display and prevent duplicate hook selection.
+    """
+    clean_song = song.strip()
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS song_hooks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        song_name TEXT UNIQUE NOT NULL,
+                        hook_start REAL NOT NULL,
+                        hook_end REAL NOT NULL,
+                        source TEXT DEFAULT 'teaser',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                row = conn.execute(
+                    "SELECT hook_start, hook_end, source FROM song_hooks WHERE LOWER(song_name) = LOWER(?)",
+                    (clean_song,)
+                ).fetchone()
+                if row and row[0] is not None and row[1] is not None:
+                    return {
+                        "has_hook": True,
+                        "song": clean_song,
+                        "hook_start": float(row[0]),
+                        "hook_end": float(row[1]),
+                        "duration": round(float(row[1]) - float(row[0]), 2),
+                        "source": row[2]
+                    }
+                # Check batch_ingest_queue fallback
+                q_row = conn.execute(
+                    "SELECT hook_start, hook_end FROM batch_ingest_queue WHERE LOWER(song_name) = LOWER(?) AND hook_start IS NOT NULL AND hook_end IS NOT NULL",
+                    (clean_song,)
+                ).fetchone()
+                if q_row and float(q_row[1]) > float(q_row[0]):
+                    return {
+                        "has_hook": True,
+                        "song": clean_song,
+                        "hook_start": float(q_row[0]),
+                        "hook_end": float(q_row[1]),
+                        "duration": round(float(q_row[1]) - float(q_row[0]), 2),
+                        "source": "batch_ingest_queue"
+                    }
+        except Exception as e:
+            logger.warning(f"Error checking song_hooks: {e}")
+            
+    # Check settings.json fallback
+    s = load_settings()
+    if s.get("song", "").strip().lower() == clean_song.lower():
+        hs = s.get("hook_start")
+        he = s.get("hook_end")
+        if hs is not None and he is not None and float(he) > float(hs):
+            return {
+                "has_hook": True,
+                "song": clean_song,
+                "hook_start": float(hs),
+                "hook_end": float(he),
+                "duration": round(float(he) - float(hs), 2),
+                "source": "settings"
+            }
+            
+    return {
+        "has_hook": False,
+        "song": clean_song,
+        "hook_start": None,
+        "hook_end": None,
+        "duration": None
+    }
+
+class ContentBrainRequest(BaseModel):
+    format_type: str = "normal"
+    song_name: str
+    author: str = ""
+    technical_focus: str = ""
+    platform: str = "tiktok"
+    segment_type: str = "climax"
+    force_ai: bool = False
+
+class RecyclingRerollRequest(BaseModel):
+    song: str
+    start_time: float
+    end_time: float
+    segment_type: str = "climax"
+    target_stream: str = "keysight_raw"
+
+class RecyclingResetRequest(BaseModel):
+    song: str
+
+class RecyclingRenderRequest(BaseModel):
+    song: str
+    author: str = "Dave Kerr"
+    start_time: float = 0.0
+    end_time: float = 60.0
+    time_offset: float = 0.0
+    zoom: float = 1.50
+    shift: int = 0
+    subtitle: str = ""
+    outro_text: str = "Rate this 1-10 👇"
+    segment_type: str = "climax"
+    version_num: Optional[int] = None
+
+class RecyclingStageRequest(BaseModel):
+    song: str
+    author: str = "Dave Kerr"
+    schedule_date: str
+    schedule_time: str
+    platforms: list[str]
+
+@router.post("/api/content-brain/generate")
+def api_generate_content_brain(req: ContentBrainRequest):
+    """Generates context-aware copy using Content Brain with fallback to static templates."""
+    try:
+        sys.path.append(str(Path(__file__).parent))
+        from content_brain import generate_content_copy
+        return generate_content_copy(
+            format_type=req.format_type,
+            song_name=req.song_name,
+            author=req.author,
+            technical_focus=req.technical_focus,
+            platform=req.platform,
+            segment_type=req.segment_type,
+            force_ai=req.force_ai
+        )
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.get("/api/recycling/detect-segments")
+def api_detect_recycling_segments(song: str, target_stream: str = "keysight_raw"):
+    """Detects musical segments and archetypes using intelligent MIDI heuristic."""
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    base_name = song[:-5].strip() if song.lower().endswith(" easy") else song
+    midi_path = cakewalk_dir / song / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{base_name}.mid"
+    if not midi_path.exists():
+        raise HTTPException(status_code=404, detail=f"MIDI file for '{song}' not found in {cakewalk_dir}")
+        
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+    candidates = [
+        keysight_dir / "RAW" / f"{song}_RAW.mp4",
+        keysight_dir / f"{song}.mp4",
+        keysight_dir / "RAW" / f"{base_name}_RAW.mp4",
+        keysight_dir / f"{base_name}.mp4"
+    ]
+    video_path = next((str(c) for c in candidates if c.exists()), None)
+        
+    sys.path.append(str(TOOLS_DIR))
+    from midi_hook_detector import get_next_recycling_segment, check_overlap
+    from ai_audio_segment_detector import detect_audio_segments
+
+    # 1. Attempt AI Multimodal Audio Detection (True musical hook listening)
+    try:
+        ai_segs = detect_audio_segments(song, video_path=video_path, midi_path=str(midi_path))
+        if ai_segs:
+            db_path = Path(__file__).resolve().parent / "analytics.db"
+            rows = []
+            if db_path.exists():
+                try:
+                    with sqlite3.connect(db_path) as conn:
+                        rows = conn.execute("""
+                            SELECT start_time, end_time, segment_type, status 
+                            FROM recycling_history 
+                            WHERE song_name = ? AND status IN ('staged', 'published')
+                        """, (song,)).fetchall()
+                except Exception:
+                    pass
+
+            chosen = None
+            for cand in ai_segs:
+                has_collision = False
+                for (ex_start, ex_end, ex_type, ex_status) in rows:
+                    if check_overlap(cand["start_time"], cand["end_time"], ex_start, ex_end) > 0.15:
+                        has_collision = True
+                        break
+                if not has_collision:
+                    chosen = cand
+                    break
+            if not chosen:
+                chosen = ai_segs[0]
+
+            all_segs_dict = {}
+            for s in ai_segs:
+                all_segs_dict[s.get("segment_type", "climax")] = s
+
+            return {
+                "chosen": chosen,
+                "all_segments": all_segs_dict,
+                "pre_roll_offset": 2.5,
+                "ai_multimodal": True
+            }
+    except Exception as e:
+        logger.warning(f"AI audio segment detection skipped/failed: {e}")
+
+    # 2. Fallback to classical MIDI heuristic
+    return get_next_recycling_segment(song, str(midi_path), target_stream=target_stream, video_path=video_path)
+
+@router.get("/api/midi/detect-hook")
+def api_detect_master_hook(song: str):
+    """Detects primary hook (climax) for MasterTab using pure MIDI timeline (target_stream='tiktok_video')."""
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    base_name = song[:-5].strip() if song.lower().endswith(" easy") else song
+    midi_path = cakewalk_dir / song / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{base_name}.mid"
+    if not midi_path.exists():
+        raise HTTPException(status_code=404, detail=f"MIDI file for '{song}' not found in {cakewalk_dir}")
+        
+    sys.path.append(str(TOOLS_DIR))
+    from midi_hook_detector import detect_phrases_and_archetypes
+    res = detect_phrases_and_archetypes(str(midi_path), target_stream="tiktok_video")
+    if "error" in res:
+        return {"error": res["error"]}
+    climax = res["segments"]["climax"]
+    return {
+        "song": song,
+        "hook_start": climax["start_time"],
+        "hook_end": climax["end_time"],
+        "duration": climax["duration"]
+    }
+
+@router.post("/api/recycling/reroll")
+def api_reroll_recycling_segment(req: RecyclingRerollRequest):
+    """Discards the current segment and retrieves the next best musical peak."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recycling_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT NOT NULL,
+                    start_time REAL NOT NULL,
+                    end_time REAL NOT NULL,
+                    segment_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO recycling_history (song_name, start_time, end_time, segment_type, status)
+                VALUES (?, ?, ?, ?, 'discarded')
+            """, (req.song, req.start_time, req.end_time, req.segment_type))
+            conn.commit()
+    except Exception as e:
+        print(f"[Recycling Re-roll DB Error] {e}")
+        
+    return api_detect_recycling_segments(req.song, target_stream=req.target_stream)
+
+@router.post("/api/recycling/reset-history")
+def api_reset_recycling_history(req: RecyclingResetRequest):
+    """Resets all recycling history entries for a song to discarded."""
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recycling_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT NOT NULL,
+                    start_time REAL NOT NULL,
+                    end_time REAL NOT NULL,
+                    segment_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("UPDATE recycling_history SET status='discarded' WHERE song_name=?", (req.song,))
+            conn.commit()
+    except Exception as e:
+        print(f"[Recycling Reset DB Error] {e}")
+    return {"status": "reset", "song": req.song}
+
+@router.get("/api/recycling/evergreen-radar")
+def api_get_evergreen_radar():
+    """Returns top candidate catalog songs ready for recycling upload cycle."""
+    sys.path.append(str(Path(__file__).parent))
+    from evergreen_radar import scan_evergreen_candidates
+    return scan_evergreen_candidates()
+
+@router.post("/api/recycling/render")
+def render_recycling_video(req: RecyclingRenderRequest):
+    r"""Triggers high-res video rendering into C:\Dev\meloscribe\Recycling."""
+    keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
+    recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
+    os.makedirs(recycling_dir, exist_ok=True)
+    
+    vid_in = keysight_dir / f"{req.song}.mp4"
+    if not vid_in.exists():
+        raise HTTPException(status_code=404, detail=f"Source video '{req.song}.mp4' not found in {keysight_dir}")
+        
+    cakewalk_dir = Path(settings.get("cakewalk_dir", r"C:\Cakewalk Projects"))
+    base_name = req.song[:-5].strip() if req.song.lower().endswith(" easy") else req.song
+    midi_path = cakewalk_dir / req.song / f"{req.song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{req.song}.mid"
+    if not midi_path.exists():
+        midi_path = cakewalk_dir / base_name / f"{base_name}.mid"
+
+    # Auto-generate copy via Content Brain if not provided
+    subtitle_val = req.subtitle.strip() if req.subtitle else ""
+    outro_val = req.outro_text.strip() if req.outro_text else ""
+    
+    try:
+        sys.path.append(str(Path(__file__).parent))
+        from content_brain import generate_content_copy
+        copy_res = generate_content_copy("recycled", req.song, req.author)
+        if not subtitle_val and copy_res.get("subtitle"):
+            subtitle_val = copy_res["subtitle"]
+        if not outro_val and copy_res.get("outro"):
+            outro_val = copy_res["outro"]
+    except Exception:
+        pass
+
+    # Record in recycling_history
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recycling_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT NOT NULL,
+                    start_time REAL NOT NULL,
+                    end_time REAL NOT NULL,
+                    segment_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO recycling_history (song_name, start_time, end_time, segment_type, status)
+                VALUES (?, ?, ?, ?, 'staged')
+            """, (req.song, req.start_time, req.end_time, req.segment_type))
+            conn.commit()
+    except Exception as e:
+        print(f"[Recycling History DB Error] {e}")
+
+    # Determine recycling filename / title:
+    clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', req.song).strip()
+    if getattr(req, "version_num", None):
+        video_title = f"{clean_song} Recycled {req.version_num}"
+    elif "recycled" in req.song.lower():
+        video_title = req.song
+    else:
+        existing = list(recycling_dir.glob(f"{clean_song} Recycled*.mp4"))
+        max_num = 0
+        for f in existing:
+            m = re.search(r'Recycled\s+(\d+)\.mp4$', f.name, re.IGNORECASE)
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+            elif "recycled.mp4" in f.name.lower():
+                max_num = max(max_num, 1)
+        next_num = max_num + 1
+        video_title = f"{clean_song} Recycled {next_num}"
+
+    cmd = [
+        python, "-u", str(TOOLS_DIR / "video_generator.py"),
+        "--video", str(vid_in),
+        "--title", video_title,
+        "--author", req.author,
+        "--type", "normal",
+        "--zoom", str(req.zoom),
+        "--shift", str(req.shift),
+        "--start_time", str(req.start_time),
+        "--end_time", str(req.end_time),
+        "--time_offset", str(req.time_offset),
+        "--output_dir", str(recycling_dir),
+        "--use_portrait_addon",
+        "--force"
+    ]
+    if subtitle_val:
+        cmd.extend(["--subtitle", subtitle_val])
+    if outro_val:
+        cmd.extend(["--outro_text", outro_val])
+    if midi_path.exists():
+        cmd.extend(["--midipath", str(midi_path)])
+        
+    threading.Thread(target=lambda: asyncio.run(run_tool(cmd, f"Recycling Render: {req.song}")), daemon=True).start()
+    return {"status": "started", "song": req.song, "output_dir": str(recycling_dir)}
+
+@router.post("/api/recycling/stage")
+def stage_recycling_video(req: RecyclingStageRequest):
+    """Stages the rendered recycled video to the Oracle Server VM."""
+    if not req.platforms:
+        raise HTTPException(status_code=400, detail="No target platforms selected.")
+        
+    recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
+    rec_vid = recycling_dir / f"{req.song}.mp4"
+    if not rec_vid.exists():
+        rec_vid = recycling_dir / f"{req.song} Recycled.mp4"
+    if not rec_vid.exists():
+        raise HTTPException(status_code=404, detail=f"Recycled video for '{req.song}' not found in {recycling_dir}. Please render it first.")
+
+    # Record recycling event in database
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS recycling_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT NOT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    start_time REAL,
+                    end_time REAL,
+                    platforms TEXT
+                )
+            """)
+            cur.execute(
+                "INSERT INTO recycling_events (song_name, platforms) VALUES (?, ?)",
+                (req.song, ",".join(req.platforms))
+            )
+            # Update recycling_history to published
+            cur.execute("UPDATE recycling_history SET status='published' WHERE song_name=? AND status='staged'", (req.song,))
+            conn.commit()
+    except Exception as e:
+        print(f"[Recycling] DB record error: {e}")
+        
+    cmd = [
+        python, "-u", str(TOOLS_DIR / "stage_to_server.py"),
+        "--song", req.song,
+        "--author", req.author,
+        "--schedule_date", req.schedule_date,
+        "--schedule_time", req.schedule_time,
+        "--platforms", ",".join(req.platforms),
+        "--recycling"
+    ]
+    
+    threading.Thread(target=lambda: asyncio.run(run_tool(cmd, f"Recycling Stage: {req.song}")), daemon=True).start()
+    return {"status": "started", "song": req.song, "platforms": req.platforms}
+
+

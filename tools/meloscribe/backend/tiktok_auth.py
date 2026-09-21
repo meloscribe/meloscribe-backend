@@ -27,10 +27,11 @@ def _generate_pkce():
     return code_verifier, code_challenge
 
 # -------------------------------------------------------
-CLIENT_KEY    = "sbawllqdpf3yk6g8kh"
+CLIENT_KEY    = "sbaw7fguduihq6she7"
 CLIENT_SECRET = ""
-REDIRECT_URI  = "https://wooing-encrust-ladle.ngrok-free.dev/callback"  # Static domain
-SCOPES        = "user.info.basic,video.list,video.upload"
+LOCAL_PORT    = 8080
+REDIRECT_URI  = "https://api.meloscribe.dev/callback"
+SCOPES        = "user.info.basic,video.list,video.upload,video.publish"
 TOKENS_PATH   = Path(__file__).parent / "tiktok_tokens.json"
 
 TOKEN_URL  = "https://open.tiktokapis.com/v2/oauth/token/"
@@ -167,12 +168,15 @@ def run_initial_auth(open_browser=True):
                 self.wfile.write(b"<h1>No code received.</h1>")
         def log_message(self, *args): pass
 
-    server = http.server.HTTPServer(("localhost", 8080), CallbackHandler)
-    server_thread = threading.Thread(target=server.handle_request)
-    server_thread.daemon = True
-    server_thread.start()
+    server = None
+    try:
+        server = http.server.HTTPServer(("localhost", 8080), CallbackHandler)
+        server_thread = threading.Thread(target=server.handle_request, daemon=True)
+        server_thread.start()
+    except Exception as e:
+        print(f"[TikTok] Local port 8080 listener skipped: {e}")
 
-    state = "meloscribe_auth"
+    state = f"tiktok_{secrets.token_hex(6)}"
     auth_url = (
         f"{AUTH_BASE}?"
         + urllib.parse.urlencode({
@@ -196,7 +200,30 @@ def run_initial_auth(open_browser=True):
         print(f"[TikTok] Skipping backend browser open, URL will be returned to client.")
 
     print("[TikTok] Waiting for callback (max 120s)...")
-    server_thread.join(timeout=120)
+    start_time = time.time()
+    while time.time() - start_time < 120:
+        if "code" in captured:
+            break
+        try:
+            poll_resp = requests.get(
+                f"https://api.meloscribe.dev/api/oauth/code?state={state}",
+                timeout=3
+            )
+            if poll_resp.status_code == 200:
+                data = poll_resp.json()
+                if data.get("status") == "ok" and data.get("code"):
+                    captured["code"] = data["code"]
+                    print(f"[TikTok] Code received via api.meloscribe.dev relay!")
+                    break
+        except Exception:
+            pass
+        time.sleep(1.5)
+
+    if server:
+        try:
+            server.server_close()
+        except Exception:
+            pass
 
     if "code" not in captured:
         print("[TikTok] ERROR: No authorization code received within timeout.")

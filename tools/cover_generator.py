@@ -384,7 +384,6 @@ def generate_cover(theme, bg_filename, song_title, author, output_path, is_wide=
             candidates = [
                 os.path.join(r"C:\Dev\meloscribe\TikToks", f"{clean_name}_wide.mp4"),
                 os.path.join(r"C:\Dev\meloscribe\Keysight export", f"{clean_name}.mp4"),
-                os.path.join(r"C:\Dev\meloscribe\TikToks", f"{clean_name}.mp4")
             ]
             for cand in candidates:
                 if os.path.exists(cand):
@@ -396,6 +395,17 @@ def generate_cover(theme, bg_filename, song_title, author, output_path, is_wide=
             return generate_widescreen_cover_highlight(
                 highlight_frame, song_title, author, theme, output_path, badge_text=badge_text
             )
+        else:
+            # Fallback to high-res theme 1_wide.jpg template if no 16:9 video frame exists
+            theme_wide_bg = os.path.join(tools_dir, "themes", theme, "1_wide.jpg")
+            if os.path.exists(theme_wide_bg):
+                try:
+                    bg_img = Image.open(theme_wide_bg)
+                    return generate_widescreen_cover_highlight(
+                        bg_img, song_title, author, theme, output_path, badge_text=badge_text
+                    )
+                except Exception as e:
+                    print(f"Failed to use theme wide template: {e}")
             
     # Fallback / Vertical cover generation
     lower_title = song_title.lower()

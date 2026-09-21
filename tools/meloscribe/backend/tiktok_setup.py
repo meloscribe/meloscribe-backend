@@ -47,11 +47,11 @@ except Exception as e:
 # -------------------------------------------------------
 NGROK_EXE      = Path(__file__).parent.parent.parent / "ngrok" / "ngrok.exe"
 NGROK_DOMAIN   = "wooing-encrust-ladle.ngrok-free.dev"   # Permanent static domain
-CLIENT_KEY     = "sbawllqdpf3yk6g8kh"
+CLIENT_KEY     = "sbaw7fguduihq6she7"
 CLIENT_SECRET  = ""
 LOCAL_PORT     = 8080
-REDIRECT_URI   = f"https://{NGROK_DOMAIN}/callback"      # Never changes
-SCOPES         = "user.info.basic,video.list,video.upload"
+REDIRECT_URI   = "https://api.meloscribe.dev/callback"
+SCOPES         = "user.info.basic,video.list,video.upload,video.publish"
 TOKENS_PATH    = Path(__file__).parent / "tiktok_tokens.json"
 TOKEN_URL      = "https://open.tiktokapis.com/v2/oauth/token/"
 AUTH_BASE      = "https://www.tiktok.com/v2/auth/authorize/"
@@ -78,7 +78,7 @@ def _generate_pkce():
 
 
 def _start_ngrok():
-    """Start ngrok with the static domain."""
+    """Start ngrok with the static domain (fallback only)."""
     print(f"[ngrok] Starting tunnel: {REDIRECT_URI}")
     proc = subprocess.Popen(
         [str(NGROK_EXE), "http", f"--domain={NGROK_DOMAIN}", str(LOCAL_PORT)],
@@ -104,46 +104,47 @@ def _start_ngrok():
 
 LAST_AUTH_URL = None
 
-def run_setup(force=False, open_browser=True, start_ngrok=True):
-    import os
+def run_setup(force=False, open_browser=True, start_ngrok=False):
     if TOKENS_PATH.exists():
         if force:
             try:
-                os.remove(str(TOKENS_PATH))
-                print("[Setup] Deleted existing tiktok_tokens.json for re-authorization.")
+                import shutil
+                shutil.copy2(str(TOKENS_PATH), str(TOKENS_PATH) + ".bak")
+                print("[Setup] Preserved backup tiktok_tokens.json.bak before re-authorization.")
             except Exception as e:
-                print(f"[Setup] Warning: Could not delete tiktok_tokens.json: {e}")
+                print(f"[Setup] Warning: Could not backup tiktok_tokens.json: {e}")
         else:
-            print(f"[Setup] Tokens already exist — delete tiktok_tokens.json to re-authorize.")
+            print(f"[Setup] Tokens already exist — pass force=True to re-authorize.")
             return
 
     # 1. Generate PKCE and build auth URL immediately so client can fetch it
     code_verifier, code_challenge = _generate_pkce()
+    auth_state = f"tiktok_{secrets.token_hex(6)}"
     auth_url = AUTH_BASE + "?" + urllib.parse.urlencode({
         "client_key":            CLIENT_KEY,
         "response_type":         "code",
         "scope":                 SCOPES,
         "redirect_uri":          REDIRECT_URI,
-        "state":                 "meloscribe",
+        "state":                 auth_state,
         "code_challenge":        code_challenge,
         "code_challenge_method": "S256",
+        "disable_auto_auth":     "1",
     })
 
     global LAST_AUTH_URL
     LAST_AUTH_URL = auth_url
 
     print(f"\n{'='*60}")
-    print(f"Redirect URI (already registered in TikTok portal):")
+    print(f"Redirect URI (official production domain):")
     print(f"  {REDIRECT_URI}")
     print(f"{'='*60}\n")
 
-    # 2. Start ngrok with static domain
+    # Optional local listener / ngrok fallback
     ngrok_proc = None
-    if start_ngrok:
+    if start_ngrok and NGROK_EXE.exists():
         ngrok_proc = _start_ngrok()
     captured = {}
 
-    # 3. Start local callback server
     class CallbackHandler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             parsed = urllib.parse.urlparse(self.path)
@@ -157,17 +158,20 @@ def run_setup(force=False, open_browser=True, start_ngrok=True):
                     b"TikTok Authorization Successful!<br>"
                     b"<small>You can close this tab.</small></h1>"
                 )
-                print("\n[Setup] Authorization code received!")
+                print("\n[Setup] Authorization code received via local port!")
             else:
                 self.send_response(400)
                 self.end_headers()
                 self.wfile.write(b"<h1>No code received.</h1>")
         def log_message(self, *args): pass
 
-    server = http.server.HTTPServer(("0.0.0.0", LOCAL_PORT), CallbackHandler)
-    server_thread = threading.Thread(target=server.handle_request)
-    server_thread.daemon = True
-    server_thread.start()
+    server = None
+    try:
+        server = http.server.HTTPServer(("0.0.0.0", LOCAL_PORT), CallbackHandler)
+        server_thread = threading.Thread(target=server.handle_request, daemon=True)
+        server_thread.start()
+    except Exception as e:
+        print(f"[Setup] Local port {LOCAL_PORT} listener skipped: {e}")
 
     if open_browser:
         print("[Setup] Opening TikTok login in browser...")
@@ -176,13 +180,42 @@ def run_setup(force=False, open_browser=True, start_ngrok=True):
         print("[Setup] Skipping backend browser open, URL will be returned to client.")
     print("[Setup] Waiting for you to log in (max 120s)...")
 
-    server_thread.join(timeout=120)
+    # Poll official api.meloscribe.dev server for authorization code
+    start_time = time.time()
+    while time.time() - start_time < 120:
+        if "code" in captured:
+            break
+        try:
+            poll_resp = requests.get(
+                f"https://api.meloscribe.dev/api/oauth/code?state={auth_state}",
+                timeout=3
+            )
+            if poll_resp.status_code == 200:
+                data = poll_resp.json()
+                if data.get("status") == "ok" and data.get("code"):
+                    captured["code"] = data["code"]
+                    print("\n[Setup] Authorization code received via api.meloscribe.dev relay!")
+                    break
+        except Exception:
+            pass
+        time.sleep(1.5)
+
+    if server:
+        try:
+            server.server_close()
+        except Exception:
+            pass
+
+    if ngrok_proc:
+        try:
+            ngrok_proc.terminate()
+            print("[ngrok] Tunnel closed.")
+        except Exception:
+            pass
 
     if "code" not in captured:
         print("[Setup] ERROR: No code received within 120 seconds.")
-        if ngrok_proc:
-            ngrok_proc.terminate()
-        return
+        return False
 
     code = captured["code"]
     print(f"[Setup] Exchanging code for tokens...")
@@ -217,7 +250,7 @@ def run_setup(force=False, open_browser=True, start_ngrok=True):
 
     print(f"\n{'='*60}")
     print("SUCCESS! TikTok authorization complete.")
-    print(f"Tokens saved → {TOKENS_PATH}")
+    print(f"Tokens saved -> {TOKENS_PATH}")
     print("Meloscribe will now auto-sync TikTok stats on every startup.")
     print(f"{'='*60}\n")
 
