@@ -518,14 +518,12 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Stale Cover Variant Sync in `upload_bot.py`**:
   - `upload_bot.py` previously only copied `_clean.jpg` to `website/public/covers/`, leaving stale `_wide.jpg` and other variant files in place. The video preview modal (`PaddleModal.tsx`) uses `_wide.jpg`, causing new uploads to display old cover artwork.
   - Fix: Updated `upload_bot.py` to copy all matching cover variations (`clean`, `wide`, standard, and `{clean_name}*.jpg`) on upload.
-- **Data-Driven Trending Score vs Static Index Insertion**:
-  - Previously, `upload_bot.py` inserted new songs at index 0 of `songs.json`, and the frontend statically picked `slice(0, 3)` with a hardcoded `trending` badge.
-  - Initial naive fix summed all-time views from `videos`, which erroneously marked seasonal/historical songs (like *Carol of the Bells* with 706k all-time views) as trending despite 0 purchases and no recent momentum.
-  - Final Solution: Replaced all-time metrics with 30-day velocity:
-    - View growth from `snapshots` table: `MAX(views) - MIN(views)` in the last 30 days.
-    - Purchases from `purchases` table in the last 30 days.
-    - Qualification requirement: Song must have >= 1 purchase in the last 30 days OR viral view explosion (>= 50,000 views in 30 days).
-    - Top eligible songs (max 3) receive `trending = True`.
+- **Seasonal Holiday Track Suppression & Catalog Sorting Alignment**:
+  - Out of season holiday tracks (*Carol of the Bells*, *Silent Night*) had accumulated views from the previous winter. Without seasonal calendar gating, they can monopolize trending spots outside Christmas despite 0 sales.
+  - Fix: Added holiday keyword check (`carol of the bells`, `silent night`, `god rest ye merry`, `we wish you a merry xmas`). Outside of months 11 and 12, holiday arrangements require at least 1 recent purchase to trend.
+  - Result: Active non-holiday viral songs (*Golden Brown* with +18.4k views in 30d) qualify for the #3 spot alongside *River Flows in You* and *Sweetest Rain*.
+  - Frontend now displays all 3 trending cards on desktop with flame badges (`md:grid-cols-3`) and top 2 on mobile (`grid-cols-2`), with sorting on `/sheets` defaulting to `trending`.
+
 
 
 
