@@ -2743,3 +2743,127 @@ def get_oauth_code(state: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+
+class OutboundEventRequest(BaseModel):
+    target: Optional[str] = None
+    source: Optional[str] = "studio_page"
+    partner: Optional[str] = None
+    partnerId: Optional[str] = None
+    partner_id: Optional[str] = None
+    placement: Optional[str] = None
+
+    def get_target(self) -> str:
+        return self.target or self.partner or self.partnerId or self.partner_id or "unknown"
+
+    def get_source(self) -> str:
+        return self.source or self.placement or "studio_page"
+
+
+@router.post("/api/events/outbound")
+@router.post("/api/public/affiliate/click")
+def record_outbound_click(req: OutboundEventRequest, request: Request):
+    """
+    Logs an outbound recommendation link click from the website (/studio or post-purchase page)
+    to analytics.db for internal performance tracking.
+    Uses neutral naming (/api/events/outbound) to avoid client-side adblock / Brave Shields false positives.
+    """
+    try:
+        db_file = Path(__file__).resolve().parent / "analytics.db"
+        conn = sqlite3.connect(str(db_file), timeout=10.0)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS affiliate_clicks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                partner TEXT NOT NULL,
+                placement TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip TEXT
+            )
+        """)
+        client_ip = request.client.host if request.client else "unknown"
+        target = req.get_target()
+        source = req.get_source()
+        c.execute(
+            "INSERT INTO affiliate_clicks (partner, placement, ip) VALUES (?, ?, ?)",
+            (target, source, client_ip)
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "success", "target": target, "source": source, "partner": target, "placement": source}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+@router.get("/api/events/outbound/stats")
+@router.get("/api/public/affiliate/stats")
+def get_affiliate_stats():
+    """
+    Aggregates affiliate outbound click metrics from analytics.db for the internal dashboard.
+    """
+    try:
+        db_file = Path(__file__).resolve().parent / "analytics.db"
+        conn = sqlite3.connect(str(db_file), timeout=10.0)
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS affiliate_clicks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                partner TEXT NOT NULL,
+                placement TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ip TEXT
+            )
+        """)
+
+        # Total clicks all-time
+        c.execute("SELECT COUNT(*) FROM affiliate_clicks")
+        total_clicks = c.fetchone()[0] or 0
+
+        # Clicks in the last 30 days
+        c.execute("SELECT COUNT(*) FROM affiliate_clicks WHERE created_at >= datetime('now', '-30 days')")
+        clicks_30d = c.fetchone()[0] or 0
+
+        # Top partner
+        c.execute("SELECT partner, COUNT(*) as cnt FROM affiliate_clicks GROUP BY partner ORDER BY cnt DESC LIMIT 1")
+        top_partner_row = c.fetchone()
+        top_partner = top_partner_row[0] if top_partner_row else "-"
+
+        # Top placement
+        c.execute("SELECT placement, COUNT(*) as cnt FROM affiliate_clicks GROUP BY placement ORDER BY cnt DESC LIMIT 1")
+        top_placement_row = c.fetchone()
+        top_placement = top_placement_row[0] if top_placement_row else "-"
+
+        # Detailed breakdown per partner
+        c.execute("""
+            SELECT 
+                partner,
+                COUNT(*) as total_clicks,
+                SUM(CASE WHEN placement = 'studio_page' THEN 1 ELSE 0 END) as studio_clicks,
+                SUM(CASE WHEN placement = 'download_page' THEN 1 ELSE 0 END) as download_clicks,
+                MAX(created_at) as latest_click
+            FROM affiliate_clicks
+            GROUP BY partner
+        """)
+        rows = c.fetchall()
+        partner_stats = {}
+        for r in rows:
+            partner_stats[r[0]] = {
+                "total": r[1],
+                "studio_page": r[2],
+                "download_page": r[3],
+                "latest_click": r[4]
+            }
+
+        conn.close()
+        return {
+            "status": "success",
+            "kpi": {
+                "total_clicks": total_clicks,
+                "clicks_30d": clicks_30d,
+                "top_partner": top_partner,
+                "top_placement": top_placement
+            },
+            "partner_stats": partner_stats
+        }
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+

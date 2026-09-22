@@ -527,7 +527,14 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - *Root Cause:* Hook/teaser uploads were appending `" Teaser"` to labels and ntfy notifications. AI hashtags were bypassed when `ai_captions_enabled: false`, and `content_brain.py` prompt had rigid static tags.
   - *Fix:* Replaced `" Teaser"` with `" (Best Part)"` across all platforms and ntfy push headers. Decoupled `ai_hashtags_enabled` to generate and inject dynamic song/genre-specific tags into templates even when standard captions are used. Updated models to `gemini-2.5-flash` and `gemini-flash-latest`.
 
+---
 
-
-
-
+### 2026-09-23: Adblock Evasion, Neutral Endpoint Routing & PUBLIC_ROUTES Whitelisting
+- **Adblock Heuristics Blocking Outbound Logging:**
+  - Endpoints containing `affiliate`, `track-click`, or `ad-click` trigger network-level blocking (`ERR_BLOCKED_BY_CLIENT`) in Brave Shields, uBlock Origin, and AdGuard for 40–50% of visitors.
+  - Solution: Expose neutral `POST /api/events/outbound` and `GET /api/events/outbound/stats` alongside legacy `/api/public/affiliate/*` routes.
+- **Security Middleware Trap for New Public Endpoints:**
+  - On Linux/Production, `main.py` enforces a `security_middleware` checking `X-Meloscribe-Key` unless the route prefix is listed in `PUBLIC_ROUTES`.
+  - Introducing any new public endpoint under a new root path (such as `/api/events`) requires adding `"/api/events"` to `PUBLIC_ROUTES` in `main.py`; otherwise, valid public client beacons will be rejected with 500/403.
+- **Flexible Payload Schema:**
+  - `OutboundEventRequest` accepts both `{ target, source }` and `{ partner, placement, partnerId }` seamlessly mapping to `affiliate_clicks` in `analytics.db`.

@@ -72,6 +72,7 @@ PUBLIC_ROUTES = [
     "/callback",
     "/pinterest-callback",
     "/api/oauth/code",
+    "/api/events",
     "/public",
     "/ws/logs"
 ]

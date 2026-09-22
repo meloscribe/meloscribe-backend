@@ -216,6 +216,12 @@ git add . && git commit -m "..." && git push
 
 
 
+- [x] Neutral Outbound Click Tracking & Adblock Evasion API:
+  - `routes_public.py`: Neuer neutraler Endpunkt `POST /api/events/outbound` und Metrik-Aggregation `GET /api/events/outbound/stats` (mit Legacy-Aliasing auf `/api/public/affiliate/*`) implementiert. Verhindert clientseitiges Blockieren durch Brave Shields / uBlock Origin (`net::ERR_BLOCKED_BY_CLIENT`).
+  - `OutboundEventRequest`: Unterstützt flexibel `{ target, source }`, `{ partner, placement }` sowie `partnerId`-Aliase. Speichert Events mit Client-IP und Zeitstempel in `affiliate_clicks` in `analytics.db`.
+  - `main.py`: `"/api/events"` in die `PUBLIC_ROUTES`-Whitelist des `security_middleware` aufgenommen, damit Requests auch in Linux/Production ohne `X-Meloscribe-Key` zugelassen werden.
+  - End-to-End über `requests` und PowerShell verifiziert (`200 OK`, aggregierte KPI- und Partner-Statistiken fehlerfrei).
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.
