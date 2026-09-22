@@ -329,14 +329,24 @@ def fetch_recent_data():
         except Exception as err:
             print(f"[AI Agent] Warning: Failed to fetch live sales from VM: {err}")
 
-        # 5. Live Upcoming Upload Queue from VM queue.db
+        # 5. Live Upcoming Upload Queue from VM queue.db (pending active queue + recent errors)
+        recent_upload_errors = []
         if os.path.exists(SSH_KEY):
             try:
-                py_q = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT id, song, author, mode, schedule_time, status, error, attempts, format FROM upload_queue WHERE status != \\'completed\\' ORDER BY schedule_time ASC LIMIT 15').fetchall()]))"
+                py_q = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT id, song, author, mode, schedule_time, status, attempts, format FROM upload_queue WHERE status = \\'pending\\' ORDER BY schedule_time ASC LIMIT 15').fetchall()]))"
                 cmd = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 ubuntu@{SERVER_IP} "python3 -c \\"{py_q}\\" 2>/dev/null"'
                 res = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=6)
                 if res.returncode == 0 and res.stdout.strip():
                     upcoming_upload_queue = json.loads(res.stdout.strip())
+            except Exception as err:
+                pass
+
+            try:
+                py_err = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT id, song, mode, schedule_time, status, error FROM upload_queue WHERE status = \\'failed\\' AND datetime(schedule_time) >= datetime(\\'now\\', \\'-2 days\\') ORDER BY schedule_time DESC LIMIT 5').fetchall()]))"
+                cmd_err = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=4 ubuntu@{SERVER_IP} "python3 -c \\"{py_err}\\" 2>/dev/null"'
+                res_err = subprocess.run(cmd_err, shell=True, capture_output=True, text=True, timeout=6)
+                if res_err.returncode == 0 and res_err.stdout.strip():
+                    recent_upload_errors = json.loads(res_err.stdout.strip())
             except Exception as err:
                 pass
 
@@ -363,6 +373,7 @@ def fetch_recent_data():
         "current_todo_list": todos,
         "community_wishlist": community_wishlist,
         "upcoming_upload_queue": upcoming_upload_queue,
+        "recent_upload_errors": recent_upload_errors,
         "dismissed_suggestions": dismissed,
         "purchases_stats": purchases_stats,
         "revenue_summary": revenue_summary,
