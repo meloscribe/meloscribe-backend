@@ -1996,24 +1996,31 @@ def annotate_trending_metrics(songs: list, db_file: Path) -> list:
                 key = norm_title(sname)
                 views_map[key] = views_map.get(key, 0) + (vcnt or 0)
 
+        now = datetime.now()
+        is_holiday_season = now.month in (11, 12)
+        holiday_keywords = ["carol of the bells", "silent night", "god rest ye merry", "we wish you a merry xmas"]
+
         # Score and qualify catalog items
         catalog_candidates = []
         for s in songs:
             if s.get("id") == "global_settings" or s.get("hidden"):
                 continue
+            title_lower = (s.get("title") or "").lower()
             t_key = norm_title(s.get("title", ""))
             p_cnt = purchases_map.get(t_key, 0)
             v_cnt = views_map.get(t_key, 0)
             
-            score = (p_cnt * 100_000) + v_cnt
-            # Require at least 1 recent purchase or viral momentum (>= 50,000 views in 30 days)
-            is_eligible = (p_cnt > 0) or (v_cnt >= 50_000)
-            if is_eligible:
-                catalog_candidates.append((s.get("id"), score))
+            # Holiday songs require actual purchases if outside of Nov/Dec
+            is_holiday_track = any(kw in title_lower for kw in holiday_keywords)
+            if is_holiday_track and not is_holiday_season and p_cnt == 0:
+                continue
 
-        # Determine top eligible IDs (max 3)
+            score = (p_cnt * 100_000) + v_cnt
+            catalog_candidates.append((s.get("id"), score))
+
+        # Determine top 3 eligible IDs with score > 0
         catalog_candidates.sort(key=lambda x: x[1], reverse=True)
-        top_trending_ids = {item[0] for item in catalog_candidates[:3]}
+        top_trending_ids = {item[0] for item in catalog_candidates[:3] if item[1] > 0}
 
         for s in songs:
             is_trending = s.get("id") in top_trending_ids
