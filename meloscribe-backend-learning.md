@@ -523,6 +523,10 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Fix: Added holiday keyword check (`carol of the bells`, `silent night`, `god rest ye merry`, `we wish you a merry xmas`). Outside of months 11 and 12, holiday arrangements require at least 1 recent purchase to trend.
   - Result: Active non-holiday viral songs (*Golden Brown* with +18.4k views in 30d) qualify for the #3 spot alongside *River Flows in You* and *Sweetest Rain*.
   - Frontend now displays all 3 trending cards on desktop with flame badges (`md:grid-cols-3`) and top 2 on mobile (`grid-cols-2`), with sorting on `/sheets` defaulting to `trending`.
+- **Teaser vs Best Part Labeling & Dynamic AI Hashtags:**
+  - *Root Cause:* Hook/teaser uploads were appending `" Teaser"` to labels and ntfy notifications. AI hashtags were bypassed when `ai_captions_enabled: false`, and `content_brain.py` prompt had rigid static tags.
+  - *Fix:* Replaced `" Teaser"` with `" (Best Part)"` across all platforms and ntfy push headers. Decoupled `ai_hashtags_enabled` to generate and inject dynamic song/genre-specific tags into templates even when standard captions are used. Updated models to `gemini-2.5-flash` and `gemini-flash-latest`.
+
 
 
 
