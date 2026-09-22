@@ -39,8 +39,8 @@ def get_server_api_key():
 GEMINI_API_KEY = get_gemini_key()
 genai.configure(api_key=GEMINI_API_KEY)
 
-MODEL_NAME = 'models/gemini-3.8-flash'
-FALLBACK_MODEL_NAME = 'models/gemini-2.5-flash'
+MODEL_NAME = 'models/gemini-2.5-flash'
+FALLBACK_MODEL_NAME = 'models/gemini-flash-latest'
 model = genai.GenerativeModel(MODEL_NAME)
 fallback_model = genai.GenerativeModel(FALLBACK_MODEL_NAME)
 

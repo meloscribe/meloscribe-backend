@@ -104,7 +104,7 @@ def get_static_fallback(
     if format_type == "recycled":
         subtitle = author.strip() if (author and author.strip()) else clean_song
     elif format_type == "hook_teaser":
-        subtitle = f"{clean_song} (Hook)"
+        subtitle = f"{clean_song} (Best Part)"
     elif format_type == "slow_tutorial":
         subtitle = "Slow practice speed"
     elif format_type in ("easy_normal", "easy_slow"):
@@ -117,7 +117,8 @@ def get_static_fallback(
     
     # 3. Hashtags Fallback
     song_clean_tag = re.sub(r'[^a-zA-Z0-9]', '', clean_song).lower()
-    hashtags = f"#piano #pianocover #pianotutorial #musictok #{song_clean_tag}"
+    author_clean_tag = re.sub(r'[^a-zA-Z0-9]', '', author).lower() if author else "pianist"
+    hashtags = f"#{song_clean_tag} #{author_clean_tag} #pianotok #pianocover #pianotutorial #musictok #piano"
     
     # 4. Outro Fallback (Strictly Rate this 1-10 👇)
     outro = "Rate this 1-10 👇"
@@ -179,10 +180,10 @@ def generate_content_copy(
     settings = load_settings()
     fallback = get_static_fallback(format_type, song_name, author, platform, segment_type, settings)
     
-    ai_sub = settings.get("ai_subtitles_enabled", True) or force_ai
-    ai_cap = settings.get("ai_captions_enabled", True) or force_ai
+    ai_sub = settings.get("ai_subtitles_enabled", False) or force_ai
+    ai_cap = settings.get("ai_captions_enabled", False) or force_ai
     ai_hash = settings.get("ai_hashtags_enabled", True) or force_ai
-    ai_outro = settings.get("ai_outro_enabled", True) or force_ai
+    ai_outro = settings.get("ai_outro_enabled", False) or force_ai
     
     if not (ai_sub or ai_cap or ai_hash or ai_outro):
         return fallback
@@ -215,7 +216,7 @@ Folgende Wörter und Phrasen sind ABSOLUT VERBOTEN. Wenn dein Output eines diese
 
 FEW-SHOT GUIDELINES (GOOD VS BAD):
 ❌ BAD Subtitle: "Original phrasing flow" | "Dynamic piano touch" | "Authentic feel"
-✅ GOOD Subtitle: "{song_name} (Chorus)" | "{guidance['good_sub']}" | "{guidance['good_sub_alt']}"
+✅ GOOD Subtitle: "{song_name} (Best Part)" | "{guidance['good_sub']}" | "{guidance['good_sub_alt']}"
 
 ❌ BAD Caption: "Bringing out the authentic feel of {song_name} with precise original phrasing and melodic flow..."
 ✅ GOOD Caption: "{guidance['good_cap']}"
@@ -227,7 +228,7 @@ REGELN FÜR DIE AUSGABE:
 1. SUBTITLE (9:16 Video On-Screen Hook):
    - Maximal 2 bis 4 Worte!
    - Visueller Anker für 0,3s Scroll-Stopp.
-   - Entweder der Song-Part (z.B. "{song_name} (Chorus)") oder eine spieltechnische Beobachtung (z.B. "{guidance['good_sub']}").
+   - Entweder der Song-Part (z.B. "{song_name} (Best Part)") oder eine spieltechnische Beobachtung (z.B. "{guidance['good_sub']}").
 2. CAPTION:
    - 1 bis maximal 2 kurze Sätze aus der Perspektive des Pianisten (Spielgefühl, linke Hand, Tempo, Drop).
    - MUSS immer mit "Sheets in bio." enden (oder "Sheets in bio if you want to learn it.").
@@ -235,7 +236,11 @@ REGELN FÜR DIE AUSGABE:
 3. OUTRO:
    - Immer exakt: "Rate this 1-10 👇" (OHNE "or suggest a song").
 4. HASHTAGS:
-   - 4-6 relevante Hashtags: #{clean_song_tag} #{clean_author_tag} #pianocover #pianotutorial #musictok #piano
+   - 5 bis 8 dynamische, hochgradig zielgerichtete Hashtags passend zu DIESEM Song und Genre.
+   - Song & Künstler Tags: #{clean_song_tag} #{clean_author_tag}
+   - Passende Genre-, Mood- oder Soundtrack/Pop-Tags für diesen konkreten Track (z.B. bei Melancholie/Indie wie 'In This Shirt': #indie #melancholy #pianoversion #cinematic; bei Soundtracks wie 'Interstellar': #filmmusic #soundtrack #hanszimmer; bei Pop-Hits: #popcover #pianotutorial)
+   - 2-3 virale Piano-Community-Tags: #pianotok #pianocover #pianotutorial #piano #musictok
+   - WICHTIG: KEINE stumpfe Wiederholung von immer denselben 4 Standard-Tags für jeden Song, sondern dynamisch und passend für '{song_name}'!
 
 Antworte AUSSCHLIESSLICH im folgenden JSON-Format ohne Markdown-Codeblöcke:
 {{
@@ -248,7 +253,7 @@ Antworte AUSSCHLIESSLICH im folgenden JSON-Format ohne Markdown-Codeblöcke:
 
     genai.configure(api_key=api_key)
     res_text = ""
-    for model_name in ['models/gemini-3.8-flash', 'models/gemini-2.5-flash']:
+    for model_name in ['models/gemini-2.5-flash', 'models/gemini-flash-latest', 'models/gemini-2.5-flash-lite']:
         try:
             m = genai.GenerativeModel(model_name)
             resp = m.generate_content(prompt)

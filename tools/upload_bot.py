@@ -1741,7 +1741,7 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
     if is_tut:
         label_parts.append(" Tutorial")
     elif is_teaser:
-        label_parts.append(" Teaser")
+        label_parts.append(" (Best Part)")
     label = "".join(label_parts)
     
     prefix = ""
@@ -1757,20 +1757,23 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
         sys.exit(1)
 
     # 2. Build Caption Text
-    use_ai_caption = settings.get("ai_captions_enabled", True)
+    use_ai_caption = settings.get("ai_captions_enabled", False)
+    use_ai_hashtags = settings.get("ai_hashtags_enabled", True)
     full_title = ""
-    if use_ai_caption:
+    ai_res = {}
+    if use_ai_caption or use_ai_hashtags:
         try:
             backend_dir = os.path.join(tools_dir, "meloscribe", "backend")
             if backend_dir not in sys.path:
                 sys.path.append(backend_dir)
             from content_brain import generate_content_copy
             f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
-            c_res = generate_content_copy(f_type, song_name, author_name, platform="tiktok")
-            if c_res.get("caption"):
-                full_title = f"{c_res['caption']}\n\n{c_res.get('hashtags', '')}".strip()
+            ai_res = generate_content_copy(f_type, song_name, author_name, platform="tiktok")
         except Exception as ex_ai:
             print(f"[UploadBot] AI Caption fallback due to: {ex_ai}")
+
+    if use_ai_caption and ai_res.get("caption"):
+        full_title = f"{ai_res['caption']}\n\n{ai_res.get('hashtags', '')}".strip()
 
     if not full_title:
         tiktok_tpl = settings.get("desc_template_tiktok") or (
@@ -1783,6 +1786,11 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
         if is_tut:
             tiktok_tpl = tiktok_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         full_title = format_description_template(tiktok_tpl, song_name, author_name, label)
+        
+        # If AI hashtags are enabled, replace static hashtags with dynamic AI hashtags
+        if use_ai_hashtags and ai_res.get("hashtags"):
+            full_title = re.sub(r'(?:\s*#[a-zA-Z0-9_]+)+\s*$', '', full_title).strip()
+            full_title = f"{full_title}\n\n{ai_res['hashtags']}".strip()
     
     # Resolve cover image path with full fallbacks (including hook.jpg for Teasers)
     covers_dir = settings.get("covers_dir")
@@ -1804,10 +1812,19 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
                 image_path = cand_path
                 break
 
+    # Build clear display title for ntfy (e.g. "Song (Best Part)" instead of "Song Teaser")
+    ntfy_song_title = base_song
+    if is_easy and not ntfy_song_title.lower().endswith(" easy"):
+        ntfy_song_title += " Easy"
+    if is_tut:
+        ntfy_song_title += " Tutorial"
+    elif is_teaser:
+        ntfy_song_title += " (Best Part)"
+
     # Send description and cover image to user's phone via ntfy
-    print("Sending caption, hashtags, and cover image to ntfy...")
+    print(f"Sending caption, hashtags, and cover image to ntfy for '{ntfy_song_title}'...")
     send_ntfy_notification(
-        title=f"TikTok: {song_name}",
+        title=f"TikTok: {ntfy_song_title}",
         body=full_title,
         image_path=image_path
     )
@@ -2172,7 +2189,7 @@ if __name__ == "__main__":
         if is_tut:
             label_parts.append(" Tutorial")
         elif is_teaser:
-            label_parts.append(" Teaser")
+            label_parts.append(" (Best Part)")
         label = "".join(label_parts)
         
         suffix = ""
@@ -2229,6 +2246,17 @@ if __name__ == "__main__":
         if is_tut:
             yt_tpl = yt_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(yt_tpl, args.song, args.author, label, preserve_links=True)
+        if settings.get("ai_hashtags_enabled", True):
+            try:
+                from content_brain import generate_content_copy
+                f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
+                yt_ai = generate_content_copy(f_type, args.song, args.author, platform="youtube")
+                if yt_ai.get("hashtags"):
+                    desc = re.sub(r'(?:\s*#[a-zA-Z0-9_]+)+\s*$', '', desc).strip()
+                    desc = f"{desc}\n\n{yt_ai['hashtags']}".strip()
+            except Exception as e_ai:
+                print(f"[YouTube Uploader] AI Hashtags warning: {e_ai}")
+
         tags = ["piano", "tutorial", "synthesia", "cover", base_song, args.author, "music", "piano cover"]
         yt_url = post_video(video_path, f"{base_song} - {args.author}{label} | Piano Cover", desc, tags,
                    publish_at_dt=dt_obj, privacy="public", format=format_mode,
@@ -2270,7 +2298,7 @@ if __name__ == "__main__":
         if is_tut:
             label_parts.append(" Tutorial")
         elif is_teaser:
-            label_parts.append(" Teaser")
+            label_parts.append(" (Best Part)")
         label = "".join(label_parts)
         
         suffix = ""
@@ -2289,6 +2317,17 @@ if __name__ == "__main__":
         if is_tut:
             ig_tpl = ig_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         caption = format_description_template(ig_tpl, args.song, args.author, label)
+        if settings.get("ai_hashtags_enabled", True):
+            try:
+                from content_brain import generate_content_copy
+                f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
+                ig_ai = generate_content_copy(f_type, args.song, args.author, platform="instagram")
+                if ig_ai.get("hashtags"):
+                    caption = re.sub(r'(?:\s*#[a-zA-Z0-9_]+)+\s*$', '', caption).strip()
+                    caption = f"{caption}\n\n{ig_ai['hashtags']}".strip()
+            except Exception as e_ai:
+                print(f"[Instagram Uploader] AI Hashtags warning: {e_ai}")
+
         success = post_reel(video_path, caption, publish_at_dt=dt_obj)
         if not success:
             sys.exit(1)
@@ -2323,7 +2362,7 @@ if __name__ == "__main__":
         if is_tut:
             label_parts.append(" Tutorial")
         elif is_teaser:
-            label_parts.append(" Teaser")
+            label_parts.append(" (Best Part)")
         label = "".join(label_parts)
         
         suffix = ""
@@ -2395,6 +2434,16 @@ if __name__ == "__main__":
         if is_tut:
             fb_tpl = fb_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         desc = format_description_template(fb_tpl, args.song, args.author, label, medium_arg='reel' if format_mode == "viral_part" else 'video', preserve_links=preserve_fb_links)
+        if settings.get("ai_hashtags_enabled", True):
+            try:
+                from content_brain import generate_content_copy
+                f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
+                fb_ai = generate_content_copy(f_type, args.song, args.author, platform="facebook")
+                if fb_ai.get("hashtags"):
+                    desc = re.sub(r'(?:\s*#[a-zA-Z0-9_]+)+\s*$', '', desc).strip()
+                    desc = f"{desc}\n\n{fb_ai['hashtags']}".strip()
+            except Exception as e_ai:
+                print(f"[Facebook Uploader] AI Hashtags warning: {e_ai}")
 
         success = post_video(video_path, f"{base_song} - {args.author}{label}", desc,
                    format=format_mode, thumbnail_path=thumbnail_path,
@@ -2424,7 +2473,7 @@ if __name__ == "__main__":
         if is_tut:
             label_parts.append(" Tutorial")
         elif is_teaser:
-            label_parts.append(" Teaser")
+            label_parts.append(" (Best Part)")
         label = "".join(label_parts)
         
         suffix = ""
@@ -2443,6 +2492,16 @@ if __name__ == "__main__":
         if is_tut:
             th_tpl = th_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
         caption = format_description_template(th_tpl, args.song, args.author, label)
+        if settings.get("ai_hashtags_enabled", True):
+            try:
+                from content_brain import generate_content_copy
+                f_type = "slow_tutorial" if is_tut else ("hook_teaser" if is_teaser else "normal")
+                th_ai = generate_content_copy(f_type, args.song, args.author, platform="threads")
+                if th_ai.get("hashtags"):
+                    caption = re.sub(r'(?:\s*#[a-zA-Z0-9_]+)+\s*$', '', caption).strip()
+                    caption = f"{caption}\n\n{th_ai['hashtags']}".strip()
+            except Exception as e_ai:
+                print(f"[Threads Uploader] AI Hashtags warning: {e_ai}")
         
         # Build direct sheet music link & comment text
         slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
