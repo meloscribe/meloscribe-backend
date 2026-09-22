@@ -170,11 +170,12 @@ EMAIL_TEMPLATES = {
         "heading_gift": "🎁 A Music Gift for You!",
         "intro_gift": "Hey {buyer_name}!",
         "intro_purchase": "Hey!",
-        "body_purchase": "Thank you so much for your purchase and supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready.",
-        "body_gift": "You have received a learning package for <strong>{song_name}</strong> as a gift!",
-        "action": "Click the button below to download your sheet music (PDF), MIDI files, and practice video tutorials:",
+        "body_purchase": "Thanks for supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready to practice:",
+        "body_gift": "You have received a learning package for <strong>{song_name}</strong> as a gift – ready to practice:",
+        "action": "",
         "button": "Download Learning Package",
-        "footer": "This download link is permanent. You can access it anytime to download updates or get your files.",
+        "footer": "This download link is permanent – you can access it anytime.",
+        "ps": "PS: Any issues with the files, or ideas to improve? Just hit reply – every feedback helps!",
         "happy_practicing": "Happy practicing,",
         "help_text": "Need help? Reply directly to this email or visit"
     },
@@ -184,12 +185,13 @@ EMAIL_TEMPLATES = {
         "heading_purchase": "🎹 Deine Klaviernoten sind bereit!",
         "heading_gift": "🎁 Ein Musikgeschenk für dich!",
         "intro_gift": "Hallo {buyer_name}!",
-        "intro_purchase": "Hallo!",
-        "body_purchase": "Vielen Dank für deinen Einkauf und die Unterstützung meiner Arrangements! Dein Lernpaket für <strong>{song_name}</strong> ist bereit.",
-        "body_gift": "Du hast ein Lernpaket für <strong>{song_name}</strong> als Geschenk erhalten!",
-        "action": "Klicke auf den Button unten, um deine Klaviernoten (PDF), MIDI-Dateien und Video-Tutorials herunterzuladen:",
+        "intro_purchase": "Hey!",
+        "body_purchase": "Danke für die Unterstützung meiner Arrangements! Dein Lernpaket für <strong>{song_name}</strong> steht bereit zum Üben:",
+        "body_gift": "Du hast ein Lernpaket für <strong>{song_name}</strong> als Geschenk erhalten – bereit zum Üben:",
+        "action": "",
         "button": "Lernpaket herunterladen",
-        "footer": "Dieser Download-Link ist dauerhaft gültig. Du kannst ihn jederzeit aufrufen, um deine Dateien herunterzuladen.",
+        "footer": "Dieser Download-Link ist dauerhaft gültig – du kannst jederzeit darauf zugreifen.",
+        "ps": "PS: Probleme mit den Dateien oder Ideen zur Verbesserung? Antworte einfach auf diese Mail – jedes Feedback hilft!",
         "happy_practicing": "Viel Spaß beim Üben,",
         "help_text": "Brauchst du Hilfe? Antworte direkt auf diese E-Mail oder besuche"
     },
@@ -200,11 +202,12 @@ EMAIL_TEMPLATES = {
         "heading_gift": "🎁 Un cadeau musical pour vous !",
         "intro_gift": "Bonjour {buyer_name} !",
         "intro_purchase": "Bonjour !",
-        "body_purchase": "Merci beaucoup pour votre achat et pour votre soutien à mes arrangements ! Votre pack musical pour <strong>{song_name}</strong> est prêt.",
-        "body_gift": "Vous avez reçu un pack musical pour <strong>{song_name}</strong> en cadeau !",
-        "action": "Cliquez sur le bouton ci-dessous pour télécharger vos partitions (PDF), fichiers MIDI et tutoriels vidéo :",
-        "button": "Télécharger le pack musical",
-        "footer": "Ce lien de téléchargement est permanent. Vous pouvez y accéder à tout moment pour récupérer vos fichiers.",
+        "body_purchase": "Merci de soutenir mes arrangements ! Votre pack d'apprentissage pour <strong>{song_name}</strong> est prêt pour la pratique :",
+        "body_gift": "Vous avez reçu un pack d'apprentissage pour <strong>{song_name}</strong> en cadeau – prêt pour la pratique :",
+        "action": "",
+        "button": "Télécharger le pack d'apprentissage",
+        "footer": "Ce lien de téléchargement est permanent – vous pouvez y accéder à tout moment.",
+        "ps": "PS : Un problème avec les fichiers ou une idée d'amélioration ? Répondez simplement à cet e-mail – chaque retour compte !",
         "happy_practicing": "Bonne pratique,",
         "help_text": "Besoin d'aide ? Répondez directement à cet e-mail ou visitez"
     },
@@ -215,26 +218,28 @@ EMAIL_TEMPLATES = {
         "heading_gift": "🎁 ¡Un regalo musical para ti!",
         "intro_gift": "¡Hola {buyer_name}!",
         "intro_purchase": "¡Hola!",
-        "body_purchase": "¡Muchas gracias por tu compra y por apoyar mis arreglos! Tu paquete de música para <strong>{song_name}</strong> está listo.",
-        "body_gift": "¡Has recibido un paquete de música para <strong>{song_name}</strong> como regalo!",
-        "action": "Haz clic en el botón de abajo para descargar tus partituras (PDF), archivos MIDI y tutoriales en video:",
-        "button": "Descargar paquete de música",
-        "footer": "Este enlace de descarga es permanente. Puedes acceder en cualquier momento para obtener tus archivos.",
+        "body_purchase": "¡Gracias por apoyar mis arreglos! Tu paquete de aprendizaje para <strong>{song_name}</strong> está listo para practicar:",
+        "body_gift": "¡Has recibido un paquete de aprendizaje para <strong>{song_name}</strong> como regalo – listo para practicar:",
+        "action": "",
+        "button": "Descargar paquete de aprendizaje",
+        "footer": "Este enlace de descarga es permanente – puedes acceder en cualquier momento.",
+        "ps": "PD: ¿Algún problema con los archivos o ideas para mejorar? Solo responde a este correo – ¡cada comentario ayuda!",
         "happy_practicing": "¡Disfruta practicando!,",
         "help_text": "¿Necesitas ayuda? Responde directamente a este correo o visita"
     },
     "it": {
         "purchase_subject": "🎹 Il tuo pacchetto musicale per {song_name} è pronto!",
-        "gift_subject": "🎁 Un regalo musicale per te: spartiti di {song_name}!",
+        "gift_subject": "🎁 Un regalo musical per te: spartiti di {song_name}!",
         "heading_purchase": "🎹 I tuoi spartiti sono pronti!",
-        "heading_gift": "🎁 Un regalo musicale per te!",
+        "heading_gift": "🎁 Un regalo musical per te!",
         "intro_gift": "Ciao {buyer_name}!",
         "intro_purchase": "Ciao!",
-        "body_purchase": "Grazie mille per il tuo acquisto e per aver supportato i miei arrangiamenti! Il tuo pacchetto musicale per <strong>{song_name}</strong> è pronto.",
-        "body_gift": "Hai ricevuto un pacchetto musicale per <strong>{song_name}</strong> in regalo!",
-        "action": "Clicca sul pulsante qui sotto per scaricare i tuoi spartiti (PDF), i file MIDI e i tutorial video:",
-        "button": "Scarica pacchetto musicale",
-        "footer": "Questo link di download è permanente. Puoi accedervi in qualsiasi momento per scaricare i tuoi file.",
+        "body_purchase": "Grazie per supportare i miei arrangiamenti! Il tuo pacchetto di apprendimento per <strong>{song_name}</strong> è pronto per esercitarti:",
+        "body_gift": "Hai ricevuto un pacchetto di apprendimento per <strong>{song_name}</strong> in regalo – pronto per esercitarti:",
+        "action": "",
+        "button": "Scarica pacchetto di apprendimento",
+        "footer": "Questo link di download è permanente – puoi accedervi in qualsiasi momento.",
+        "ps": "PS: Qualche problema con i file o idee per migliorare? Rispondi pure a questa email – ogni feedback è utile!",
         "happy_practicing": "Buon esercizio,",
         "help_text": "Hai bisogno di aiuto? Rispondi direttamente a questa email o visita"
     }
@@ -269,30 +274,27 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 32px; background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 24px 16px;">
-    <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: collapse;">
-      <tr>
-        <td style="font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 32px; font-weight: 900; color: #00f5ff; letter-spacing: 3px; text-transform: lowercase; padding: 0; text-align: right;">melo</td>
-        <td style="font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 32px; font-weight: 900; color: #ff2d92; letter-spacing: 3px; text-transform: lowercase; padding: 0; text-align: left;">scribe</td>
-      </tr>
-    </table>
-    <p style="color: #888899; font-size: 12px; margin: 12px 0 0 0; letter-spacing: 1px; font-style: italic;">Arranged by ear. Played by you.</p>
-  </div>
   <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
-    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 16px; font-weight: 700; text-align: center;">{heading}</h2>
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">{intro}</p>
-    <p style="color: #b0b0c0; line-height: 1.8; font-size: 15px;">{body}</p>
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px;">{tpl["action"]}</p>
+    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 20px; font-weight: 700; text-align: center;">{heading}</h2>
+    <p style="color: #b0b0c0; line-height: 1.7; font-size: 15px; margin-top: 0; margin-bottom: 12px;">{intro}</p>
+    <p style="color: #b0b0c0; line-height: 1.7; font-size: 15px; margin-top: 0; margin-bottom: 24px;">{body}</p>
     
-    <div style="text-align: center; margin: 28px 0;">
+    <div style="text-align: center; margin: 24px 0 16px 0;">
       <a href="{download_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">{tpl["button"]}</a>
     </div>
     
-    <p style="color: #888; font-size: 13px; text-align: center;">
+    <p style="color: #888899; font-size: 13px; text-align: center; margin-top: 0; margin-bottom: 28px;">
       {tpl["footer"]}
     </p>
     
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px;">{tpl["happy_practicing"]}<br>meloscribe</p>
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 14px; margin-top: 0; margin-bottom: 24px;">
+      {tpl["ps"]}
+    </p>
+    
+    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px; margin-bottom: 0;">
+      {tpl["happy_practicing"]}<br><br>
+      meloscribe
+    </p>
   </div>
   <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
     {tpl["help_text"]} <a href="https://meloscribesheets.com" style="color: #00f5d4;">meloscribesheets.com</a>
@@ -301,19 +303,21 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
 </html>
 """
 
+    plain_body = body.replace("<strong>", "").replace("</strong>", "")
     text_body = f"""{heading}
 
 {intro}
 
-{body}
+{plain_body}
 
-{tpl["action"]}
-
-Download Sheet Music: {download_url}
+{download_url}
 
 {tpl["footer"]}
 
+{tpl["ps"]}
+
 {tpl["happy_practicing"]}
+
 meloscribe
 
 {tpl["help_text"]} https://meloscribesheets.com
@@ -326,6 +330,7 @@ meloscribe
             json={
                 "from": "meloscribe <info@meloscribe.dev>",
                 "to": [email],
+                "reply_to": "info@meloscribe.dev",
                 "subject": subject,
                 "html": html_body,
                 "text": text_body
@@ -1919,44 +1924,129 @@ def downvote_suggestion(sug_id: str, request: Request):
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
+def annotate_trending_metrics(songs: list, db_file: Path) -> list:
+    """
+    Computes data-driven trending metrics for songs using analytics.db:
+    Score = (purchases * 100_000) + social_views
+    Top 3 songs with score > 0 receive trending = True
+    """
+    if not db_file or not db_file.exists():
+        return songs
+
+    def norm_title(t: str) -> str:
+        if not t:
+            return ""
+        t = t.lower()
+        for sfx in [" (easy version)", " (easy)", " easy", " (original)", " original", " (all parts)", " (part 1)", " (part 2)"]:
+            if t.endswith(sfx):
+                t = t[:-len(sfx)].strip()
+        return "".join(c for c in t if c.isalnum() or c.isspace()).strip()
+
+    try:
+        conn = sqlite3.connect(str(db_file), timeout=5.0)
+        c = conn.cursor()
+        
+        # Real purchases
+        c.execute("""
+            SELECT song_name, COUNT(id) 
+            FROM purchases 
+            WHERE status NOT LIKE '%Refund%' AND status NOT LIKE '%refund%' AND status NOT LIKE '%failed%'
+            GROUP BY song_name
+        """)
+        purchases_raw = c.fetchall()
+        
+        # Social media views
+        c.execute("SELECT song_name, SUM(views) FROM videos WHERE views IS NOT NULL GROUP BY song_name")
+        views_raw = c.fetchall()
+        conn.close()
+
+        # Build normalized maps
+        purchases_map = {}
+        for sname, cnt in purchases_raw:
+            if sname:
+                key = norm_title(sname)
+                purchases_map[key] = purchases_map.get(key, 0) + (cnt or 0)
+                
+        views_map = {}
+        for sname, vcnt in views_raw:
+            if sname:
+                key = norm_title(sname)
+                views_map[key] = views_map.get(key, 0) + (vcnt or 0)
+
+        # Score catalog items
+        catalog_scores = []
+        for s in songs:
+            if s.get("id") == "global_settings" or s.get("hidden"):
+                continue
+            t_key = norm_title(s.get("title", ""))
+            p_cnt = purchases_map.get(t_key, 0)
+            v_cnt = views_map.get(t_key, 0)
+            
+            score = (p_cnt * 100_000) + v_cnt
+            catalog_scores.append((s.get("id"), score))
+
+        # Determine top 3 IDs with score > 0
+        catalog_scores.sort(key=lambda x: x[1], reverse=True)
+        top_trending_ids = {item[0] for item in catalog_scores[:3] if item[1] > 0}
+
+        for s in songs:
+            is_trending = s.get("id") in top_trending_ids
+            s["trending"] = is_trending
+            s["isTrending"] = is_trending
+
+    except Exception as e:
+        print(f"[Trending Ranking] Warning: failed to compute trending: {e}")
+
+    return songs
+
 @router.get("/api/public/songs")
 def get_public_songs(request: Request):
     if platform.system() == "Windows":
         try:
             r = requests.get(f"{VM_API_BASE}/api/public/songs", headers=get_proxy_headers(), timeout=5.0)
-            return JSONResponse(content=r.json(), status_code=r.status_code)
-        except Exception as e:
-            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
-    else:
-        try:
-            songs_path = Path(__file__).resolve().parent / "songs.json"
-            with open(songs_path, "r", encoding="utf-8") as f:
-                songs_list = json.load(f)
-                
-            filtered_songs = [s for s in songs_list if s.get("id") != "global_settings"]
-            currency = get_currency_from_request(request)
+            if r.status_code == 200:
+                return JSONResponse(content=r.json(), status_code=200)
+        except Exception:
+            pass # Fall back to local calculation if VM proxy is unavailable
             
-            for song in filtered_songs:
-                price = song.get("price", "")
-                if price and "€" in price:
-                    if currency == "usd":
-                        song["price"] = price.replace("€", "$")
-                    elif currency == "gbp":
-                        song["price"] = price.replace("€", "£")
-                easy_price = song.get("easyPrice", "")
-                if easy_price and "€" in easy_price:
-                    if currency == "usd":
-                        song["easyPrice"] = easy_price.replace("€", "$")
-                    elif currency == "gbp":
-                        song["easyPrice"] = easy_price.replace("€", "£")
-                        
-            return JSONResponse(
-                content=filtered_songs,
-                headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
-            )
-        except Exception as e:
-            print(f"[Public Songs] Error: {e}")
-            return JSONResponse(content={"error": str(e)}, status_code=500)
+    try:
+        if platform.system() == "Windows":
+            songs_path = Path(r"c:\Dev\meloscribe-frontend\website\src\data\songs.json")
+            if not songs_path.exists():
+                songs_path = Path(__file__).resolve().parent / "songs.json"
+        else:
+            songs_path = Path(__file__).resolve().parent / "songs.json"
+            
+        with open(songs_path, "r", encoding="utf-8") as f:
+            songs_list = json.load(f)
+            
+        filtered_songs = [s for s in songs_list if s.get("id") != "global_settings"]
+        
+        # Dynamically compute and inject trending flags based on purchases & views from analytics.db
+        annotate_trending_metrics(filtered_songs, db_path)
+        
+        currency = get_currency_from_request(request)
+        for song in filtered_songs:
+            price = song.get("price", "")
+            if price and "€" in price:
+                if currency == "usd":
+                    song["price"] = price.replace("€", "$")
+                elif currency == "gbp":
+                    song["price"] = price.replace("€", "£")
+            easy_price = song.get("easyPrice", "")
+            if easy_price and "€" in easy_price:
+                if currency == "usd":
+                    song["easyPrice"] = easy_price.replace("€", "$")
+                elif currency == "gbp":
+                    song["easyPrice"] = easy_price.replace("€", "£")
+                    
+        return JSONResponse(
+            content=filtered_songs,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+        )
+    except Exception as e:
+        print(f"[Public Songs] Error: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 # -------------------------------------------------------------------
 # Public Stats (Windows Proxy vs direct SQLite Server handlers)

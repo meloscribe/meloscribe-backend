@@ -501,3 +501,26 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Never invoke remote Python one-liners with complex quoting via `shell=True`. Pass SSH commands as explicit argument lists `["ssh", "-i", key_path, host, remote_script]` or use minimal SQL statements (`sqlite3 -separator '|' queue.db "SELECT ..."`), processing and filtering the resulting data locally in Python.
 - **Production VM API Authentication Headers**:
   - Internal proxies and agents must always inject both `x-admin-passcode: 579110` and `X-Meloscribe-Key` from `api_key.txt` when querying `https://api.meloscribe.dev/api/public/suggestions`.
+
+---
+
+### 2026-09-21: Purchase Email Template Streamlining, Button Placement & PS Feedback Trigger
+- **Above-The-Fold Action Optimization**:
+  - Eliminated redundant action instruction lines ("Click the button below to download your sheet music...") to move the primary CTA button directly below the intro body sentence (`is ready to practice:` / `... steht bereit zum Üben:`).
+  - Placed the permanent link reminder directly beneath the button (`This download link is permanent – you can access it anytime.` / `Dieser Download-Link ist dauerhaft gültig – du kannst jederzeit darauf zugreifen.`).
+  - Added dedicated post-scriptum feedback trigger (`PS: Any issues with the files, or ideas to improve? Just hit reply – every feedback helps!`) across all supported locales (EN, DE, FR, ES, IT).
+  - Sanitized RFC 2046 plaintext extraction by stripping HTML tags from body text and explicit `reply_to: info@meloscribe.dev`.
+  - Purged redundant top logo table and slogan box from HTML email body to display main content directly at the top.
+
+---
+
+### 2026-09-22: Dynamic Catalog Trending Calculation & Cover Asset Pipeline
+- **Stale Cover Variant Sync in `upload_bot.py`**:
+  - `upload_bot.py` previously only copied `_clean.jpg` to `website/public/covers/`, leaving stale `_wide.jpg` and other variant files in place. The video preview modal (`PaddleModal.tsx`) uses `_wide.jpg`, causing new uploads to display old cover artwork.
+  - Fix: Updated `upload_bot.py` to copy all matching cover variations (`clean`, `wide`, standard, and `{clean_name}*.jpg`) on upload.
+- **Data-Driven Trending Score vs Static Index Insertion**:
+  - Previously, `upload_bot.py` inserted new songs at index 0 of `songs.json`, and the frontend statically picked `slice(0, 3)` with a hardcoded `trending` badge.
+  - Solution: Replaced arbitrary index-based trending with data-driven scoring `(purchases * 100_000) + social_views` from `analytics.db`.
+  - Injected `annotate_trending_metrics` into `upload_bot.py` (during catalog sync) and `routes_public.py` (live on `GET /api/public/songs`).
+
+

@@ -1,5 +1,21 @@
 [
   {
+    "id": "9",
+    "title": "In This Shirt",
+    "artist": "The Irrepressibles",
+    "difficulty": "Original",
+    "price": "6 €",
+    "coverImage": "/covers/In This Shirt_clean.jpg",
+    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
+    "stripePriceId": "price_1UISU8Q4cuBqoYoXtmC1mCZZ",
+    "theme": "warm",
+    "format": "full_arrangement",
+    "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
+    "kofiId": "price_1UISU8Q4cuBqoYoXtmC1mCZZ",
+    "hasOriginal": true,
+    "trending": false
+  },
+  {
     "id": "58",
     "title": "River Flows in You",
     "artist": "Yiruma",
@@ -16,7 +32,8 @@
     "easyPrice": "6 €",
     "easyStripePriceId": "price_1UCmWzQ4cuBqoYoXCuDpwsgr",
     "easyKofiId": "price_1UCmWzQ4cuBqoYoXCuDpwsgr",
-    "easyId": "59"
+    "easyId": "59",
+    "trending": true
   },
   {
     "id": "56",
@@ -35,7 +52,8 @@
     "easyPrice": "6 €",
     "easyStripePriceId": "price_1U3LSpQ4cuBqoYoXkGdCg5cT",
     "easyKofiId": "price_1U3LSpQ4cuBqoYoXkGdCg5cT",
-    "easyId": "57"
+    "easyId": "57",
+    "trending": true
   },
   {
     "id": "5",
@@ -49,7 +67,7 @@
     "audioPreviewUrl": "/audio-previews/Sweetest Rain.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "theme": "warm",
-    "pinned": true
+    "trending": false
   },
   {
     "id": "54",
@@ -71,7 +89,8 @@
     "easyKofiId": "price_1Tt8L4L8a9dEAmWsA6Iakte8",
     "easyId": "55",
     "arrangemeUrl": "",
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   },
   {
     "id": "global_settings",
@@ -97,7 +116,8 @@
     "paymentsDisabled": false,
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Mary On A Cross.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "trending": false
   },
   {
     "id": "2",
@@ -112,7 +132,8 @@
     "audioPreviewUrl": "/audio-previews/Sonne.mp3",
     "kofiId": "prod_dummy123",
     "paymentsDisabled": true,
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   },
   {
     "id": "3",
@@ -126,7 +147,7 @@
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Je te laisserai des mots.mp3",
     "kofiId": "prod_dummy123",
-    "pinned": false
+    "trending": false
   },
   {
     "id": "4",
@@ -139,7 +160,8 @@
     "coverImage": "/covers/Closed Doors_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Closed Doors.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "6",
@@ -152,21 +174,8 @@
     "stripePriceId": "pri_01kwap7vmg93500mvg8e0rj82a",
     "theme": "cold",
     "format": "full_arrangement",
-    "audioPreviewUrl": "/audio-previews/We Wish You a Merry Xmas.mp3"
-  },
-  {
-    "id": "9",
-    "title": "In This Shirt",
-    "artist": "The Irrepressibles",
-    "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/In This Shirt_clean.jpg",
-    "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "stripePriceId": "pri_01kwap7wtwpnprpwpbtmrddzh3",
-    "theme": "warm",
-    "format": "full_arrangement",
-    "audioPreviewUrl": "/audio-previews/In This Shirt.mp3",
-    "kofiId": "prod_dummy123"
+    "audioPreviewUrl": "/audio-previews/We Wish You a Merry Xmas.mp3",
+    "trending": false
   },
   {
     "id": "10",
@@ -179,7 +188,8 @@
     "coverImage": "/covers/Wet Hands_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Wet Hands.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "11",
@@ -194,7 +204,8 @@
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "theme": "warm",
     "paymentsDisabled": true,
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   },
   {
     "id": "13",
@@ -209,7 +220,8 @@
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "theme": "warm",
     "paymentsDisabled": true,
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   },
   {
     "id": "14",
@@ -222,7 +234,8 @@
     "coverImage": "/covers/Succession Theme_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Succession Theme.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "15",
@@ -235,7 +248,8 @@
     "coverImage": "/covers/Past Lives_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Past Lives.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "16",
@@ -248,7 +262,8 @@
     "coverImage": "/covers/No Surprises_clean.jpg",
     "audioPreviewUrl": "/audio-previews/No Surprises.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "17",
@@ -261,7 +276,8 @@
     "coverImage": "/covers/Greensleeves_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Greensleeves.mp3",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "theme": "cold"
+    "theme": "cold",
+    "trending": false
   },
   {
     "id": "18",
@@ -275,7 +291,7 @@
     "audioPreviewUrl": "/audio-previews/God Rest Ye Merry.mp3",
     "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
     "theme": "cold",
-    "pinned": true
+    "trending": false
   },
   {
     "id": "19",
@@ -288,7 +304,8 @@
     "stripePriceId": "pri_01kwap87zrswysf4vqcaasvm89",
     "theme": "cold",
     "audioPreviewUrl": "/audio-previews/Carol of the Bells.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "trending": true
   },
   {
     "id": "21",
@@ -302,7 +319,8 @@
     "theme": "cold",
     "audioPreviewUrl": "/audio-previews/Silent Night.mp3",
     "kofiId": "prod_dummy123",
-    "format": "full_arrangement"
+    "format": "full_arrangement",
+    "trending": false
   },
   {
     "id": "22",
@@ -317,7 +335,8 @@
     "audioPreviewUrl": "/audio-previews/Hallelujah.mp3",
     "kofiId": "prod_dummy123",
     "paymentsDisabled": true,
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   },
   {
     "id": "23",
@@ -330,7 +349,8 @@
     "stripePriceId": "pri_01kwap8bnmvvdjkx3g7zwkq1vz",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Cornfield Chase.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "trending": false
   },
   {
     "id": "30",
@@ -343,7 +363,8 @@
     "stripePriceId": "pri_01kwap8e5vbzsrjxrtj8mjs2xm",
     "theme": "warm",
     "audioPreviewUrl": "/audio-previews/Your love is my drug.mp3",
-    "kofiId": "prod_dummy123"
+    "kofiId": "prod_dummy123",
+    "trending": false
   },
   {
     "id": "37",
@@ -356,7 +377,8 @@
     "coverImage": "/covers/Icarus_clean.jpg",
     "audioPreviewUrl": "/audio-previews/Icarus.mp3",
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
-    "theme": "warm"
+    "theme": "warm",
+    "trending": false
   },
   {
     "id": "41",
@@ -369,7 +391,8 @@
     "coverImage": "/covers/My Singing Monsters_clean.jpg",
     "audioPreviewUrl": "/audio-previews/My Singing Monsters.mp3",
     "gradient": "from-emerald-500/20 via-dark-700 to-teal-500/5",
-    "theme": "green"
+    "theme": "green",
+    "trending": false
   },
   {
     "id": "53",
@@ -384,6 +407,7 @@
     "gradient": "from-orange-500/20 via-dark-700 to-orange-500/5",
     "theme": "warm",
     "paymentsDisabled": true,
-    "isArrangeMe": false
+    "isArrangeMe": false,
+    "trending": false
   }
 ]

@@ -675,6 +675,60 @@ def get_or_create_stripe_price(clean_name, difficulty, price_str):
         print(f"[Stripe Auto-Price] Error interacting with Stripe API: {e}")
         return None
 
+def annotate_trending_metrics(songs, db_file):
+    import sqlite3
+    if not db_file or not os.path.exists(db_file):
+        return songs
+
+    def norm_title(t: str) -> str:
+        if not t:
+            return ""
+        t = t.lower()
+        for sfx in [" (easy version)", " (easy)", " easy", " (original)", " original", " (all parts)", " (part 1)", " (part 2)"]:
+            if t.endswith(sfx):
+                t = t[:-len(sfx)].strip()
+        return "".join(c for c in t if c.isalnum() or c.isspace()).strip()
+
+    try:
+        conn = sqlite3.connect(str(db_file), timeout=5.0)
+        c = conn.cursor()
+        c.execute("SELECT song_name, COUNT(id) FROM purchases WHERE status NOT LIKE '%Refund%' AND status NOT LIKE '%refund%' AND status NOT LIKE '%failed%' GROUP BY song_name")
+        purchases_raw = c.fetchall()
+        c.execute("SELECT song_name, SUM(views) FROM videos WHERE views IS NOT NULL GROUP BY song_name")
+        views_raw = c.fetchall()
+        conn.close()
+
+        purchases_map = {}
+        for sname, cnt in purchases_raw:
+            if sname:
+                k = norm_title(sname)
+                purchases_map[k] = purchases_map.get(k, 0) + (cnt or 0)
+        views_map = {}
+        for sname, vcnt in views_raw:
+            if sname:
+                key = norm_title(sname)
+                views_map[key] = views_map.get(key, 0) + (vcnt or 0)
+
+        catalog_scores = []
+        for s in songs:
+            if s.get("id") == "global_settings" or s.get("hidden"):
+                continue
+            t_key = norm_title(s.get("title", ""))
+            p_cnt = purchases_map.get(t_key, 0)
+            v_cnt = views_map.get(t_key, 0)
+            score = (p_cnt * 100000) + v_cnt
+            catalog_scores.append((s.get("id"), score))
+
+        catalog_scores.sort(key=lambda x: x[1], reverse=True)
+        top_3_ids = {item[0] for item in catalog_scores[:3] if item[1] > 0}
+        for s in songs:
+            is_t = s.get("id") in top_3_ids
+            s["trending"] = is_t
+            s["isTrending"] = is_t
+    except Exception as e:
+        print(f"[Trending Ranking] Warning: failed to compute trending: {e}")
+    return songs
+
 def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dave Kerr", **kwargs):
     # Auto-generate previews first!
     try:
@@ -862,6 +916,14 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             songs_list.insert(0, new_song)
             print(f"[Website Sync] Added new entry for '{clean_name}' ({difficulty}, ID: {next_id}) to top of catalog (index 0)!")
         
+        # Automatically recalculate data-driven trending flags from analytics.db
+        try:
+            db_file = os.path.join(tools_dir, "meloscribe", "backend", "analytics.db")
+            annotate_trending_metrics(songs_list, db_file)
+            print("[Website Sync] Successfully annotated dynamic trending metrics based on sales and views.")
+        except Exception as trend_err:
+            print(f"[Website Sync] Warning: failed to compute trending metrics: {trend_err}")
+
         # Write to frontend songs.json
         with open(website_json_path, "w", encoding="utf-8") as f:
             json.dump(songs_list, f, indent=2, ensure_ascii=False)
@@ -875,19 +937,22 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             except Exception as e:
                 print(f"[Website Sync] Warning: could not write local songs.json: {e}")
             
-        # Copy clean cover to website directory so it's committed to Git
+        # Copy all matching covers (clean, wide, standard, variants) to website directory so they are committed to Git
         settings = get_settings()
         covers_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
-        local_cover_path = os.path.join(covers_dir, f"{clean_name}_clean.jpg")
-        website_cover_path = os.path.join(r"c:\Dev\meloscribe-frontend\website\public\covers", f"{clean_name}_clean.jpg")
-        if os.path.exists(local_cover_path):
-            try:
-                import shutil
-                os.makedirs(os.path.dirname(website_cover_path), exist_ok=True)
-                shutil.copy2(local_cover_path, website_cover_path)
-                print(f"[Website Sync] Copied clean cover to website assets: {website_cover_path}")
-            except Exception as copy_err:
-                print(f"[Website Sync] Warning: failed to copy cover to website: {copy_err}")
+        website_covers_dir = r"c:\Dev\meloscribe-frontend\website\public\covers"
+        if os.path.exists(covers_dir) and os.path.exists(website_covers_dir):
+            import glob, shutil
+            pattern = os.path.join(covers_dir, f"{clean_name}*.jpg")
+            copied_count = 0
+            for src_cover in glob.glob(pattern):
+                dst_cover = os.path.join(website_covers_dir, os.path.basename(src_cover))
+                try:
+                    shutil.copy2(src_cover, dst_cover)
+                    copied_count += 1
+                except Exception as copy_err:
+                    print(f"[Website Sync] Warning: failed to copy {src_cover}: {copy_err}")
+            print(f"[Website Sync] Copied {copied_count} cover assets (clean, wide, variants) for '{clean_name}' to website assets.")
                 
         print(f"[Website Sync] Automatically added song '{clean_name}' (ID: {next_id}, Price: {clean_price}, Theme: {theme}, Ko-fi: {kofi_id}) to website songs.json!")
 

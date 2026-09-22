@@ -205,6 +205,14 @@ git add . && git commit -m "..." && git push
   - `checkout_analytics.py` und `routes_admin.py` für Dual-Tracking aufgerüstet: Erfasst ab sofort sowohl Hosted Checkout Sessions als auch Embedded PaymentIntents nahtlos mit automatischer Deduplizierung.
   - Reset-Mechanismus (`POST /api/admin/checkout-analytics/clear`) implementiert, um verfälschte Phantome aus dem aktuellen Monat zu löschen und historische Monate (Juli, August) zu erhalten.
   - Live auf Oracle Cloud VM deployed und Backend-Service neu gestartet.
+- [x] Purchase Email Redesign & Multi-Language PS Alignment:
+  - `routes_public.py`: Above-the-fold CTA placement, intro sentence ending in colon pointing directly to the download button, link persistence notice directly under the button, and interactive PS feedback trigger added across all 5 locales (EN, DE, FR, ES, IT).
+  - Sanitized RFC 2046 plaintext extraction, added `reply_to: info@meloscribe.dev`, and verified delivery via Resend API.
+- [x] Dynamic Catalog Trending Detection & Cover Asset Pipeline:
+  - `upload_bot.py`: Added complete cover variant syncing (`_wide`, `_clean`, standard) to prevent stale video preview posters.
+  - Implemented data-driven ranking `(purchases * 100_000) + social_views` from `analytics.db` in `upload_bot.py` and `routes_public.py` (`GET /api/public/songs`).
+  - Deployed `routes_public.py` and `songs.json` to production VM (`152.70.23.171`), restarted `meloscribe-backend.service`, and verified live API response.
+
 
 ## Active Blockers / Next Steps
 
