@@ -1926,9 +1926,12 @@ def downvote_suggestion(sug_id: str, request: Request):
 
 def annotate_trending_metrics(songs: list, db_file: Path) -> list:
     """
-    Computes data-driven trending metrics for songs using analytics.db:
-    Score = (purchases * 100_000) + social_views
-    Top 3 songs with score > 0 receive trending = True
+    Computes data-driven trending metrics for songs using 30-day velocity from analytics.db:
+    Score = (purchases_30d * 100_000) + views_30d
+    A song is eligible for trending ONLY IF:
+    - it has >= 1 purchase in the last 30 days, OR
+    - it has high recent view momentum (>= 50_000 views in the last 30 days)
+    Top scoring eligible songs (max 3) receive trending = True.
     """
     if not db_file or not db_file.exists():
         return songs
@@ -1943,21 +1946,41 @@ def annotate_trending_metrics(songs: list, db_file: Path) -> list:
         return "".join(c for c in t if c.isalnum() or c.isspace()).strip()
 
     try:
+        from datetime import datetime, timedelta
         conn = sqlite3.connect(str(db_file), timeout=5.0)
         c = conn.cursor()
         
-        # Real purchases
+        # 1. Real purchases in last 30 days
+        p_cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
         c.execute("""
             SELECT song_name, COUNT(id) 
             FROM purchases 
             WHERE status NOT LIKE '%Refund%' AND status NOT LIKE '%refund%' AND status NOT LIKE '%failed%'
+              AND created_at >= ?
             GROUP BY song_name
-        """)
+        """, (p_cutoff,))
         purchases_raw = c.fetchall()
         
-        # Social media views
-        c.execute("SELECT song_name, SUM(views) FROM videos WHERE views IS NOT NULL GROUP BY song_name")
-        views_raw = c.fetchall()
+        # 2. View momentum in last 30 days from snapshots
+        v_cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        views_raw = []
+        try:
+            c.execute("""
+                WITH recent AS (
+                    SELECT video_id, song_name, MAX(views) as max_v, MIN(views) as min_v
+                    FROM snapshots
+                    WHERE snapshot_date >= ?
+                    GROUP BY video_id, song_name
+                )
+                SELECT song_name, SUM(max_v - min_v) as view_growth
+                FROM recent
+                GROUP BY song_name
+                HAVING view_growth > 0
+            """, (v_cutoff,))
+            views_raw = c.fetchall()
+        except Exception:
+            pass # Fall back gracefully if snapshots table is not yet populated
+            
         conn.close()
 
         # Build normalized maps
@@ -1973,8 +1996,8 @@ def annotate_trending_metrics(songs: list, db_file: Path) -> list:
                 key = norm_title(sname)
                 views_map[key] = views_map.get(key, 0) + (vcnt or 0)
 
-        # Score catalog items
-        catalog_scores = []
+        # Score and qualify catalog items
+        catalog_candidates = []
         for s in songs:
             if s.get("id") == "global_settings" or s.get("hidden"):
                 continue
@@ -1983,11 +2006,14 @@ def annotate_trending_metrics(songs: list, db_file: Path) -> list:
             v_cnt = views_map.get(t_key, 0)
             
             score = (p_cnt * 100_000) + v_cnt
-            catalog_scores.append((s.get("id"), score))
+            # Require at least 1 recent purchase or viral momentum (>= 50,000 views in 30 days)
+            is_eligible = (p_cnt > 0) or (v_cnt >= 50_000)
+            if is_eligible:
+                catalog_candidates.append((s.get("id"), score))
 
-        # Determine top 3 IDs with score > 0
-        catalog_scores.sort(key=lambda x: x[1], reverse=True)
-        top_trending_ids = {item[0] for item in catalog_scores[:3] if item[1] > 0}
+        # Determine top eligible IDs (max 3)
+        catalog_candidates.sort(key=lambda x: x[1], reverse=True)
+        top_trending_ids = {item[0] for item in catalog_candidates[:3]}
 
         for s in songs:
             is_trending = s.get("id") in top_trending_ids

@@ -210,8 +210,10 @@ git add . && git commit -m "..." && git push
   - Sanitized RFC 2046 plaintext extraction, added `reply_to: info@meloscribe.dev`, and verified delivery via Resend API.
 - [x] Dynamic Catalog Trending Detection & Cover Asset Pipeline:
   - `upload_bot.py`: Added complete cover variant syncing (`_wide`, `_clean`, standard) to prevent stale video preview posters.
-  - Implemented data-driven ranking `(purchases * 100_000) + social_views` from `analytics.db` in `upload_bot.py` and `routes_public.py` (`GET /api/public/songs`).
-  - Deployed `routes_public.py` and `songs.json` to production VM (`152.70.23.171`), restarted `meloscribe-backend.service`, and verified live API response.
+  - Implemented data-driven 30-day velocity ranking `(purchases_30d * 100_000) + views_30d` with delta tracking from `snapshots` table in `upload_bot.py` and `routes_public.py` (`GET /api/public/songs`).
+  - Added qualification requirement (>= 1 purchase in last 30d OR >= 50k views in 30d) preventing non-converting seasonal tracks (*Carol of the Bells*) from appearing as trending out of season.
+  - Deployed `routes_public.py`, `songs.json`, and `upload_bot.py` to production VM (`152.70.23.171`), restarted `meloscribe-backend.service`, and verified live API response.
+
 
 
 ## Active Blockers / Next Steps

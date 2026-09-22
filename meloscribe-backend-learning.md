@@ -520,7 +520,12 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Fix: Updated `upload_bot.py` to copy all matching cover variations (`clean`, `wide`, standard, and `{clean_name}*.jpg`) on upload.
 - **Data-Driven Trending Score vs Static Index Insertion**:
   - Previously, `upload_bot.py` inserted new songs at index 0 of `songs.json`, and the frontend statically picked `slice(0, 3)` with a hardcoded `trending` badge.
-  - Solution: Replaced arbitrary index-based trending with data-driven scoring `(purchases * 100_000) + social_views` from `analytics.db`.
-  - Injected `annotate_trending_metrics` into `upload_bot.py` (during catalog sync) and `routes_public.py` (live on `GET /api/public/songs`).
+  - Initial naive fix summed all-time views from `videos`, which erroneously marked seasonal/historical songs (like *Carol of the Bells* with 706k all-time views) as trending despite 0 purchases and no recent momentum.
+  - Final Solution: Replaced all-time metrics with 30-day velocity:
+    - View growth from `snapshots` table: `MAX(views) - MIN(views)` in the last 30 days.
+    - Purchases from `purchases` table in the last 30 days.
+    - Qualification requirement: Song must have >= 1 purchase in the last 30 days OR viral view explosion (>= 50,000 views in 30 days).
+    - Top eligible songs (max 3) receive `trending = True`.
+
 
 

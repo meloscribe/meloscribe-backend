@@ -677,6 +677,7 @@ def get_or_create_stripe_price(clean_name, difficulty, price_str):
 
 def annotate_trending_metrics(songs, db_file):
     import sqlite3
+    from datetime import datetime, timedelta
     if not db_file or not os.path.exists(db_file):
         return songs
 
@@ -692,10 +693,38 @@ def annotate_trending_metrics(songs, db_file):
     try:
         conn = sqlite3.connect(str(db_file), timeout=5.0)
         c = conn.cursor()
-        c.execute("SELECT song_name, COUNT(id) FROM purchases WHERE status NOT LIKE '%Refund%' AND status NOT LIKE '%refund%' AND status NOT LIKE '%failed%' GROUP BY song_name")
+        
+        # 1. Real purchases in last 30 days
+        p_cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        c.execute("""
+            SELECT song_name, COUNT(id) 
+            FROM purchases 
+            WHERE status NOT LIKE '%Refund%' AND status NOT LIKE '%refund%' AND status NOT LIKE '%failed%'
+              AND created_at >= ?
+            GROUP BY song_name
+        """, (p_cutoff,))
         purchases_raw = c.fetchall()
-        c.execute("SELECT song_name, SUM(views) FROM videos WHERE views IS NOT NULL GROUP BY song_name")
-        views_raw = c.fetchall()
+
+        # 2. View momentum in last 30 days from snapshots
+        v_cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        views_raw = []
+        try:
+            c.execute("""
+                WITH recent AS (
+                    SELECT video_id, song_name, MAX(views) as max_v, MIN(views) as min_v
+                    FROM snapshots
+                    WHERE snapshot_date >= ?
+                    GROUP BY video_id, song_name
+                )
+                SELECT song_name, SUM(max_v - min_v) as view_growth
+                FROM recent
+                GROUP BY song_name
+                HAVING view_growth > 0
+            """, (v_cutoff,))
+            views_raw = c.fetchall()
+        except Exception:
+            pass
+
         conn.close()
 
         purchases_map = {}
@@ -709,18 +738,21 @@ def annotate_trending_metrics(songs, db_file):
                 key = norm_title(sname)
                 views_map[key] = views_map.get(key, 0) + (vcnt or 0)
 
-        catalog_scores = []
+        catalog_candidates = []
         for s in songs:
             if s.get("id") == "global_settings" or s.get("hidden"):
                 continue
             t_key = norm_title(s.get("title", ""))
             p_cnt = purchases_map.get(t_key, 0)
             v_cnt = views_map.get(t_key, 0)
-            score = (p_cnt * 100000) + v_cnt
-            catalog_scores.append((s.get("id"), score))
+            score = (p_cnt * 100_000) + v_cnt
+            # Require at least 1 recent purchase or viral momentum (>= 50,000 views in 30 days)
+            is_eligible = (p_cnt > 0) or (v_cnt >= 50_000)
+            if is_eligible:
+                catalog_candidates.append((s.get("id"), score))
 
-        catalog_scores.sort(key=lambda x: x[1], reverse=True)
-        top_3_ids = {item[0] for item in catalog_scores[:3] if item[1] > 0}
+        catalog_candidates.sort(key=lambda x: x[1], reverse=True)
+        top_3_ids = {item[0] for item in catalog_candidates[:3]}
         for s in songs:
             is_t = s.get("id") in top_3_ids
             s["trending"] = is_t
