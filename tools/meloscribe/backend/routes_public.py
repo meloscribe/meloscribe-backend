@@ -347,6 +347,157 @@ meloscribe
         log_webhook(f"[Notify] Resend exception: {err}")
         return False
 
+CONFIRMATION_TEMPLATES = {
+    "en": {
+        "song_subject": "Download your sheet music: {song_name} — meloscribe",
+        "song_intro": "Here is the confirmation link for your sheet music arrangement of <strong>{song_name}</strong>.",
+        "song_body": "Click the button below to confirm your request and download your files (PDF, MIDI, and video tutorials).",
+        "song_cta": "Download {song_name}",
+        "song_disclaimer": "You will also receive notifications when new piano arrangements are released. You can unsubscribe at any time using the link below. If you didn't request this, you can safely ignore this email.",
+        "generic_subject": "Confirm your subscription — meloscribe",
+        "generic_intro": "Welcome to meloscribe!",
+        "generic_body": "Please confirm your email address to receive notifications whenever new piano sheet music and tutorials are released.",
+        "generic_cta": "Confirm Subscription",
+        "generic_disclaimer": "If you didn't request this, you can safely ignore this email. You will not be subscribed unless you click the link above.",
+        "unsubscribe": "Unsubscribe",
+        "greeting": "Hi,",
+    },
+    "de": {
+        "song_subject": "Noten-Download bestätigen: {song_name} — meloscribe",
+        "song_intro": "Hier ist dein Bestätigungslink für das Notenpaket von <strong>{song_name}</strong>.",
+        "song_body": "Klicke auf den Button unten, um deine Anfrage zu bestätigen und deine Dateien (PDF, MIDI und Video-Tutorials) direkt herunterzuladen.",
+        "song_cta": "{song_name} herunterladen",
+        "song_disclaimer": "Du erhältst künftig auch Benachrichtigungen, wenn neue Klavierarrangements erscheinen. Eine Abmeldung ist jederzeit mit 1 Klick über den Link unten möglich. Falls du das nicht angefordert hast, kannst du diese E-Mail ignorieren.",
+        "generic_subject": "Anmeldung bestätigen — meloscribe",
+        "generic_intro": "Willkommen bei meloscribe!",
+        "generic_body": "Bitte bestätige deine E-Mail-Adresse, um Benachrichtigungen zu erhalten, sobald neue Klaviernoten und Tutorials veröffentlicht werden.",
+        "generic_cta": "Anmeldung bestätigen",
+        "generic_disclaimer": "Falls du diese Anfrage nicht gestellt hast, kannst du diese E-Mail ignorieren. Ohne Klick auf den Link wirst du nicht eingetragen.",
+        "unsubscribe": "Abmelden",
+        "greeting": "Hallo,",
+    },
+    "fr": {
+        "song_subject": "Téléchargez vos partitions : {song_name} — meloscribe",
+        "song_intro": "Voici le lien de confirmation pour votre arrangement de <strong>{song_name}</strong>.",
+        "song_body": "Cliquez sur le bouton ci-dessous pour confirmer votre demande et télécharger vos fichiers (PDF, MIDI et vidéos d'entraînement).",
+        "song_cta": "Télécharger {song_name}",
+        "song_disclaimer": "Vous recevrez également des notifications lors de la sortie de nouveaux arrangements. Vous pouvez vous désinscrire à tout moment avec le lien ci-dessous.",
+        "generic_subject": "Confirmez votre inscription — meloscribe",
+        "generic_intro": "Bienvenue sur meloscribe !",
+        "generic_body": "Veuillez confirmer votre adresse e-mail pour recevoir des alertes lorsque de nouvelles partitions et tutoriels sont disponibles.",
+        "generic_cta": "Confirmer l'inscription",
+        "generic_disclaimer": "Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.",
+        "unsubscribe": "Se désabonner",
+        "greeting": "Bonjour,",
+    },
+    "es": {
+        "song_subject": "Descarga tu partitura: {song_name} — meloscribe",
+        "song_intro": "Aquí tienes el enlace de confirmación para tu arreglo de <strong>{song_name}</strong>.",
+        "song_body": "Haz clic en el botón de abajo para confirmar tu solicitud y descargar tus archivos (PDF, MIDI y tutoriales en vídeo).",
+        "song_cta": "Descargar {song_name}",
+        "song_disclaimer": "También recibirás avisos cuando se publiquen nuevos arreglos de piano. Puedes darte de baja en cualquier momento usando el enlace inferior.",
+        "generic_subject": "Confirma tu suscripción — meloscribe",
+        "generic_intro": "¡Te damos la bienvenida a meloscribe!",
+        "generic_body": "Confirma tu correo electrónico para recibir notificaciones cada vez que publiquemos nuevas partituras y tutoriales de piano.",
+        "generic_cta": "Confirmar suscripción",
+        "generic_disclaimer": "Si no solicitaste esto, puedes ignorar este correo de forma segura.",
+        "unsubscribe": "Darse de baja",
+        "greeting": "Hola,",
+    },
+    "it": {
+        "song_subject": "Scarica il tuo spartito: {song_name} — meloscribe",
+        "song_intro": "Ecco il link di conferma per il tuo arrangiamento di <strong>{song_name}</strong>.",
+        "song_body": "Clicca sul pulsante qui sotto per confermare la tua richiesta e scaricare i tuoi file (PDF, MIDI e tutorial video).",
+        "song_cta": "Scarica {song_name}",
+        "song_disclaimer": "Riceverai anche notifiche quando saranno disponibili nuovi arrangiamenti. Puoi annullare l'iscrizione in qualsiasi momento dal link sottostante.",
+        "generic_subject": "Conferma la tua iscrizione — meloscribe",
+        "generic_intro": "Benvenuto su meloscribe!",
+        "generic_body": "Conferma il tuo indirizzo email per ricevere notifiche quando vengono pubblicati nuovi spartiti e tutorial per pianoforte.",
+        "generic_cta": "Conferma iscrizione",
+        "generic_disclaimer": "Se non hai richiesto questa iscrizione, puoi tranquillamente ignorare questa email.",
+        "unsubscribe": "Annulla iscrizione",
+        "greeting": "Ciao,",
+    }
+}
+
+NEWSLETTER_TEMPLATES = {
+    "en": {
+        "subject": "🎹 New Piano Arrangement: {song_name} ({artist}) — meloscribe",
+        "badge": "NEW ARRANGEMENT RELEASE",
+        "greeting": "Hey pianist,",
+        "intro": "A brand new handcrafted piano arrangement is now live in our library: <strong>{song_name}</strong> by {artist}.",
+        "box_title": "Included in this learning package:",
+        "feat_1": "Accurate Sheet Music (Printable PDF)",
+        "feat_2": "Complete MIDI Files (Both hands + split)",
+        "feat_3": "Synchronized practice video tutorials (Original & Slow)",
+        "cta": "Play & Listen Now",
+        "preview_note": "You can listen to the free audio preview directly on the website.",
+        "happy_practicing": "Happy practicing,",
+        "footer_reason": "You received this email because you subscribed to piano arrangement updates on",
+        "unsubscribe": "Unsubscribe"
+    },
+    "de": {
+        "subject": "🎹 Neues Klavier-Arrangement: {song_name} ({artist}) — meloscribe",
+        "badge": "NEUES ARRANGEMENT RELEASE",
+        "greeting": "Hey Pianist,",
+        "intro": "Ein brandneues, handgefertigtes Klavier-Arrangement steht ab sofort für dich bereit: <strong>{song_name}</strong> von {artist}.",
+        "box_title": "In diesem Lernpaket enthalten:",
+        "feat_1": "Präzise Noten (Druckfähiges PDF)",
+        "feat_2": "Vollständige MIDI-Dateien (Beide Hände + getrennt zum Üben)",
+        "feat_3": "Synchronisierte Video-Tutorials (Original & Slow Practice)",
+        "cta": "Jetzt anhören & spielen",
+        "preview_note": "Du kannst dir auf der Website direkt die kostenlose Audio-Vorschau anhören.",
+        "happy_practicing": "Viel Spaß beim Üben,",
+        "footer_reason": "Du erhältst diese E-Mail, weil du dich für Noten-Updates angemeldet hast auf",
+        "unsubscribe": "Newsletter abmelden"
+    },
+    "fr": {
+        "subject": "🎹 Nouvel arrangement piano : {song_name} ({artist}) — meloscribe",
+        "badge": "NOUVEL ARRANGEMENT PIANO",
+        "greeting": "Bonjour pianiste,",
+        "intro": "Un tout nouvel arrangement pour piano fait main est disponible : <strong>{song_name}</strong> de {artist}.",
+        "box_title": "Contenu du pack d'apprentissage :",
+        "feat_1": "Partitions précises (PDF imprimable)",
+        "feat_2": "Fichiers MIDI complets (Deux mains + séparées pour l'entraînement)",
+        "feat_3": "Tutoriels vidéo synchronisés (Vitesse normale & lente)",
+        "cta": "Écouter & Jouer maintenant",
+        "preview_note": "Vous pouvez écouter l'extrait audio gratuit directement sur le site.",
+        "happy_practicing": "Bonne pratique,",
+        "footer_reason": "Vous recevez cet e-mail car vous vous êtes inscrit(e) aux nouveautés sur",
+        "unsubscribe": "Se désabonner"
+    },
+    "es": {
+        "subject": "🎹 Nuevo arreglo de piano: {song_name} ({artist}) — meloscribe",
+        "badge": "NUEVO ARREGLO DE PIANO",
+        "greeting": "¡Hola pianista!,",
+        "intro": "Un nuevo arreglo de piano hecho a oído ya está disponible: <strong>{song_name}</strong> de {artist}.",
+        "box_title": "Incluido en este paquete de aprendizaje:",
+        "feat_1": "Partitura precisa (PDF imprimible)",
+        "feat_2": "Archivos MIDI completos (Ambas manos + separadas para practicar)",
+        "feat_3": "Tutoriales en vídeo synchronizados (Velocidad normal y lenta)",
+        "cta": "Escuchar y Tocar ahora",
+        "preview_note": "Puedes escuchar la vista previa de audio gratuita directamente en la web.",
+        "happy_practicing": "¡Disfruta practicando!,",
+        "footer_reason": "Recibes este correo porque te suscribiste a las novedades en",
+        "unsubscribe": "Darse de baja"
+    },
+    "it": {
+        "subject": "🎹 Nuovo arrangiamento per pianoforte: {song_name} ({artist}) — meloscribe",
+        "badge": "NUOVO ARRANGIAMENTO PER PIANOFORTE",
+        "greeting": "Ciao pianista,",
+        "intro": "Un nuovissimo arrangiamento per pianoforte è ora disponibile: <strong>{song_name}</strong> di {artist}.",
+        "box_title": "Cosa è incluso in questo pacchetto:",
+        "feat_1": "Spartito accurato (PDF stampabile)",
+        "feat_2": "File MIDI completi (Entrambe le mani + separate per esercitarsi)",
+        "feat_3": "Tutorial video sincronizzati (Velocità normale e lenta)",
+        "cta": "Ascolta e Suona ora",
+        "preview_note": "Puoi ascoltare l'anteprima audio gratuita direttamente sul sito web.",
+        "happy_practicing": "Buon esercizio,",
+        "footer_reason": "Hai ricevuto questa email perché ti sei iscritto agli aggiornamenti su",
+        "unsubscribe": "Annulla iscrizione"
+    }
+}
+
 def _send_confirmation_email(email: str, token: str, song_name: str = None, locale: str = "en"):
     api_key = load_settings().get("resend_api_key") or settings.get("resend_api_key", "")
     if not api_key:
@@ -356,25 +507,32 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
     confirm_url = f"https://api.meloscribe.dev/api/notify/confirm?token={token}"
     unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
     
+    lang = (locale or "en").lower()[:2]
+    if lang not in CONFIRMATION_TEMPLATES:
+        lang = "en"
+    tpl = CONFIRMATION_TEMPLATES[lang]
+    
     if song_name:
-        subject = f"Download your sheet music: {song_name} — meloscribe"
-        message_intro = f"Here is the confirmation link for your sheet music arrangement of <strong>{song_name}</strong>."
-        message_body = "Click the button below to confirm your request and download your files (PDF, MIDI, and video tutorials)."
-        cta_text = f"Download {song_name}"
-        disclaimer = "You will also receive notifications when new piano arrangements are released. You can unsubscribe at any time using the link below. If you didn't request this, you can safely ignore this email."
-        plain_intro = f"Here is the confirmation link for your sheet music arrangement of {song_name}."
-        plain_body = "Confirm your request and download your files (PDF, MIDI, and video tutorials) using the link below:"
+        subject = tpl["song_subject"].format(song_name=song_name)
+        message_intro = tpl["song_intro"].format(song_name=song_name)
+        message_body = tpl["song_body"]
+        cta_text = tpl["song_cta"].format(song_name=song_name)
+        disclaimer = tpl["song_disclaimer"]
+        plain_intro = message_intro.replace("<strong>", "").replace("</strong>", "")
+        plain_body = message_body
     else:
-        subject = "Confirm your subscription — meloscribe"
-        message_intro = "Welcome to meloscribe!"
-        message_body = "Please confirm your email address to receive notifications whenever new piano sheet music and tutorials are released."
-        cta_text = "Confirm Subscription"
-        disclaimer = "If you didn't request this, you can safely ignore this email. You will not be subscribed unless you click the link above."
-        plain_intro = "Welcome to meloscribe!"
-        plain_body = "Please confirm your email address to receive notifications whenever new piano sheet music and tutorials are released:"
+        subject = tpl["generic_subject"]
+        message_intro = tpl["generic_intro"]
+        message_body = tpl["generic_body"]
+        cta_text = tpl["generic_cta"]
+        disclaimer = tpl["generic_disclaimer"]
+        plain_intro = message_intro
+        plain_body = message_body
+        
+    greeting = tpl.get("greeting", "Hi,")
+    unsubscribe_label = tpl.get("unsubscribe", "Unsubscribe")
 
-    html_body = f"""
-<!DOCTYPE html>
+    html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
@@ -388,7 +546,7 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
     <p style="color: #94a3b8; font-size: 13px; margin: 10px 0 0 0; font-style: italic;">Arranged by ear. Played by you.</p>
   </div>
   <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
-    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">Hi,</p>
+    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">{greeting}</p>
     <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
       {message_intro} {message_body}
     </p>
@@ -401,13 +559,13 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
   </div>
   <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; line-height: 1.6;">
     meloscribe • Arranged by ear. Played by you.<br>
-    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">Unsubscribe</a>
+    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
 </html>
 """
 
-    text_body = f"""Hi,
+    text_body = f"""{greeting}
 
 {plain_intro}
 {plain_body}
@@ -419,7 +577,7 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
 meloscribe • Arranged by ear. Played by you.
 https://meloscribesheets.com
 
-Unsubscribe:
+{unsubscribe_label}:
 {unsubscribe_url}
 """
 
@@ -430,6 +588,7 @@ Unsubscribe:
             json={
                 "from": "meloscribe <info@meloscribe.dev>",
                 "to": [email],
+                "reply_to": "info@meloscribe.dev",
                 "subject": subject,
                 "html": html_body,
                 "text": text_body,
@@ -441,7 +600,7 @@ Unsubscribe:
             timeout=10
         )
         if resp.status_code in (200, 201):
-            print(f"[Notify] Confirmation email sent to {email}")
+            print(f"[Notify] Confirmation email sent to {email} (locale: {lang})")
             return True
         else:
             print(f"[Notify] Resend API error {resp.status_code}: {resp.text}")
@@ -449,6 +608,212 @@ Unsubscribe:
     except Exception as e:
         print(f"[Notify] Email send failed: {e}")
         return False
+
+def send_newsletter_email(email: str, token: str, song_name: str, artist: str, locale: str = "en") -> bool:
+    api_key = load_settings().get("resend_api_key") or settings.get("resend_api_key", "")
+    if not api_key:
+        print("[Newsletter] WARNING: resend_api_key not set in settings.json. Skipping newsletter.")
+        return False
+
+    lang = (locale or "en").lower()[:2]
+    if lang not in NEWSLETTER_TEMPLATES:
+        lang = "en"
+    tpl = NEWSLETTER_TEMPLATES[lang]
+
+    to_slug = lambda t: re.sub(r'[^a-z0-9]+', '-', t.lower()).strip('-')
+    song_slug = to_slug(song_name)
+    song_url = f"https://meloscribesheets.com/?song={song_slug}"
+    unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
+
+    subject = tpl["subject"].format(song_name=song_name, artist=artist)
+    badge = tpl["badge"]
+    greeting = tpl["greeting"]
+    intro = tpl["intro"].format(song_name=song_name, artist=artist)
+    box_title = tpl["box_title"]
+    feat_1 = tpl["feat_1"]
+    feat_2 = tpl["feat_2"]
+    feat_3 = tpl["feat_3"]
+    cta = tpl["cta"]
+    preview_note = tpl["preview_note"]
+    happy_practicing = tpl["happy_practicing"]
+    footer_reason = tpl["footer_reason"]
+    unsubscribe_label = tpl["unsubscribe"]
+
+    html_body = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 540px; margin: 0 auto; padding: 32px 16px;">
+  <div style="text-align: center; margin-bottom: 24px; background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 24px 16px;">
+    <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: collapse;">
+      <tr>
+        <td style="font-size: 30px; font-weight: 900; color: #00f5ff; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: right;">melo</td>
+        <td style="font-size: 30px; font-weight: 900; color: #ff2d92; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: left;">scribe</td>
+      </tr>
+    </table>
+    <p style="color: #94a3b8; font-size: 13px; margin: 10px 0 0 0; font-style: italic;">Arranged by ear. Played by you.</p>
+  </div>
+
+  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
+    <div style="text-align: center; margin-bottom: 16px;">
+      <span style="display: inline-block; background-color: rgba(0, 245, 255, 0.1); border: 1px solid rgba(0, 245, 255, 0.3); color: #00f5ff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;">
+        {badge}
+      </span>
+    </div>
+
+    <h1 style="color: #ffffff; font-size: 22px; font-weight: 800; text-align: center; margin: 0 0 4px 0;">{song_name}</h1>
+    <p style="color: #94a3b8; font-size: 14px; text-align: center; margin: 0 0 24px 0;">{artist}</p>
+
+    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">{greeting}</p>
+    <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
+      {intro}
+    </p>
+
+    <div style="background-color: #0c0e17; border: 1px solid #1e293b; border-radius: 12px; padding: 18px; margin: 20px 0;">
+      <p style="color: #00f5ff; font-size: 13px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
+        {box_title}
+      </p>
+      <ul style="color: #cbd5e1; font-size: 14px; line-height: 1.8; margin: 0; padding-left: 20px;">
+        <li><strong>{feat_1}</strong></li>
+        <li><strong>{feat_2}</strong></li>
+        <li><strong>{feat_3}</strong></li>
+      </ul>
+    </div>
+
+    <div style="text-align: center; margin: 28px 0 20px 0;">
+      <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; color: #050508; font-weight: 800; font-size: 15px; padding: 14px 34px; border-radius: 10px; text-decoration: none; box-shadow: 0 0 20px rgba(0, 245, 212, 0.3);">{cta}</a>
+    </div>
+
+    <p style="color: #94a3b8; font-size: 13px; text-align: center; line-height: 1.6; margin: 0;">
+      {preview_note}
+    </p>
+
+    <p style="color: #cbd5e1; line-height: 1.6; font-size: 15px; margin-top: 24px; margin-bottom: 0;">
+      {happy_practicing}<br><br>
+      <strong>meloscribe</strong>
+    </p>
+  </div>
+
+  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 24px; line-height: 1.6;">
+    meloscribe • Arranged by ear. Played by you.<br>
+    {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a>.<br>
+    <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
+  </p>
+</body>
+</html>
+"""
+
+    text_body = f"""{greeting}
+
+{intro.replace("<strong>", "").replace("</strong>", "")}
+
+{box_title}
+- {feat_1}
+- {feat_2}
+- {feat_3}
+
+{song_url}
+
+{preview_note}
+
+{happy_practicing}
+meloscribe
+
+---
+meloscribe • Arranged by ear. Played by you.
+https://meloscribesheets.com
+
+{unsubscribe_label}:
+{unsubscribe_url}
+"""
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "meloscribe <info@meloscribe.dev>",
+                "to": [email],
+                "reply_to": "info@meloscribe.dev",
+                "subject": subject,
+                "html": html_body,
+                "text": text_body,
+                "headers": {
+                    "List-Unsubscribe": f"<{unsubscribe_url}>",
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
+                }
+            },
+            timeout=10
+        )
+        if resp.status_code in (200, 201):
+            print(f"[Newsletter] Email sent to {email} ({lang})")
+            return True
+        else:
+            print(f"[Newsletter] Resend API error {resp.status_code}: {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[Newsletter] Failed to send email: {e}")
+        return False
+
+def broadcast_new_arrangement_newsletter(song_id: str = None, song_title: str = None, artist: str = None, test_email: str = None, target_locale: str = None) -> dict:
+    songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+    if not os.path.exists(songs_path):
+        songs_path = Path(__file__).resolve().parent / "songs.json"
+
+    matched_song = None
+    if os.path.exists(songs_path):
+        try:
+            with open(songs_path, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+            if song_id:
+                matched_song = next((s for s in catalog if str(s.get("id")) == str(song_id)), None)
+            elif song_title:
+                matched_song = next((s for s in catalog if s.get("title", "").strip().lower() == song_title.strip().lower()), None)
+        except Exception as e:
+            print(f"[Newsletter] Error loading catalog: {e}")
+
+    s_title = song_title or (matched_song.get("title") if matched_song else "New Piano Arrangement")
+    s_artist = artist or (matched_song.get("artist") if matched_song else "meloscribe")
+
+    if test_email:
+        test_locale = target_locale or "de"
+        ok = send_newsletter_email(test_email, "test_preview_token", s_title, s_artist, locale=test_locale)
+        return {
+            "status": "success" if ok else "failed",
+            "mode": "test",
+            "test_email": test_email,
+            "song": s_title,
+            "artist": s_artist,
+            "locale": test_locale
+        }
+
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("SELECT email, locale, token FROM notify_subscribers WHERE status = 'active'")
+        subscribers = c.fetchall()
+        conn.close()
+    except Exception as e:
+        return {"status": "error", "message": f"Database error: {e}"}
+
+    sent = 0
+    failed = 0
+    for sub in subscribers:
+        sub_email, sub_locale, sub_token = sub[0], sub[1] or "en", sub[2] or "token"
+        if send_newsletter_email(sub_email, sub_token, s_title, s_artist, locale=sub_locale):
+            sent += 1
+        else:
+            failed += 1
+
+    return {
+        "status": "success",
+        "mode": "broadcast",
+        "song": s_title,
+        "artist": s_artist,
+        "total_active_subscribers": len(subscribers),
+        "sent": sent,
+        "failed": failed
+    }
+
 
 # In-memory cache for IP to currency mappings
 ip_currency_cache = {}

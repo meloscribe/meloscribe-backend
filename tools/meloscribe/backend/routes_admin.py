@@ -210,6 +210,42 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
 
+    @router.post("/api/admin/newsletter/broadcast")
+    async def post_local_newsletter_broadcast(request: Request):
+        try:
+            body = await request.json()
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.post(f"{VM_API_BASE}/api/admin/newsletter/broadcast", json=body, headers=headers, timeout=30.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @router.post("/api/admin/notify/activate")
+    async def post_local_notify_activate(request: Request):
+        try:
+            body = await request.json()
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.post(f"{VM_API_BASE}/api/admin/notify/activate", json=body, headers=headers, timeout=10.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @router.post("/api/admin/notify/resend-confirmation")
+    async def post_local_notify_resend(request: Request):
+        try:
+            body = await request.json()
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.post(f"{VM_API_BASE}/api/admin/notify/resend-confirmation", json=body, headers=headers, timeout=10.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
     @router.get("/api/stripe/sales")
     def get_local_stripe_sales(request: Request):
         try:
@@ -1176,14 +1212,88 @@ else:
                     email TEXT PRIMARY KEY,
                     status TEXT,
                     created_at TEXT,
-                    confirmed_at TEXT
+                    confirmed_at TEXT,
+                    song_name TEXT,
+                    locale TEXT
                 )
             """)
             conn.commit()
-            c.execute("SELECT email, status, created_at, confirmed_at FROM notify_subscribers ORDER BY created_at DESC")
-            rows = [{"email": r[0], "status": r[1], "created_at": r[2], "confirmed_at": r[3]} for r in c.fetchall()]
+            for col, col_type in [("song_name", "TEXT"), ("locale", "TEXT DEFAULT 'en'"), ("song_id", "TEXT")]:
+                try:
+                    c.execute(f"ALTER TABLE notify_subscribers ADD COLUMN {col} {col_type}")
+                    conn.commit()
+                except Exception:
+                    pass
+            c.execute("SELECT email, status, song_name, locale, created_at, confirmed_at FROM notify_subscribers ORDER BY created_at DESC")
+            rows = [{"email": r[0], "status": r[1], "song_name": r[2], "locale": r[3] or "en", "created_at": r[4], "confirmed_at": r[5]} for r in c.fetchall()]
             conn.close()
             return {"subscribers": rows, "total": len(rows), "active": sum(1 for r in rows if r["status"] == "active")}
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.post("/api/admin/newsletter/broadcast")
+    async def admin_broadcast_newsletter(request: Request):
+        verify_admin(request)
+        try:
+            body = await request.json()
+            song_name = body.get("song_name")
+            if not song_name:
+                raise HTTPException(status_code=400, detail="song_name is required")
+            song_url = body.get("song_url", "")
+            preview_url = body.get("preview_url", "")
+            from routes_public import broadcast_new_arrangement_newsletter
+            result = broadcast_new_arrangement_newsletter(
+                song_name=song_name,
+                song_url=song_url,
+                preview_url=preview_url
+            )
+            return JSONResponse(content=result, status_code=200)
+        except HTTPException:
+            raise
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.post("/api/admin/notify/activate")
+    async def admin_activate_subscriber(request: Request):
+        verify_admin(request)
+        try:
+            body = await request.json()
+            email = body.get("email")
+            if not email:
+                raise HTTPException(status_code=400, detail="email is required")
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            c = conn.cursor()
+            c.execute("UPDATE notify_subscribers SET status = 'active', confirmed_at = CURRENT_TIMESTAMP WHERE email = ?", (email,))
+            conn.commit()
+            updated = c.rowcount
+            conn.close()
+            return {"success": True, "updated": updated, "email": email}
+        except HTTPException:
+            raise
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
+    @router.post("/api/admin/notify/resend-confirmation")
+    async def admin_resend_confirmation(request: Request):
+        verify_admin(request)
+        try:
+            body = await request.json()
+            email = body.get("email")
+            if not email:
+                raise HTTPException(status_code=400, detail="email is required")
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            c = conn.cursor()
+            row = c.execute("SELECT email, token, song_name, song_id, locale FROM notify_subscribers WHERE email = ?", (email,)).fetchone()
+            conn.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Subscriber not found")
+            
+            sub_email, sub_token, sub_song_name, sub_song_id, sub_locale = row
+            from routes_public import _send_confirmation_email
+            _send_confirmation_email(sub_email, sub_token, sub_song_name or "Sheet Music", sub_song_id or "", sub_locale or "en")
+            return {"success": True, "email": sub_email, "message": "Confirmation email resent"}
+        except HTTPException:
+            raise
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
