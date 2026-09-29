@@ -424,14 +424,17 @@ NEWSLETTER_TEMPLATES = {
     "en": {
         "subject": "🎹 New Piano Arrangement: {song_name} ({artist}) — meloscribe",
         "badge": "NEW ARRANGEMENT RELEASE",
-        "greeting": "Hey pianist,",
-        "intro": "A brand new handcrafted piano arrangement is now live in our library: <strong>{song_name}</strong> by {artist}.",
+        "greeting": "Hey Pianist,",
+        "intro": "The handcrafted sheet music and learning package for <strong>{song_name}</strong> is now live in our catalog.",
         "box_title": "Included in this learning package:",
-        "feat_1": "Accurate Sheet Music (Printable PDF)",
-        "feat_2": "Complete MIDI Files (Both hands + split)",
-        "feat_3": "Synchronized practice video tutorials (Original & Slow)",
-        "cta": "Play & Listen Now",
-        "preview_note": "You can listen to the free audio preview directly on the website.",
+        "feat_1_title": "Accurate Sheet Music",
+        "feat_1_desc": "Clean, studio-grade printable PDF",
+        "feat_2_title": "Full MIDI Files",
+        "feat_2_desc": "Both hands + separated practice tracks",
+        "feat_3_title": "Synced Video Tutorials",
+        "feat_3_desc": "Original performance & slow practice tempo",
+        "cta": "Listen & Play Now",
+        "preview_note": "Free audio preview available on website",
         "happy_practicing": "Happy practicing,",
         "footer_reason": "You received this email because you subscribed to piano arrangement updates on",
         "unsubscribe": "Unsubscribe"
@@ -440,13 +443,16 @@ NEWSLETTER_TEMPLATES = {
         "subject": "🎹 Neues Klavier-Arrangement: {song_name} ({artist}) — meloscribe",
         "badge": "NEUES ARRANGEMENT RELEASE",
         "greeting": "Hey Pianist,",
-        "intro": "Ein brandneues, handgefertigtes Klavier-Arrangement steht ab sofort für dich bereit: <strong>{song_name}</strong> von {artist}.",
+        "intro": "Das handgefertigte Noten- und Lernpaket für <strong>{song_name}</strong> ist ab sofort in unserem Katalog verfügbar.",
         "box_title": "In diesem Lernpaket enthalten:",
-        "feat_1": "Präzise Noten (Druckfähiges PDF)",
-        "feat_2": "Vollständige MIDI-Dateien (Beide Hände + getrennt zum Üben)",
-        "feat_3": "Synchronisierte Video-Tutorials (Original & Slow Practice)",
+        "feat_1_title": "Präzise Noten",
+        "feat_1_desc": "Druckfähiges, hochwertiges PDF",
+        "feat_2_title": "Vollständige MIDI-Dateien",
+        "feat_2_desc": "Beide Hände + getrennt zum Üben",
+        "feat_3_title": "Synchronisierte Tutorials",
+        "feat_3_desc": "Original-Tempo & Slow Practice",
         "cta": "Jetzt anhören & spielen",
-        "preview_note": "Du kannst dir auf der Website direkt die kostenlose Audio-Vorschau anhören.",
+        "preview_note": "Kostenlose Audio-Vorschau auf der Website verfügbar",
         "happy_practicing": "Viel Spaß beim Üben,",
         "footer_reason": "Du erhältst diese E-Mail, weil du dich für Noten-Updates angemeldet hast auf",
         "unsubscribe": "Newsletter abmelden"
@@ -455,13 +461,16 @@ NEWSLETTER_TEMPLATES = {
         "subject": "🎹 Nouvel arrangement piano : {song_name} ({artist}) — meloscribe",
         "badge": "NOUVEL ARRANGEMENT PIANO",
         "greeting": "Bonjour pianiste,",
-        "intro": "Un tout nouvel arrangement pour piano fait main est disponible : <strong>{song_name}</strong> de {artist}.",
+        "intro": "Le pack d'apprentissage complet pour <strong>{song_name}</strong> est maintenant disponible dans notre catalogue.",
         "box_title": "Contenu du pack d'apprentissage :",
-        "feat_1": "Partitions précises (PDF imprimable)",
-        "feat_2": "Fichiers MIDI complets (Deux mains + séparées pour l'entraînement)",
-        "feat_3": "Tutoriels vidéo synchronisés (Vitesse normale & lente)",
+        "feat_1_title": "Partitions précises",
+        "feat_1_desc": "PDF imprimable de qualité studio",
+        "feat_2_title": "Fichiers MIDI complets",
+        "feat_2_desc": "Deux mains + pistes séparées pour l'entraînement",
+        "feat_3_title": "Tutoriels vidéo synchronisés",
+        "feat_3_desc": "Performance originale & tempo ralenti",
         "cta": "Écouter & Jouer maintenant",
-        "preview_note": "Vous pouvez écouter l'extrait audio gratuit directement sur le site.",
+        "preview_note": "Extrait audio gratuit disponible sur le site",
         "happy_practicing": "Bonne pratique,",
         "footer_reason": "Vous recevez cet e-mail car vous vous êtes inscrit(e) aux nouveautés sur",
         "unsubscribe": "Se désabonner"
@@ -470,13 +479,16 @@ NEWSLETTER_TEMPLATES = {
         "subject": "🎹 Nuevo arreglo de piano: {song_name} ({artist}) — meloscribe",
         "badge": "NUEVO ARREGLO DE PIANO",
         "greeting": "¡Hola pianista!,",
-        "intro": "Un nuevo arreglo de piano hecho a oído ya está disponible: <strong>{song_name}</strong> de {artist}.",
+        "intro": "El paquete de aprendizaje completo para <strong>{song_name}</strong> ya está disponible en nuestro catálogo.",
         "box_title": "Incluido en este paquete de aprendizaje:",
-        "feat_1": "Partitura precisa (PDF imprimible)",
-        "feat_2": "Archivos MIDI completos (Ambas manos + separadas para practicar)",
-        "feat_3": "Tutoriales en vídeo synchronizados (Velocidad normal y lenta)",
+        "feat_1_title": "Partitura precisa",
+        "feat_1_desc": "PDF imprimible de alta calidad",
+        "feat_2_title": "Archivos MIDI completos",
+        "feat_2_desc": "Ambas manos + separadas para practicar",
+        "feat_3_title": "Tutoriales sincronizados",
+        "feat_3_desc": "Interpretación original y tempo lento",
         "cta": "Escuchar y Tocar ahora",
-        "preview_note": "Puedes escuchar la vista previa de audio gratuita directamente en la web.",
+        "preview_note": "Vista previa de audio gratuita disponible en la web",
         "happy_practicing": "¡Disfruta practicando!,",
         "footer_reason": "Recibes este correo porque te suscribiste a las novedades en",
         "unsubscribe": "Darse de baja"
@@ -485,13 +497,16 @@ NEWSLETTER_TEMPLATES = {
         "subject": "🎹 Nuovo arrangiamento per pianoforte: {song_name} ({artist}) — meloscribe",
         "badge": "NUOVO ARRANGIAMENTO PER PIANOFORTE",
         "greeting": "Ciao pianista,",
-        "intro": "Un nuovissimo arrangiamento per pianoforte è ora disponibile: <strong>{song_name}</strong> di {artist}.",
+        "intro": "Il pacchetto di apprendimento completo per <strong>{song_name}</strong> è ora disponibile nel nostro catalogo.",
         "box_title": "Cosa è incluso in questo pacchetto:",
-        "feat_1": "Spartito accurato (PDF stampabile)",
-        "feat_2": "File MIDI completi (Entrambe le mani + separate per esercitarsi)",
-        "feat_3": "Tutorial video sincronizzati (Velocità normale e lenta)",
+        "feat_1_title": "Spartito accurato",
+        "feat_1_desc": "PDF stampabile di alta qualità",
+        "feat_2_title": "File MIDI completi",
+        "feat_2_desc": "Entrambe le mani + separate per esercitarsi",
+        "feat_3_title": "Tutorial video sincronizzati",
+        "feat_3_desc": "Esecuzione originale e tempo lento",
         "cta": "Ascolta e Suona ora",
-        "preview_note": "Puoi ascoltare l'anteprima audio gratuita direttamente sul sito web.",
+        "preview_note": "Anteprima audio gratuita disponibile sul sito web",
         "happy_practicing": "Buon esercizio,",
         "footer_reason": "Hai ricevuto questa email perché ti sei iscritto agli aggiornamenti su",
         "unsubscribe": "Annulla iscrizione"
@@ -535,21 +550,27 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
     html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
-    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">{greeting}</p>
-    <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
-      {message_intro} {message_body}
-    </p>
-    <div style="text-align: center; margin: 28px 0;">
-      <a href="{confirm_url}" style="display: inline-block; background-color: #00f5d4; color: #050508; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none;">{cta_text}</a>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 24px 12px;">
+  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
+    <div style="height: 3px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
+    <div style="padding: 30px 24px;">
+      <p style="color: #ffffff; font-size: 16px; font-weight: 700; margin: 0 0 10px 0;">{greeting}</p>
+      <p style="color: #cbd5e1; line-height: 1.7; font-size: 14.5px; margin: 0 0 24px 0;">
+        {message_intro} {message_body}
+      </p>
+      <div style="text-align: center; margin: 26px 0;">
+        <a href="{confirm_url}" style="display: inline-block; background-color: #00f5d4; background: linear-gradient(135deg, #00f5d4 0%, #ff2d92 100%); color: #ffffff; font-weight: 800; font-size: 15px; padding: 14px 36px; border-radius: 12px; text-decoration: none; box-shadow: 0 4px 22px rgba(255, 45, 146, 0.35); text-shadow: 0 1px 2px rgba(0,0,0,0.35);">{cta_text}</a>
+      </div>
+      <p style="color: #94a3b8; font-size: 12.5px; text-align: center; line-height: 1.6; margin: 0 0 20px 0;">
+        {disclaimer}
+      </p>
+      <p style="color: #94a3b8; font-size: 14px; margin: 20px 0 0 0; line-height: 1.6;">
+        <span style="font-size: 17px; font-weight: 900; letter-spacing: 1px;"><span style="color: #00f5ff;">melo</span><span style="color: #ff2d92;">scribe</span></span>
+      </p>
     </div>
-    <p style="color: #94a3b8; font-size: 13px; text-align: center; line-height: 1.6; margin-bottom: 0;">
-      {disclaimer}
-    </p>
   </div>
-  <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; line-height: 1.6;">
-    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
+  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 22px; line-height: 1.6;">
+    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
 </html>
@@ -619,9 +640,12 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
     greeting = tpl["greeting"]
     intro = tpl["intro"].format(song_name=song_name, artist=artist)
     box_title = tpl["box_title"]
-    feat_1 = tpl["feat_1"]
-    feat_2 = tpl["feat_2"]
-    feat_3 = tpl["feat_3"]
+    feat_1_title = tpl.get("feat_1_title", "Accurate Sheet Music")
+    feat_1_desc = tpl.get("feat_1_desc", "Clean printable PDF")
+    feat_2_title = tpl.get("feat_2_title", "Full MIDI Files")
+    feat_2_desc = tpl.get("feat_2_desc", "Both hands + separated practice tracks")
+    feat_3_title = tpl.get("feat_3_title", "Synced Video Tutorials")
+    feat_3_desc = tpl.get("feat_3_desc", "Original performance & slow practice tempo")
     cta = tpl["cta"]
     preview_note = tpl["preview_note"]
     happy_practicing = tpl["happy_practicing"]
@@ -631,50 +655,86 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
     html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 540px; margin: 0 auto; padding: 32px 16px;">
-  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
-    <div style="text-align: center; margin-bottom: 16px;">
-      <span style="display: inline-block; background-color: rgba(0, 245, 255, 0.1); border: 1px solid rgba(0, 245, 255, 0.3); color: #00f5ff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;">
-        {badge}
-      </span>
-    </div>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 24px 12px;">
+  <!-- Main Card Container -->
+  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
+    
+    <!-- Signature Meloscribe Top Gradient Bar: Cyan to Magenta -->
+    <div style="height: 3px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
 
-    <h1 style="color: #ffffff; font-size: 22px; font-weight: 800; text-align: center; margin: 0 0 4px 0;">{song_name}</h1>
-    <p style="color: #94a3b8; font-size: 14px; text-align: center; margin: 0 0 24px 0;">{artist}</p>
+    <div style="padding: 30px 24px;">
+      <!-- Release Pill Badge with Magenta Glow -->
+      <div style="text-align: center; margin-bottom: 18px;">
+        <span style="display: inline-block; background-color: rgba(255, 45, 146, 0.12); border: 1px solid rgba(255, 45, 146, 0.4); color: #ff2d92; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; padding: 5px 14px; border-radius: 20px; text-transform: uppercase;">
+          {badge}
+        </span>
+      </div>
 
-    <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">{greeting}</p>
-    <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
-      {intro}
-    </p>
-
-    <div style="background-color: #0c0e17; border: 1px solid #1e293b; border-radius: 12px; padding: 18px; margin: 20px 0;">
-      <p style="color: #00f5ff; font-size: 13px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.5px;">
-        {box_title}
+      <!-- Song Title & Artist -->
+      <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; text-align: center; margin: 0 0 6px 0; line-height: 1.25; letter-spacing: -0.3px;">
+        {song_name}
+      </h1>
+      <p style="color: #94a3b8; font-size: 15px; text-align: center; margin: 0 0 24px 0; font-weight: 500;">
+        by <span style="color: #e2e8f0; font-weight: 600;">{artist}</span>
       </p>
-      <ul style="color: #cbd5e1; font-size: 14px; line-height: 1.8; margin: 0; padding-left: 20px;">
-        <li><strong>{feat_1}</strong></li>
-        <li><strong>{feat_2}</strong></li>
-        <li><strong>{feat_3}</strong></li>
-      </ul>
+
+      <!-- Clean Personal Intro -->
+      <p style="color: #ffffff; font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">{greeting}</p>
+      <p style="color: #94a3b8; line-height: 1.6; font-size: 14.5px; margin: 0 0 22px 0;">
+        {intro}
+      </p>
+
+      <!-- Structured Learning Package Feature Box with Magenta Border & Cyan Accents -->
+      <div style="background-color: #0c0e17; border: 1px solid #1e293b; border-left: 3px solid #ff2d92; border-radius: 12px; padding: 18px 20px; margin: 20px 0 26px 0;">
+        <p style="color: #ff2d92; font-size: 11.5px; font-weight: 800; margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.8px;">
+          {box_title}
+        </p>
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
+          <tr>
+            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #00f5ff; font-size: 13px;">✦</td>
+            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+              <strong style="color: #ffffff;">{feat_1_title}</strong> — {feat_1_desc}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #ff2d92; font-size: 13px;">✦</td>
+            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+              <strong style="color: #ffffff;">{feat_2_title}</strong> — {feat_2_desc}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #00f5ff; font-size: 13px;">✦</td>
+            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+              <strong style="color: #ffffff;">{feat_3_title}</strong> — {feat_3_desc}
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- High-Impact CTA Button (Cyan-to-Magenta Brand Gradient) -->
+      <div style="text-align: center; margin: 26px 0 14px 0;">
+        <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; background: linear-gradient(135deg, #00f5d4 0%, #ff2d92 100%); color: #ffffff; font-weight: 800; font-size: 15px; padding: 14px 38px; border-radius: 12px; text-decoration: none; box-shadow: 0 4px 22px rgba(255, 45, 146, 0.38); text-shadow: 0 1px 2px rgba(0,0,0,0.35); letter-spacing: 0.3px;">
+          {cta}
+        </a>
+      </div>
+
+      <!-- Audio Preview Callout -->
+      <p style="color: #94a3b8; font-size: 12.5px; text-align: center; margin: 0 0 24px 0;">
+        🎧 {preview_note}
+      </p>
+
+      <!-- Signature with Signature Melo (cyan) Scribe (magenta) -->
+      <p style="color: #94a3b8; font-size: 14px; margin: 22px 0 0 0; line-height: 1.6;">
+        {happy_practicing}<br>
+        <span style="font-size: 17px; font-weight: 900; letter-spacing: 1px;"><span style="color: #00f5ff;">melo</span><span style="color: #ff2d92;">scribe</span></span>
+      </p>
     </div>
-
-    <div style="text-align: center; margin: 28px 0 20px 0;">
-      <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; color: #050508; font-weight: 800; font-size: 15px; padding: 14px 34px; border-radius: 10px; text-decoration: none; box-shadow: 0 0 20px rgba(0, 245, 212, 0.3);">{cta}</a>
-    </div>
-
-    <p style="color: #94a3b8; font-size: 13px; text-align: center; line-height: 1.6; margin: 0;">
-      {preview_note}
-    </p>
-
-    <p style="color: #cbd5e1; line-height: 1.6; font-size: 15px; margin-top: 24px; margin-bottom: 0;">
-      {happy_practicing}<br><br>
-      <strong>meloscribe</strong>
-    </p>
   </div>
 
-  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 24px; line-height: 1.6;">
+  <!-- Minimalist Footer -->
+  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 22px; line-height: 1.6;">
     {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a>.<br>
-    <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
+    <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
 </html>
@@ -685,9 +745,9 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
 {intro.replace("<strong>", "").replace("</strong>", "")}
 
 {box_title}
-- {feat_1}
-- {feat_2}
-- {feat_3}
+- {feat_1_title}: {feat_1_desc}
+- {feat_2_title}: {feat_2_desc}
+- {feat_3_title}: {feat_3_desc}
 
 {song_url}
 
