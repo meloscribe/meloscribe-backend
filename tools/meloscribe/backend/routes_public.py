@@ -536,15 +536,6 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 24px; background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 24px 16px;">
-    <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: collapse;">
-      <tr>
-        <td style="font-size: 30px; font-weight: 900; color: #00f5ff; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: right;">melo</td>
-        <td style="font-size: 30px; font-weight: 900; color: #ff2d92; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: left;">scribe</td>
-      </tr>
-    </table>
-    <p style="color: #94a3b8; font-size: 13px; margin: 10px 0 0 0; font-style: italic;">Arranged by ear. Played by you.</p>
-  </div>
   <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
     <p style="color: #ffffff; font-size: 16px; font-weight: 600; margin-top: 0;">{greeting}</p>
     <p style="color: #cbd5e1; line-height: 1.7; font-size: 15px;">
@@ -558,7 +549,6 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
     </p>
   </div>
   <p style="text-align: center; font-size: 12px; color: #94a3b8; margin-top: 24px; line-height: 1.6;">
-    meloscribe • Arranged by ear. Played by you.<br>
     <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
@@ -574,7 +564,6 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
 
 {disclaimer}
 
-meloscribe • Arranged by ear. Played by you.
 https://meloscribesheets.com
 
 {unsubscribe_label}:
@@ -643,16 +632,6 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
 <html>
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 540px; margin: 0 auto; padding: 32px 16px;">
-  <div style="text-align: center; margin-bottom: 24px; background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 24px 16px;">
-    <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto; border-collapse: collapse;">
-      <tr>
-        <td style="font-size: 30px; font-weight: 900; color: #00f5ff; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: right;">melo</td>
-        <td style="font-size: 30px; font-weight: 900; color: #ff2d92; letter-spacing: 2px; text-transform: lowercase; padding: 0; text-align: left;">scribe</td>
-      </tr>
-    </table>
-    <p style="color: #94a3b8; font-size: 13px; margin: 10px 0 0 0; font-style: italic;">Arranged by ear. Played by you.</p>
-  </div>
-
   <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; padding: 32px;">
     <div style="text-align: center; margin-bottom: 16px;">
       <span style="display: inline-block; background-color: rgba(0, 245, 255, 0.1); border: 1px solid rgba(0, 245, 255, 0.3); color: #00f5ff; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; padding: 4px 12px; border-radius: 20px; text-transform: uppercase;">
@@ -694,7 +673,6 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
   </div>
 
   <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 24px; line-height: 1.6;">
-    meloscribe • Arranged by ear. Played by you.<br>
     {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a>.<br>
     <a href="{unsubscribe_url}" style="color: #94a3b8; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
@@ -719,7 +697,6 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
 meloscribe
 
 ---
-meloscribe • Arranged by ear. Played by you.
 https://meloscribesheets.com
 
 {unsubscribe_label}:
