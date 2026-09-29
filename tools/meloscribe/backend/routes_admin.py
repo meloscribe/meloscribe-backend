@@ -1243,9 +1243,8 @@ else:
             preview_url = body.get("preview_url", "")
             from routes_public import broadcast_new_arrangement_newsletter
             result = broadcast_new_arrangement_newsletter(
-                song_name=song_name,
-                song_url=song_url,
-                preview_url=preview_url
+                song_title=song_name,
+                force=body.get("force", False)
             )
             return JSONResponse(content=result, status_code=200)
         except HTTPException:

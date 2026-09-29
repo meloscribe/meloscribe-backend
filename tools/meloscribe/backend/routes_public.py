@@ -791,7 +791,7 @@ https://meloscribesheets.com
         print(f"[Newsletter] Failed to send email: {e}")
         return False
 
-def broadcast_new_arrangement_newsletter(song_id: str = None, song_title: str = None, artist: str = None, test_email: str = None, target_locale: str = None) -> dict:
+def broadcast_new_arrangement_newsletter(song_id: str = None, song_title: str = None, artist: str = None, test_email: str = None, target_locale: str = None, force: bool = False) -> dict:
     songs_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
     if not os.path.exists(songs_path):
         songs_path = Path(__file__).resolve().parent / "songs.json"
@@ -826,30 +826,69 @@ def broadcast_new_arrangement_newsletter(song_id: str = None, song_title: str = 
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
+        
+        # Ensure dispatch tracking table exists
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_dispatches (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                song_name TEXT,
+                song_id TEXT,
+                sent_at TEXT,
+                count_sent INTEGER
+            )
+        """)
+        conn.commit()
+
+        # Deduplication check: prevent accidental double broadcast if song is rearranged / re-saved
+        if not force:
+            c.execute(
+                "SELECT sent_at, count_sent FROM newsletter_dispatches WHERE LOWER(song_name) = LOWER(?) ORDER BY id DESC LIMIT 1",
+                (s_title,)
+            )
+            existing_dispatch = c.fetchone()
+            if existing_dispatch:
+                conn.close()
+                return {
+                    "status": "skipped",
+                    "reason": "already_sent",
+                    "message": f"Newsletter for '{s_title}' was already sent on {existing_dispatch[0]} to {existing_dispatch[1]} subscribers. Overwriting or re-saving the song does not trigger duplicate emails. Set force=True to override.",
+                    "song": s_title,
+                    "sent_at": existing_dispatch[0],
+                    "count_previously_sent": existing_dispatch[1]
+                }
+
         c.execute("SELECT email, locale, token FROM notify_subscribers WHERE status = 'active'")
         subscribers = c.fetchall()
+        
+        sent = 0
+        failed = 0
+        for sub in subscribers:
+            sub_email, sub_locale, sub_token = sub[0], sub[1] or "en", sub[2] or "token"
+            if send_newsletter_email(sub_email, sub_token, s_title, s_artist, locale=sub_locale):
+                sent += 1
+            else:
+                failed += 1
+
+        # Record this dispatch to prevent future duplicates
+        if sent > 0:
+            c.execute(
+                "INSERT INTO newsletter_dispatches (song_name, song_id, sent_at, count_sent) VALUES (?, ?, datetime('now'), ?)",
+                (s_title, str(song_id or (matched_song.get('id') if matched_song else '')), sent)
+            )
+            conn.commit()
+
         conn.close()
+        return {
+            "status": "success",
+            "mode": "broadcast",
+            "song": s_title,
+            "artist": s_artist,
+            "total_active_subscribers": len(subscribers),
+            "sent": sent,
+            "failed": failed
+        }
     except Exception as e:
         return {"status": "error", "message": f"Database error: {e}"}
-
-    sent = 0
-    failed = 0
-    for sub in subscribers:
-        sub_email, sub_locale, sub_token = sub[0], sub[1] or "en", sub[2] or "token"
-        if send_newsletter_email(sub_email, sub_token, s_title, s_artist, locale=sub_locale):
-            sent += 1
-        else:
-            failed += 1
-
-    return {
-        "status": "success",
-        "mode": "broadcast",
-        "song": s_title,
-        "artist": s_artist,
-        "total_active_subscribers": len(subscribers),
-        "sent": sent,
-        "failed": failed
-    }
 
 
 # In-memory cache for IP to currency mappings
