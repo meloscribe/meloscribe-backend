@@ -418,6 +418,58 @@ def get_checkout_analytics_data():
 
     traffic = parse_traffic_sources()
 
+    # Ratings from purchases table
+    rating_stats = {
+        "total_rated": 0,
+        "up": 0,
+        "down": 0,
+        "satisfaction_rate": 0.0,
+        "by_song": []
+    }
+    try:
+        from shared import db_path
+        if db_path.exists():
+            import sqlite3
+            conn = sqlite3.connect(str(db_path), timeout=5.0)
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM purchases WHERE rating = 'up'")
+            up_c = c.fetchone()[0] or 0
+            c.execute("SELECT COUNT(*) FROM purchases WHERE rating = 'down'")
+            down_c = c.fetchone()[0] or 0
+            tot_c = up_c + down_c
+            sat_r = round((up_c / tot_c * 100), 1) if tot_c > 0 else 0.0
+            
+            c.execute("""
+                SELECT song_name, 
+                       SUM(CASE WHEN rating = 'up' THEN 1 ELSE 0 END) as up_cnt,
+                       SUM(CASE WHEN rating = 'down' THEN 1 ELSE 0 END) as down_cnt
+                FROM purchases
+                WHERE rating IN ('up', 'down')
+                GROUP BY song_name
+                ORDER BY (up_cnt + down_cnt) DESC
+            """)
+            by_song = []
+            for r in c.fetchall():
+                stot = r[1] + r[2]
+                srate = round((r[1] / stot * 100), 1) if stot > 0 else 0.0
+                by_song.append({
+                    "song": r[0],
+                    "up": r[1],
+                    "down": r[2],
+                    "total": stot,
+                    "satisfaction_rate": srate
+                })
+            conn.close()
+            rating_stats = {
+                "total_rated": tot_c,
+                "up": up_c,
+                "down": down_c,
+                "satisfaction_rate": sat_r,
+                "by_song": by_song
+            }
+    except Exception as e:
+        print(f"[Checkout Analytics] Error getting rating stats: {e}")
+
     return {
         "summary": {
             "total_initiated": total_all,
@@ -429,6 +481,7 @@ def get_checkout_analytics_data():
             "website_unique_ips": website_views_unique_ips
         },
         "traffic_sources": traffic,
+        "ratings": rating_stats,
         "monthly": monthly_list,
         "attempts": attempts[:100]
     }

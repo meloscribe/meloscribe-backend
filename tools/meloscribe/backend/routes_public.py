@@ -55,6 +55,10 @@ class NotifySubscribeRequest(BaseModel):
     difficulty: Optional[str] = "Original"
     locale: Optional[str] = "en"
 
+class OrderRatingRequest(BaseModel):
+    hash: str
+    rating: Optional[str] = None
+
 # -------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------
@@ -1522,7 +1526,7 @@ def get_order_details(hash: str, request: Request):
         return JSONResponse(status_code=429, content={"error": "Too many requests. Please try again later."})
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
-    c.execute("SELECT song_name, email, download_count, created_at, status FROM purchases WHERE download_hash = ?", (hash,))
+    c.execute("SELECT song_name, email, download_count, created_at, status, rating FROM purchases WHERE download_hash = ?", (hash,))
     row = c.fetchone()
     conn.close()
     
@@ -1532,7 +1536,8 @@ def get_order_details(hash: str, request: Request):
             "email": "demo_customer@example.com",
             "download_count": 0,
             "created_at": "2026-07-01T12:00:00Z",
-            "status": "completed"
+            "status": "completed",
+            "rating": None
         }
         
     if not row:
@@ -1546,8 +1551,39 @@ def get_order_details(hash: str, request: Request):
         "song_name": row[0],
         "email": row[1],
         "download_count": row[2],
-        "created_at": row[3]
+        "created_at": row[3],
+        "rating": row[5] if len(row) > 5 else None
     }
+
+@router.post("/api/order/rating")
+def submit_order_rating(req: OrderRatingRequest, request: Request):
+    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
+    if "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    if is_rate_limited(client_ip, "order_rating", 30, 300):
+        return JSONResponse(status_code=429, content={"error": "Too many requests. Please try again later."})
+        
+    rating_raw = (req.rating or "").strip().lower()
+    if rating_raw in ("none", "clear", "remove", "null", ""):
+        rating_db = None
+    elif rating_raw in ("up", "down"):
+        rating_db = rating_raw
+    else:
+        return JSONResponse(status_code=400, content={"error": "Invalid rating. Must be 'up', 'down', or 'none'."})
+        
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    c = conn.cursor()
+    c.execute("SELECT song_name FROM purchases WHERE download_hash = ?", (req.hash,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return JSONResponse(status_code=404, content={"error": "Order not found."})
+        
+    c.execute("UPDATE purchases SET rating = ? WHERE download_hash = ?", (rating_db, req.hash))
+    conn.commit()
+    conn.close()
+    
+    return {"status": "success", "rating": rating_db}
 
 # -------------------------------------------------------------------
 # Secure file downloads

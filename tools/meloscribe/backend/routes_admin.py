@@ -1974,7 +1974,7 @@ else:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA busy_timeout=30000;")
         c = conn.cursor()
-        c.execute("SELECT transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, download_count, created_at FROM purchases ORDER BY created_at DESC")
+        c.execute("SELECT transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, download_count, created_at, rating FROM purchases ORDER BY created_at DESC")
         rows = c.fetchall()
         conn.close()
         
@@ -1991,7 +1991,8 @@ else:
                 "locale": row[7],
                 "buyer_name": row[8],
                 "download_count": row[9],
-                "created_at": row[10]
+                "created_at": row[10],
+                "rating": row[11] if len(row) > 11 else None
             })
         return {"orders": orders}
 
