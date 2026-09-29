@@ -117,6 +117,18 @@ def post_video(video_path: str, title: str, description: str,
         finish_resp = requests.post(upload_url, data=finish_params)
         if finish_resp.status_code == 200 and finish_resp.json().get("success"):
             print(f"[Facebook API] SUCCESS! Reel {'scheduled' if publish_at_dt else 'published'}.")
+            if thumbnail_path and os.path.exists(thumbnail_path):
+                try:
+                    with open(thumbnail_path, "rb") as tf:
+                        thumb_resp = requests.post(
+                            f"{GRAPH_URL}/{upload_session_id}/thumbnails",
+                            data={"access_token": token, "is_preferred": "true"},
+                            files={"source": tf}
+                        )
+                        if thumb_resp.status_code == 200:
+                            print("[Facebook API] Reel highlight thumbnail set successfully.")
+                except Exception as te:
+                    print(f"[Facebook API] Warning: Reel thumbnail setting failed: {te}")
             if comment_text and not publish_at_dt:
                 time.sleep(3)
                 post_comment(upload_session_id, comment_text, pin=True)

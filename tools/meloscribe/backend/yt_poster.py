@@ -121,8 +121,8 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
         yt_url = f"https://youtu.be/{video_id}"
         print(f"[YouTube API] SUCCESS! Video uploaded at {yt_url}")
 
-        # Upload thumbnail for long-form videos
-        if not is_short and thumbnail_path and os.path.exists(thumbnail_path):
+        # Upload thumbnail for all videos (including Shorts)
+        if thumbnail_path and os.path.exists(thumbnail_path):
             try:
                 print(f"[YouTube API] Uploading thumbnail...")
                 with open(thumbnail_path, "rb") as tf:

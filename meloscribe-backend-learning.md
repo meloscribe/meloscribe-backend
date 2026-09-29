@@ -2,6 +2,24 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-09-29: YouTube Caption/Title Formatting & Video Highlight Thumbnail Detection Across Social Platforms
+- **YouTube Title/Caption Formatting**:
+  - *Root Cause:* In `upload_bot.py`, `label` appended `" Tutorial"` when `args.profile == "tutorial"`. The YouTube upload call formatted titles with `f"{base_song} - {args.author}{label} | Piano Cover"`, generating double labels like `In This Shirt - The Irrepressibles Tutorial | Piano Cover`.
+  - *Fix:* Decoupled tutorial titles from cover titles:
+    - Tutorials: `{base_song} - {author} | Tutorial` (or `(Easy) | Tutorial` if easy version).
+    - Piano Covers: `{base_song} - {author} | Piano Cover` (or `Easy | Piano Cover`).
+    - Teasers: `{base_song} - {author} (Best Part) | Piano Cover`.
+- **Climax / Highlight Video Frame Detection (`extract_video_highlight_frame`)**:
+  - Implemented computer-vision scanner in `upload_bot.py` to automatically extract the peak highlight moment from any video (16:9 widescreen or 9:16 vertical):
+    - Uses a two-pass algorithm (30 coarse samples across middle 76% of duration, followed by 15 fine samples within ±1.5s of peak).
+    - Scores frames by illuminated active keys (HSV value > 180 & saturation > 50 or pure white center > 240) and falling note density.
+    - Saves the native full-resolution frame as a high-quality JPEG (`quality=95`).
+- **Cross-Platform Social Media Thumbnail Support**:
+  - **YouTube**: Full custom thumbnail upload via YouTube Data API v3 (`youtube.thumbnails().set`). Long-form and Shorts upload the highlight frame automatically.
+  - **Instagram Reels**: Uses the Graph API's `thumb_offset` parameter. In `ig_poster.py`, replaced the faulty `duration_ms - 100` (which landed in the dark fadeout at the end) with `thumb_offset_ms = int(highlight_ts * 1000)`, locking the Reel cover to the exact highlight climax.
+  - **Facebook**: Posts custom thumbnail image to `/{video_id}/thumbnails` with `is_preferred: true` for both long-form videos and Reels.
+  - **Threads**: Meta Threads Graph API currently does **NOT** expose any thumbnail upload or `thumb_offset` parameter. Threads handles preview frames automatically in-feed.
+
 ### 2026-09-10: Facebook Sync Endpoint Missing & Website Analytics IP-Deduplication Nuance
 - **Facebook 0 Views Root Cause**:
   1. Frontend `InsightsTab.jsx` calls `POST /api/facebook/sync` on sync triggers.

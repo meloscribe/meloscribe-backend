@@ -98,6 +98,108 @@ def get_duration_seconds(filepath):
     except Exception:
         return 0.0
 
+def extract_video_highlight_frame(video_path: str, output_path: str = None) -> tuple[str | None, float]:
+    """
+    Scans a video for the highlight moment with the highest density of pressed keys
+    and falling notes, saves that frame as high-quality JPEG thumbnail, and returns
+    (thumbnail_path, best_timestamp_seconds).
+    Works on both 16:9 widescreen and 9:16 portrait videos.
+    """
+    if not video_path or not os.path.exists(video_path):
+        return None, 0.0
+
+    if not output_path:
+        base, _ = os.path.splitext(video_path)
+        output_path = f"{base}_highlight_thumb.jpg"
+
+    try:
+        import cv2
+        import numpy as np
+
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0.0
+
+        if duration <= 1.0:
+            cap.release()
+            return None, 0.0
+
+        def score_frame(small_frame):
+            h, w, _ = small_frame.shape
+            is_portrait = h > w
+            if is_portrait:
+                keys_roi = small_frame[int(h * 0.58):int(h * 0.72), :]
+                notes_roi = small_frame[int(h * 0.15):int(h * 0.58), :]
+            else:
+                keys_roi = small_frame[int(h * 0.72):, :]
+                notes_roi = small_frame[int(h * 0.15):int(h * 0.72), :]
+
+            hsv_keys = cv2.cvtColor(keys_roi, cv2.COLOR_BGR2HSV)
+            # Active illuminated keys: high brightness & saturation or pure white key cores
+            active_keys = np.sum(((hsv_keys[:, :, 2] > 180) & (hsv_keys[:, :, 1] > 50)) | (hsv_keys[:, :, 2] > 240))
+            gray_notes = cv2.cvtColor(notes_roi, cv2.COLOR_BGR2GRAY)
+            active_notes = np.sum(gray_notes > 80)
+            return float(active_keys * 3.0 + active_notes)
+
+        # Coarse pass: 30 candidate samples across middle 76% of video
+        coarse_ts = [duration * (0.12 + 0.76 * (i / 29)) for i in range(30)]
+        scored = []
+        for t in coarse_ts:
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                small = cv2.resize(frame, (480, int(480 * frame.shape[0] / frame.shape[1])))
+                s = score_frame(small)
+                scored.append((s, t))
+
+        if not scored:
+            cap.release()
+            return None, 0.0
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_t = scored[0][1]
+
+        # Fine pass: 15 samples around top_t (+/- 1.5s)
+        fine_ts = [max(0.5, min(duration - 0.5, top_t - 1.5 + 3.0 * (i / 14))) for i in range(15)]
+        best_t = top_t
+        best_s = scored[0][0]
+        for t in fine_ts:
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                small = cv2.resize(frame, (480, int(480 * frame.shape[0] / frame.shape[1])))
+                s = score_frame(small)
+                if s > best_s:
+                    best_s = s
+                    best_t = t
+
+        # Extract best full-resolution frame
+        cap.set(cv2.CAP_PROP_POS_MSEC, best_t * 1000)
+        ret, best_frame = cap.read()
+        cap.release()
+
+        if ret and best_frame is not None:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            cv2.imwrite(output_path, best_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+            print(f"[Highlight Detector] Highlight thumbnail saved: {output_path} (at {best_t:.2f}s, score {best_s:.0f})")
+            return output_path, best_t
+
+    except Exception as e:
+        print(f"[Highlight Detector] CV2 extraction failed: {e}. Trying FFmpeg fallback...")
+        try:
+            import subprocess
+            dur = get_duration_seconds(video_path)
+            fallback_t = dur * 0.5 if dur > 2 else 1.0
+            cmd = ['ffmpeg', '-y', '-ss', str(fallback_t), '-i', video_path, '-vframes', '1', '-q:v', '2', output_path]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if os.path.exists(output_path):
+                return output_path, fallback_t
+        except Exception:
+            pass
+
+    return None, 0.0
+
 def get_audio_delay(video_path):
     import subprocess
     import tempfile
@@ -2217,8 +2319,14 @@ if __name__ == "__main__":
                 video_path = portrait_path
             format_mode = "full_arrangement"
             
-        thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
-        thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
+        # Resolve thumbnail: prioritize video highlight frame where keys & notes are max active
+        highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
+        if highlight_thumb and os.path.exists(highlight_thumb):
+            thumbnail_path = highlight_thumb
+            print(f"[YouTube Uploader] Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
+        else:
+            thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
+            thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
         
         if format_mode == "full_arrangement":
             default_yt_tpl = (
@@ -2257,8 +2365,13 @@ if __name__ == "__main__":
             except Exception as e_ai:
                 print(f"[YouTube Uploader] AI Hashtags warning: {e_ai}")
 
+        if is_tut:
+            yt_title = f"{base_song} - {args.author}{' (Easy)' if is_easy else ''} | Tutorial"
+        else:
+            yt_title = f"{base_song} - {args.author}{' Easy' if is_easy else ''}{' (Best Part)' if is_teaser else ''} | Piano Cover"
+
         tags = ["piano", "tutorial", "synthesia", "cover", base_song, args.author, "music", "piano cover"]
-        yt_url = post_video(video_path, f"{base_song} - {args.author}{label} | Piano Cover", desc, tags,
+        yt_url = post_video(video_path, yt_title, desc, tags,
                    publish_at_dt=dt_obj, privacy="public", format=format_mode,
                    thumbnail_path=thumbnail_path)
         if not yt_url:
@@ -2309,6 +2422,10 @@ if __name__ == "__main__":
 
         video_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}.mp4")
 
+        # Resolve highlight frame offset for Instagram Reel cover
+        _, highlight_ts = extract_video_highlight_frame(video_path)
+        thumb_offset_ms = int(highlight_ts * 1000) if highlight_ts > 0 else None
+
         ig_tpl = settings.get("desc_template_instagram") or (
             "🎹 {song} - {author}{label}\n\n"
             "Sheet Music & MIDI -> Link in Bio (Ko-Fi)\n\n"
@@ -2328,7 +2445,7 @@ if __name__ == "__main__":
             except Exception as e_ai:
                 print(f"[Instagram Uploader] AI Hashtags warning: {e_ai}")
 
-        success = post_reel(video_path, caption, publish_at_dt=dt_obj)
+        success = post_reel(video_path, caption, publish_at_dt=dt_obj, thumb_offset_ms=thumb_offset_ms)
         if not success:
             sys.exit(1)
     elif args.mode == "facebook":
@@ -2391,7 +2508,12 @@ if __name__ == "__main__":
                 video_path = portrait_path
             format_mode = "full_arrangement"
             
-        if format_mode == "full_arrangement":
+        # Resolve thumbnail: prioritize video highlight frame where keys & notes are max active
+        highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
+        if highlight_thumb and os.path.exists(highlight_thumb):
+            thumbnail_path = highlight_thumb
+            print(f"[Facebook Uploader] Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
+        elif format_mode == "full_arrangement":
             wide_thumb = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}_wide.jpg")
             wide_thumb = resolve_case_insensitive_path(wide_thumb)
             if os.path.exists(wide_thumb):

@@ -221,6 +221,16 @@ git add . && git commit -m "..." && git push
   - `OutboundEventRequest`: Unterstützt flexibel `{ target, source }`, `{ partner, placement }` sowie `partnerId`-Aliase. Speichert Events mit Client-IP und Zeitstempel in `affiliate_clicks` in `analytics.db`.
   - `main.py`: `"/api/events"` in die `PUBLIC_ROUTES`-Whitelist des `security_middleware` aufgenommen, damit Requests auch in Linux/Production ohne `X-Meloscribe-Key` zugelassen werden.
   - End-to-End über `requests` und PowerShell verifiziert (`200 OK`, aggregierte KPI- und Partner-Statistiken fehlerfrei).
+- [x] YouTube Title Formatting & Cross-Platform Video Highlight Thumbnail Extraction:
+  - `upload_bot.py`: Decoupled tutorial titles from cover titles:
+    - Tutorials: `{base_song} - {author} | Tutorial` (or `(Easy) | Tutorial` if easy).
+    - Piano Covers: `{base_song} - {author} | Piano Cover` (or `Easy | Piano Cover`).
+    - Eliminates redundant title suffix (`In This Shirt - The Irrepressibles Tutorial | Piano Cover`).
+  - Added CV-based highlight detector `extract_video_highlight_frame(video_path)` scanning for peak pressed illuminated keys and falling note density to capture the most engaging climax thumbnail.
+  - YouTube: Uploads highlight frame automatically via YouTube Data API v3 (`youtube.thumbnails().set`).
+  - Instagram: Sets `thumb_offset` to highlight millisecond timestamp in `ig_poster.py`, eliminating the end-of-video dark fadeout bug.
+  - Facebook: Passes highlight thumbnail to `/{video_id}/thumbnails` with `is_preferred: true` in `fb_poster.py`.
+  - Synced and deployed to production VM (`152.70.23.171`).
 
 ## Active Blockers / Next Steps
 

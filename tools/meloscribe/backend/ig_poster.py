@@ -35,10 +35,11 @@ def _get_creds():
     return d.get("access_token"), d.get("ig_business_id")
 
 
-def post_reel(video_path: str, caption: str, publish_at_dt: datetime = None) -> bool:
+def post_reel(video_path: str, caption: str, publish_at_dt: datetime = None, thumb_offset_ms: int = None) -> bool:
     """
     Upload a Reel to Instagram.
     If publish_at_dt is given, the post is scheduled (must be 10min–75 days in the future).
+    If thumb_offset_ms is given, that timestamp in ms is used for the cover frame.
     Returns True on success.
     """
     if not os.path.exists(video_path):
@@ -102,11 +103,14 @@ def post_reel(video_path: str, caption: str, publish_at_dt: datetime = None) -> 
             "video_url": video_url
         }
 
-        # Set cover to the last frame of the video (avoid black fade-in as cover)
+        # Set cover to the highlight frame of the video (avoid black fade-in/fade-out as cover)
         duration_ms = _get_video_duration_ms(video_path)
-        if duration_ms > 0:
-            container_params["thumb_offset"] = max(0, duration_ms - 100)  # 100ms before end
-            print(f"[Instagram API] Cover set to last frame (offset: {container_params['thumb_offset']}ms)")
+        if thumb_offset_ms is not None and 0 <= thumb_offset_ms <= duration_ms:
+            container_params["thumb_offset"] = int(thumb_offset_ms)
+            print(f"[Instagram API] Cover set to video highlight frame (offset: {container_params['thumb_offset']}ms)")
+        elif duration_ms > 0:
+            container_params["thumb_offset"] = min(int(duration_ms * 0.3), duration_ms)
+            print(f"[Instagram API] Cover set to default frame (offset: {container_params['thumb_offset']}ms)")
 
         if publish_at_dt:
             unix_ts = int(publish_at_dt.astimezone(timezone.utc).timestamp())
