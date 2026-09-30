@@ -152,6 +152,60 @@ def get_checkout_analytics_data():
     BUG_START_TS = 1789315492
     BUG_END_TS = 1789679050
 
+    # Known QA / test payment intents to exclude from conversion stats (e.g. testing checkout UX)
+    EXCLUDED_PI_IDS = {
+        "pi_3ULVYlQ4cuBqoYoX2mYBTm57",
+        "pi_3ULVYUQ4cuBqoYoX066YDh7U",
+        "pi_3ULVY3Q4cuBqoYoX2QyoOP5N",
+        "pi_3ULVKXQ4cuBqoYoX26DtyFbS",
+        "pi_3ULVJ8Q4cuBqoYoX2WdGBy9d",
+        "pi_3ULUFVQ4cuBqoYoX1Hz7rW3P",
+    }
+    custom_excluded = settings.get("excluded_payment_intents", [])
+    if isinstance(custom_excluded, list):
+        EXCLUDED_PI_IDS.update(custom_excluded)
+
+    TIER1_COUNTRIES = {
+        "US", "CA", "GB", "UK", "AU", "NZ", "DE", "AT", "CH", "FR", "NL", "BE",
+        "SE", "NO", "DK", "FI", "IE", "IT", "ES", "LU", "IS", "JP", "SG"
+    }
+
+    KNOWN_PI_COUNTRIES = {
+        "pi_3UGmUjQ4cuBqoYoX1jShvNZ5": "DE",
+        "pi_3UHJ1vQ4cuBqoYoX2aBQXTk5": "BE",
+        "pi_3UI8TTQ4cuBqoYoX18PhqVXR": "BE",
+        "pi_3UIFTdQ4cuBqoYoX2sXYPfIw": "CA",
+        "pi_3UJyRqQ4cuBqoYoX2nJokugc": "US",
+        "pi_3UHDojQ4cuBqoYoX2QubisgL": "MX",
+        "pi_3UHE2RQ4cuBqoYoX2W6JvCOj": "TW",
+        "pi_3UHFoAQ4cuBqoYoX0C4yOEJx": "PH",
+        "pi_3UHGQzQ4cuBqoYoX1rnSiZOu": "VN",
+        "pi_3UHHd2Q4cuBqoYoX2MipUHZw": "PH",
+        "pi_3UHIfOQ4cuBqoYoX0a1SROoZ": "PH",
+        "pi_3UHdQNQ4cuBqoYoX06iOVly5": "PH",
+        "pi_3UHgNpQ4cuBqoYoX2Rc3RoNQ": "PH",
+        "pi_3UHgxcQ4cuBqoYoX1E2cirOA": "PH",
+        "pi_3UHl25Q4cuBqoYoX1HEjDBro": "TW",
+        "pi_3UI4UpQ4cuBqoYoX0lQAiBSJ": "PH",
+        "pi_3UIJT0Q4cuBqoYoX1XFLeNu1": "CL",
+        "pi_3UIJkDQ4cuBqoYoX1bORPQXO": "CL",
+        "pi_3UIu3lQ4cuBqoYoX2h2t5k8O": "VN",
+        "pi_3UIu4GQ4cuBqoYoX1KeVc09p": "VN",
+        "pi_3UJtp6Q4cuBqoYoX28WIBU5q": "PH",
+        "pi_3UJvYlQ4cuBqoYoX2yipJEVY": "PH",
+        "pi_3UJvamQ4cuBqoYoX0f4M7Myi": "PH",
+        "pi_3UK7nsQ4cuBqoYoX1Fgnodpu": "PH",
+        "pi_3UKagtQ4cuBqoYoX0ew3qxQy": "PH",
+        "pi_3UKcKJQ4cuBqoYoX0IDrDqJu": "PH",
+        "pi_3UKxAiQ4cuBqoYoX2QfciK4m": "PH",
+        "pi_3UKyz4Q4cuBqoYoX1nTwpZEu": "VN",
+        "pi_3UL1FTQ4cuBqoYoX1h2ehYgU": "PH",
+        "pi_3UL1GsQ4cuBqoYoX0vCybGUr": "PH",
+        "pi_3UL2OjQ4cuBqoYoX2b68bXxZ": "PH",
+        "pi_3ULMX1Q4cuBqoYoX0Ktmofp1": "TW",
+        "pi_3ULUFVQ4cuBqoYoX1Hz7rW3P": "DE",
+    }
+
     current_month_str = datetime.datetime.now().strftime('%Y-%m')
 
     # 1. Query Checkout Sessions
@@ -216,7 +270,18 @@ def get_checkout_analytics_data():
         c_details = s.get("customer_details") or {}
         email = s.get("customer_email") or c_details.get("email") or ""
         buyer_name = c_details.get("name") or ""
+        c_addr = (c_details.get("address") or {}) if isinstance(c_details, dict) else {}
         
+        country = (
+            meta.get("country")
+            or c_addr.get("country")
+            or "unknown"
+        )
+        if not country or not isinstance(country, str):
+            country = "unknown"
+        country = country.upper()
+        tier = "tier1" if country in TIER1_COUNTRIES else ("emerging" if country != "UNKNOWN" else "unknown")
+
         expires_at_ts = s.get("expires_at")
         expires_at_iso = datetime.datetime.fromtimestamp(expires_at_ts).isoformat() if expires_at_ts else None
 
@@ -230,6 +295,8 @@ def get_checkout_analytics_data():
             "currency": currency,
             "status": status_label,
             "locale": locale,
+            "country": country,
+            "tier": tier,
             "email": email,
             "buyer_name": buyer_name,
             "expires_at": expires_at_iso
@@ -253,21 +320,35 @@ def get_checkout_analytics_data():
                 "revenue": 0.0,
                 "conversion_rate": 0.0,
                 "songs": Counter(),
-                "currencies": Counter()
+                "currencies": Counter(),
+                "countries": Counter(),
+                "tier1_segmentation": {
+                    "tier1": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()},
+                    "emerging": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()},
+                    "unknown": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()}
+                }
             }
         
         m_data = monthly[month_str]
         m_data["total_initiated"] += 1
         m_data["currencies"][currency] += 1
         m_data["songs"][song_title] += 1
+        m_data["countries"][country] += 1
+
+        t_group = m_data["tier1_segmentation"].get(tier, m_data["tier1_segmentation"]["unknown"])
+        t_group["initiated"] += 1
+        t_group["countries"][country] += 1
         
         if status_label == "paid":
             m_data["paid"] += 1
             m_data["revenue"] += amount
+            t_group["paid"] += 1
+            t_group["revenue"] += amount
         elif status_label == "open":
             m_data["open"] += 1
         else:
             m_data["abandoned"] += 1
+            t_group["abandoned"] += 1
 
     # Process PaymentIntents (Embedded Checkouts)
     now_ts = int(time.time())
@@ -296,6 +377,10 @@ def get_checkout_analytics_data():
             if status_raw in ("requires_payment_method", "canceled") and len(charges) == 0:
                 continue
 
+        # Exclude known test/QA PaymentIntents
+        if pi_id in EXCLUDED_PI_IDS:
+            continue
+
         # If reset_ts is active and this attempt was in the reset period of current month, skip
         if reset_ts and month_str == current_month_str and ts < reset_ts:
             continue
@@ -316,10 +401,25 @@ def get_checkout_analytics_data():
         song_title = meta.get("song_title") or meta.get("song_id") or "Unknown Song"
         locale = meta.get("locale") or "en"
 
-        charge_zero = charges[0] if charges else {}
-        billing = charge_zero.get("billing_details") or {}
+        charge_zero = charges[0] if (charges and isinstance(charges, list)) else {}
+        billing = charge_zero.get("billing_details") or {} if isinstance(charge_zero, dict) else {}
         email = pi.get("receipt_email") or billing.get("email") or ""
         buyer_name = billing.get("name") or ""
+        b_addr = (billing.get("address") or {}) if isinstance(billing, dict) else {}
+        pm_details = (charge_zero.get("payment_method_details") or {}) if isinstance(charge_zero, dict) else {}
+        card_details = (pm_details.get("card") or {}) if isinstance(pm_details, dict) else {}
+
+        country = (
+            meta.get("country")
+            or KNOWN_PI_COUNTRIES.get(pi_id)
+            or b_addr.get("country")
+            or card_details.get("country")
+            or "unknown"
+        )
+        if not country or not isinstance(country, str):
+            country = "unknown"
+        country = country.upper()
+        tier = "tier1" if country in TIER1_COUNTRIES else ("emerging" if country != "UNKNOWN" else "unknown")
 
         attempts.append({
             "id": pi_id,
@@ -331,6 +431,8 @@ def get_checkout_analytics_data():
             "currency": currency,
             "status": status_label,
             "locale": locale,
+            "country": country,
+            "tier": tier,
             "email": email,
             "buyer_name": buyer_name,
             "expires_at": None
@@ -354,21 +456,35 @@ def get_checkout_analytics_data():
                 "revenue": 0.0,
                 "conversion_rate": 0.0,
                 "songs": Counter(),
-                "currencies": Counter()
+                "currencies": Counter(),
+                "countries": Counter(),
+                "tier1_segmentation": {
+                    "tier1": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()},
+                    "emerging": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()},
+                    "unknown": {"initiated": 0, "paid": 0, "abandoned": 0, "revenue": 0.0, "countries": Counter()}
+                }
             }
 
         m_data = monthly[month_str]
         m_data["total_initiated"] += 1
         m_data["currencies"][currency] += 1
         m_data["songs"][song_title] += 1
+        m_data["countries"][country] += 1
+
+        t_group = m_data["tier1_segmentation"].get(tier, m_data["tier1_segmentation"]["unknown"])
+        t_group["initiated"] += 1
+        t_group["countries"][country] += 1
 
         if status_label == "paid":
             m_data["paid"] += 1
             m_data["revenue"] += amount
+            t_group["paid"] += 1
+            t_group["revenue"] += amount
         elif status_label == "open":
             m_data["open"] += 1
         else:
             m_data["abandoned"] += 1
+            t_group["abandoned"] += 1
 
     # Sort attempts newest first
     attempts.sort(key=lambda x: x["created_at"], reverse=True)
@@ -378,6 +494,19 @@ def get_checkout_analytics_data():
         d = monthly[m]
         cr = round((d["paid"] / d["total_initiated"] * 100), 1) if d["total_initiated"] > 0 else 0.0
         top_songs = [{"song": k, "count": v} for k, v in d["songs"].most_common(10)]
+
+        tier1_seg = {}
+        for t_key, t_val in d["tier1_segmentation"].items():
+            t_cr = round((t_val["paid"] / t_val["initiated"] * 100), 1) if t_val["initiated"] > 0 else 0.0
+            tier1_seg[t_key] = {
+                "initiated": t_val["initiated"],
+                "paid": t_val["paid"],
+                "abandoned": t_val["abandoned"],
+                "conversion_rate": t_cr,
+                "revenue": round(t_val["revenue"], 2),
+                "countries": dict(t_val["countries"])
+            }
+
         monthly_list.append({
             "month": d["month"],
             "label": d["label"],
@@ -390,8 +519,33 @@ def get_checkout_analytics_data():
             "revenue": round(d["revenue"], 2),
             "conversion_rate": cr,
             "currencies": dict(d["currencies"]),
+            "countries": dict(d["countries"]),
+            "tier1_segmentation": tier1_seg,
             "top_songs": top_songs
         })
+
+    # Global Tier-1 summary across all attempts
+    tier1_global = {
+        "tier1": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
+        "emerging": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
+        "unknown": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()}
+    }
+    for a in attempts:
+        t = a.get("tier", "unknown")
+        tg = tier1_global.get(t, tier1_global["unknown"])
+        tg["initiated"] += 1
+        c = a.get("country", "UNKNOWN")
+        tg["countries"][c] += 1
+        if a.get("status") == "paid":
+            tg["paid"] += 1
+            tg["revenue"] += a.get("amount", 0.0)
+        elif a.get("status") == "abandoned":
+            tg["abandoned"] += 1
+
+    for t_key, tg in tier1_global.items():
+        tg["conversion_rate"] = round((tg["paid"] / tg["initiated"] * 100), 1) if tg["initiated"] > 0 else 0.0
+        tg["revenue"] = round(tg["revenue"], 2)
+        tg["countries"] = dict(tg["countries"])
 
     website_views_unique_ips = 0
     try:
@@ -478,7 +632,8 @@ def get_checkout_analytics_data():
             "open": open_all,
             "conversion_rate": total_cr,
             "total_revenue": total_rev,
-            "website_unique_ips": website_views_unique_ips
+            "website_unique_ips": website_views_unique_ips,
+            "tier1_segmentation": tier1_global
         },
         "traffic_sources": traffic,
         "ratings": rating_stats,
