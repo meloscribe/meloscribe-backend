@@ -231,6 +231,26 @@ git add . && git commit -m "..." && git push
   - Instagram: Sets `thumb_offset` to highlight millisecond timestamp in `ig_poster.py`, eliminating the end-of-video dark fadeout bug.
   - Facebook: Passes highlight thumbnail to `/{video_id}/thumbnails` with `is_preferred: true` in `fb_poster.py`.
   - Synced and deployed to production VM (`152.70.23.171`).
+- [x] Staging SCP Upload Idempotency: Added remote file size pre-check in `stage_to_server.py` using Linux `find` to skip previously staged files on resume in <1s.
+- [x] Experience (Ludovico Einaudi) Direct Stripe Integration & Website Catalog Deployment:
+  - Switched *Experience* from ArrangeMe copyright routing to direct website sale (`isArrangeMe: false`, `paymentsDisabled: false`).
+  - Created & linked live Stripe Price IDs: `price_1UPhVQQ4cuBqoYoXHwOY1bIS` (Original, 6.00 €) and `price_1UPhVRQ4cuBqoYoX1xSuqYqW` (Easy, 6.00 €).
+  - Hardened `upload_bot.py` to reset ArrangeMe flags on existing items and synchronize `meloscribe-backend/tools/meloscribe/backend/songs.json`.
+  - Built & uploaded `Experience Full Package.zip` (230.3 MB) and `Experience Easy Full Package.zip` (154.0 MB) to Cloudflare R2 bucket `meloscribe-assets`.
+  - Synchronized catalog to production VM (`152.70.23.171`) and pushed live to GitHub (`meloscribe-frontend`).
+- [x] Website Video Preview Easy Titling & Subtitle Fix:
+  - Corrected preview title generation in `upload_bot.py` and `routes_workflow.py`: for Easy arrangements, the title card renders pure song title (e.g. `Experience`) with `"Easy Version"` as subtitle instead of author name.
+  - Re-rendered and uploaded `Experience Easy_preview.mp4` to Cloudflare R2. Verified live streaming on `api.meloscribe.dev`.
+- [x] YouTube Thumbnail Artwork Precedence & API 403 Diagnostics:
+  - Prioritized designed cover artwork (`_wide.jpg` and `.jpg`) over `extract_video_highlight_frame` in `upload_bot.py`. CV extraction is now strictly a fallback when no cover exists.
+- [x] Universal Piano Concert Stage Reflection & Static Addon Overlay Retirement:
+  - Removed static `addon.png` overlay branches from `video_generator.py` so that all portrait videos across all themes (Warm, Cold, Green, Violet, Platinum) automatically feature the satin concert stage floor reflection under the keys.
+  - Aligned `routes_workflow.py` and `upload_bot.py`. Purged obsolete static addon textures.
+- [x] Suggestions Catalog Auto-Completion & Smart Duplicate Matching:
+  - `routes_public.py`: Auto-Sync gegen `songs.json` bei jedem Abruf von `/api/public/suggestions` implementiert (markiert Treffer via SequenceMatcher & Klammern-Bereinigung automatisch auf `status = 'completed'`).
+  - Intelligente Dubletten-Erkennung bei `POST /api/public/suggestions`: Fängt Vorschläge mit oder ohne Klammern (*"Every Snowflake is Different (just like you)"* vs *"Every Snowflake is Different"*) ab und toleriert Platzhalter-/Kanal-Autoren ("Meloscribe", identisch zum Songtitel, "unknown", "All", "Piano"), indem bestehende Einträge hochgevotet statt dupliziert werden.
+  - Live Oracle VM Datenbank bereinigt: *Experience* und *River Flows in You* auf `completed` gesetzt; *Aria Math* auf Komponist `C418` aktualisiert; Schreibfehler in *Welcome to the Black Parade* korrigiert.
+  - Live auf Oracle VM deployed (`routes_public.py`) und `meloscribe-backend.service` erfolgreich neu gestartet.
 
 ## Active Blockers / Next Steps
 
