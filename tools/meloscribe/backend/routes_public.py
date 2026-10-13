@@ -995,11 +995,9 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             amount_cents = 600
             
         download_hash = uuid.uuid4().hex
-        origin = request.headers.get("origin") or "https://www.meloscribesheets.com"
-        if origin in ("https://meloscribe.dev", "https://meloscribesheets.com"):
-            origin = "https://www.meloscribesheets.com"
-        elif origin == "https://www.meloscribe.dev":
-            origin = "https://www.meloscribesheets.com"
+        origin = request.headers.get("origin") or "https://meloscribesheets.com"
+        if origin in ("https://meloscribe.dev", "https://www.meloscribe.dev", "https://www.meloscribesheets.com"):
+            origin = "https://meloscribesheets.com"
         
         s_settings = load_settings()
         is_sandbox = s_settings.get("environment", "sandbox") == "sandbox"
@@ -1027,7 +1025,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if cover_image_path:
             import urllib.parse
             quoted_path = urllib.parse.quote(cover_image_path)
-            product_image = f"https://www.meloscribesheets.com{quoted_path}"
+            product_image = f"https://meloscribesheets.com{quoted_path}"
             
         def to_slug(text):
             s = text.lower()
@@ -1074,7 +1072,8 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 metadata={
                     "song_title": song_name_meta,
                     "download_hash": download_hash,
-                    "locale": req.language
+                    "locale": req.language,
+                    "country": cf_country or "unknown"
                 },
                 description=f"Meloscribe - {product_name}"
             )
@@ -2299,6 +2298,40 @@ def get_suggestions():
             except Exception:
                 pass
             conn.commit()
+            
+            # Helper for clean title matching
+            def clean_title_str(t_raw: str) -> str:
+                if not t_raw:
+                    return ""
+                t_stripped = re.sub(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]', '', t_raw)
+                return re.sub(r'[^a-z0-9]', '', t_stripped.lower())
+
+            # Auto-sync suggestions against published catalog in songs.json
+            try:
+                songs_file = Path(__file__).resolve().parent / "songs.json"
+                if songs_file.exists():
+                    import json
+                    from difflib import SequenceMatcher
+                    with open(songs_file, "r", encoding="utf-8") as sf:
+                        pub_catalog = json.load(sf)
+                    pub_titles = [re.sub(r'[^a-z0-9]', '', s.get("title", "").lower()) for s in pub_catalog if s.get("title") and s.get("id") != "global_settings" and not s.get("hidden")]
+                    
+                    open_rows = c.execute("SELECT id, title FROM suggestions WHERE status != 'completed' OR status IS NULL").fetchall()
+                    for r_id, r_title in open_rows:
+                        if not r_title:
+                            continue
+                        clean_s = clean_title_str(r_title)
+                        matched = False
+                        for p_clean in pub_titles:
+                            if clean_s == p_clean or (len(clean_s) >= 4 and len(p_clean) >= 4 and SequenceMatcher(None, clean_s, p_clean).ratio() >= 0.85):
+                                matched = True
+                                break
+                        if matched:
+                            c.execute("UPDATE suggestions SET status = 'completed' WHERE id = ?", (r_id,))
+                    conn.commit()
+            except Exception as auto_e:
+                print(f"[get_suggestions] Auto-complete check: {auto_e}")
+
             c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions ORDER BY votes DESC, created_at DESC")
             rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4], "status": r[5]} for r in c.fetchall()]
             conn.close()
@@ -2321,13 +2354,89 @@ def create_suggestion(sug: NewSuggestion, request: Request):
             
         import uuid
         from datetime import datetime
+        import re
+        from difflib import SequenceMatcher
         sug_id = str(uuid.uuid4())
         created_at = datetime.now().isoformat()
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
-            c.execute("SELECT id, title, artist, votes FROM suggestions WHERE LOWER(title) = ? AND LOWER(artist) = ?", (sug.title.strip().lower(), sug.artist.strip().lower()))
-            existing = c.fetchone()
+            
+            def clean_title_str(t_raw: str) -> str:
+                if not t_raw:
+                    return ""
+                t_stripped = re.sub(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]', '', t_raw)
+                return re.sub(r'[^a-z0-9]', '', t_stripped.lower())
+            
+            # Helper for artist matching tolerance
+            def is_placeholder_artist(art: str, tit: str = "") -> bool:
+                if not art or not art.strip():
+                    return True
+                norm_a = re.sub(r'[^a-z0-9]', '', art.lower())
+                if len(norm_a) <= 2 or "meloscribe" in norm_a:
+                    return True
+                unknowns = ["unknown", "unbekannt", "idk", "dontknow", "noidea", "keineahnung", "none", "all", "alle", "someone", "various", "piano", "tiktok", "youtube", "ost", "soundtrack", "na"]
+                if any(norm_a == u or norm_a.startswith(u) or norm_a.endswith(u) for u in unknowns):
+                    return True
+                if tit:
+                    norm_t = re.sub(r'[^a-z0-9]', '', tit.lower())
+                    norm_base_t = clean_title_str(tit)
+                    if norm_a == norm_t or (norm_base_t and norm_a == norm_base_t):
+                        return True
+                    if norm_t and (norm_t.startswith(norm_a) or norm_a.startswith(norm_t)):
+                        return True
+                return False
+
+            # Check if this matches a published song in songs.json
+            initial_status = "open"
+            try:
+                songs_file = Path(__file__).resolve().parent / "songs.json"
+                if songs_file.exists():
+                    import json
+                    with open(songs_file, "r", encoding="utf-8") as sf:
+                        pub_catalog = json.load(sf)
+                    clean_input = clean_title_str(sug.title)
+                    for pub in pub_catalog:
+                        if pub.get("id") == "global_settings" or pub.get("hidden"):
+                            continue
+                        p_clean = re.sub(r'[^a-z0-9]', '', pub.get("title", "").lower())
+                        if clean_input == p_clean or (len(clean_input) >= 4 and len(p_clean) >= 4 and SequenceMatcher(None, clean_input, p_clean).ratio() >= 0.85):
+                            initial_status = "completed"
+                            break
+            except Exception:
+                pass
+
+            # Smart duplication check with parentheses and placeholder artist tolerance
+            clean_sug_title = clean_title_str(sug.title)
+            clean_sug_artist = re.sub(r'[^a-z0-9]', '', sug.artist.lower())
+            
+            existing = None
+            all_suggs = c.execute("SELECT id, title, artist, votes FROM suggestions").fetchall()
+            for row in all_suggs:
+                r_id, r_title, r_artist, r_votes = row
+                clean_r_title = clean_title_str(r_title or '')
+                clean_r_artist = re.sub(r'[^a-z0-9]', '', (r_artist or '').lower())
+                
+                title_matches = False
+                if clean_sug_title == clean_r_title:
+                    title_matches = True
+                elif len(clean_sug_title) >= 4 and len(clean_r_title) >= 4:
+                    if SequenceMatcher(None, clean_sug_title, clean_r_title).ratio() >= 0.85:
+                        title_matches = True
+                        
+                if title_matches:
+                    artist_matches = False
+                    if is_placeholder_artist(sug.artist, sug.title) or is_placeholder_artist(r_artist, r_title):
+                        artist_matches = True
+                    elif clean_sug_artist == clean_r_artist or clean_sug_artist in clean_r_artist or clean_r_artist in clean_sug_artist:
+                        artist_matches = True
+                    elif len(clean_sug_artist) >= 4 and len(clean_r_artist) >= 4 and SequenceMatcher(None, clean_sug_artist, clean_r_artist).ratio() >= 0.75:
+                        artist_matches = True
+                        
+                    if artist_matches:
+                        existing = row
+                        break
+                        
             if existing:
                 new_votes = existing[3] + 1
                 c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, existing[0]))
@@ -2335,11 +2444,11 @@ def create_suggestion(sug: NewSuggestion, request: Request):
                 conn.close()
                 return {"id": existing[0], "title": existing[1], "artist": existing[2], "votes": new_votes, "created_at": created_at}
                 
-            c.execute("INSERT INTO suggestions (id, title, artist, votes, created_at) VALUES (?, ?, ?, ?, ?)",
-                      (sug_id, sug.title.strip(), sug.artist.strip(), 1, created_at))
+            c.execute("INSERT INTO suggestions (id, title, artist, votes, created_at, status) VALUES (?, ?, ?, ?, ?, ?)",
+                      (sug_id, sug.title.strip(), sug.artist.strip(), 1, created_at, initial_status))
             conn.commit()
             conn.close()
-            return {"id": sug_id, "title": sug.title.strip(), "artist": sug.artist.strip(), "votes": 1, "created_at": created_at}
+            return {"id": sug_id, "title": sug.title.strip(), "artist": sug.artist.strip(), "votes": 1, "created_at": created_at, "status": initial_status}
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
