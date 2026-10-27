@@ -1124,6 +1124,16 @@ if platform.system() == "Windows":
             media_type = "image/jpeg"
             
         local_path = Path(local_dir) / filename
+
+        # Fallback: If portrait video is requested before Phase 2 render, fallback to Keysight recording
+        if is_video and folder == "" and not local_path.exists():
+            ks_dir = settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export")
+            ks_path = Path(ks_dir) / filename
+            if ks_path.exists():
+                local_dir = ks_dir
+                local_path = ks_path
+                folder = "keysight"
+
         if folder == "keysight" and is_video:
             web_path = Path(local_dir) / f"{local_path.stem}_web.mp4"
             if web_path.exists():
@@ -1165,13 +1175,11 @@ if platform.system() == "Windows":
         key_path = r"C:\Dev\ssh-key-2026-05-07.key"
         server_ip = "152.70.23.171"
         if not os.path.exists(key_path):
-            from fastapi.responses import HTMLResponse
-            return HTMLResponse(content="SSH Key not found", status_code=404)
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found locally (no SSH key configured for remote fallback)")
             
         sub_dir = "TikToks" if is_video else "Covers"
         remote_path = f"/home/ubuntu/meloscribe/staging/{song}/{sub_dir}/{filename}"
         
-        import subprocess
         from fastapi.responses import StreamingResponse
         
         cmd = [
@@ -1183,8 +1191,18 @@ if platform.system() == "Windows":
             f"cat '{remote_path}'"
         ]
         
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATION_FLAGS)
+        first_chunk = proc.stdout.read(65536)
+        if not first_chunk:
+            try:
+                proc.terminate()
+                proc.wait()
+            except Exception:
+                pass
+            raise HTTPException(status_code=404, detail=f"File '{filename}' not found locally or on server")
+
         def iter_file():
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATION_FLAGS)
+            yield first_chunk
             try:
                 while True:
                     chunk = proc.stdout.read(65536)
@@ -1192,10 +1210,18 @@ if platform.system() == "Windows":
                         break
                     yield chunk
             finally:
-                proc.terminate()
-                proc.wait()
+                try:
+                    proc.terminate()
+                    proc.wait()
+                except Exception:
+                    pass
                 
-        return StreamingResponse(iter_file(), media_type=media_type)
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "no-cache"
+        }
+        return StreamingResponse(iter_file(), media_type=media_type, headers=headers)
 
 else:
     # -------------------------------------------------------------------
@@ -1224,7 +1250,18 @@ else:
                     conn.commit()
                 except Exception:
                     pass
-            c.execute("SELECT email, status, song_name, locale, created_at, confirmed_at FROM notify_subscribers ORDER BY created_at DESC")
+            c.execute("""
+                SELECT email, status, song_name, locale, created_at, confirmed_at 
+                FROM notify_subscribers 
+                ORDER BY 
+                    CASE 
+                        WHEN status = 'active' THEN 0 
+                        WHEN status = 'pending' THEN 1 
+                        ELSE 2 
+                    END ASC,
+                    COALESCE(confirmed_at, created_at) DESC,
+                    created_at DESC
+            """)
             rows = [{"email": r[0], "status": r[1], "song_name": r[2], "locale": r[3] or "en", "created_at": r[4], "confirmed_at": r[5]} for r in c.fetchall()]
             conn.close()
             return {"subscribers": rows, "total": len(rows), "active": sum(1 for r in rows if r["status"] == "active")}

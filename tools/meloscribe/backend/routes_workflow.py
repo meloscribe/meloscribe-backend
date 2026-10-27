@@ -50,6 +50,7 @@ class WorkflowRequest(BaseModel):
     price: str = "6.00"
     format: str = "full_arrangement"
     shutdown: bool = False
+    isArrangeMe: bool = False
     doR2: bool = True
     doKofi: bool = False
     doYoutube: bool = True
@@ -58,7 +59,6 @@ class WorkflowRequest(BaseModel):
     doTiktok: bool = True
     doThreads: bool = True
     doPinterest: bool = True
-    localUpload: bool = False
     zoom: float = 1.5
     shift: int = 0
     enableVisualizerNormal: bool = True
@@ -67,7 +67,8 @@ class WorkflowRequest(BaseModel):
     enableVisualizerWideTutorial: bool = True
     enableVisualizerHook: bool = True
     enableMetronome: bool = True
-    enablePortraitAddon: bool = True
+    enableReflection: bool = True
+    enablePortraitAddon: Optional[bool] = None
     manual_crop: bool = False
     timesig: str = "auto"
     metro_offset: float = 0.0
@@ -316,8 +317,8 @@ async def _run_workflow(req: WorkflowRequest):
                 cmd_portrait.append("--metronome")
                 if req.metro_offset:
                     cmd_portrait.extend(["--metro_offset", str(req.metro_offset)])
-            if req.enablePortraitAddon:
-                cmd_portrait.append("--use_portrait_addon")
+            if not req.enableReflection:
+                cmd_portrait.append("--no_reflection")
             if has_easy:
                 cmd_portrait.append("--has_easy")
             if (vtype == "normal" and req.enableVisualizerNormal) or (vtype == "tutorial" and req.enableVisualizerTutorial):
@@ -369,98 +370,24 @@ async def _run_workflow(req: WorkflowRequest):
                 cmd.extend(["--metro_offset", str(req.metro_offset)])
             steps.append((cmd, f"Cloudflare R2 Upload ({v_song})"))
 
-    if req.localUpload:
-        # Local website catalog sync
-        for suffix, folder_name in versions:
-            v_song = f"{song}{suffix}"
-            cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
-            steps.append((cmd, f"Local Catalog Sync ({v_song})"))
+    # Local website catalog sync
+    for suffix, folder_name in versions:
+        v_song = f"{song}{suffix}"
+        cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
+        if req.isArrangeMe:
+            cmd.append("--is_arrangeme")
+        steps.append((cmd, f"Local Catalog Sync ({v_song})"))
 
-        socials = ["youtube", "instagram", "facebook", "tiktok", "threads", "pinterest"]
+    # Server-side upload to Oracle VM Server
+    server_platforms = []
+    if req.doYoutube: server_platforms.append("youtube")
+    if req.doInstagram: server_platforms.append("instagram")
+    if req.doFacebook: server_platforms.append("facebook")
+    if req.doTiktok: server_platforms.append("tiktok")
+    if req.doThreads: server_platforms.append("threads")
+    if req.doPinterest: server_platforms.append("pinterest")
 
-        from datetime import datetime as dt, timedelta
-        interval_days = int(settings.get("schedule_interval_days", 3))
-        
-        start_date_str = req.scheduleDate
-        start_time_str = req.scheduleTime or "16:00"
-        
-        try:
-            current_date = dt.fromisoformat(start_date_str)
-        except Exception:
-            current_date = dt.now()
-        
-        # Build social videos queue based on 5-video-split-strategy
-        social_videos = []
-        if req.format == "full_arrangement":
-            # V1: Teaser (Hook)
-            social_videos.append((song, "hook", "Teaser"))
-            # V2: Normal Speed Original
-            social_videos.append((song, "normal", "Normal Speed Original"))
-            # V3: Slow Speed Original (Tutorial)
-            social_videos.append((song, "tutorial", "Slow Speed Original"))
-            if has_easy:
-                # V4: Normal Speed Easy
-                social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
-                # V5: Slow Speed Easy (Tutorial)
-                social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
-        else: # viral_part (Teaser is not needed as video is already short)
-            # V1: Normal Speed Original
-            social_videos.append((song, "normal", "Normal Speed Original"))
-            # V2: Slow Speed Original (Tutorial)
-            social_videos.append((song, "tutorial", "Slow Speed Original"))
-            if has_easy:
-                # V3: Normal Speed Easy
-                social_videos.append((f"{song} Easy", "normal", "Normal Speed Easy"))
-                # V4: Slow Speed Easy (Tutorial)
-                social_videos.append((f"{song} Easy", "tutorial", "Slow Speed Easy"))
-        
-        # Add steps for each video version, with each step scheduled with the proper date spacing
-        for v_idx, (v_song, profile, label) in enumerate(social_videos):
-            plat_date = current_date + timedelta(days=v_idx * interval_days)
-            plat_date_str = plat_date.date().isoformat()
-            
-            for platform in socials:
-                cmd = [
-                    python, "-u", "upload_bot.py",
-                    "--song", v_song,
-                    "--author", author,
-                    "--mode", platform,
-                    "--profile", profile,
-                    "--format", req.format
-                ]
-                if req.scheduleDate:
-                    cmd.extend(["--schedule_date", plat_date_str, "--schedule_time", start_time_str])
-                steps.append((cmd, f"Social Upload ({platform} - {label})"))
-
-        # Original Ko-Fi Upload step
-        cmd = [
-            python, "-u", "upload_bot.py",
-            "--song", song,
-            "--mode", "kofi",
-            "--price", req.price,
-            "--format", req.format
-        ]
-        steps.append((cmd, f"Ko-Fi Upload ({song})"))
-        
-        # Easy Ko-Fi Upload step
-        if has_easy:
-            cmd = [
-                python, "-u", "upload_bot.py",
-                "--song", f"{song} Easy",
-                "--mode", "kofi",
-                "--price", req.price,
-                "--format", req.format
-            ]
-            steps.append((cmd, f"Ko-Fi Upload ({song} Easy)"))
-    else:
-        # Server-side upload (localUpload is False)
-        # Always run local catalog sync so local files are updated
-        for suffix, folder_name in versions:
-            v_song = f"{song}{suffix}"
-            cmd = [python, "-u", "upload_bot.py", "--song", v_song, "--price", req.price, "--kofi_id", req.paddle_product_id or "prod_dummy123", "--mode", "website", "--author", author]
-            steps.append((cmd, f"Local Catalog Sync ({v_song})"))
-
-        server_platforms = ["youtube", "instagram", "facebook", "tiktok", "threads", "pinterest"]
+    if server_platforms:
         start_time_str = req.scheduleTime or "16:00"
         cmd = [
             python, "-u", "stage_to_server.py",
@@ -475,6 +402,17 @@ async def _run_workflow(req: WorkflowRequest):
         if has_easy:
             cmd.append("--has_easy")
         steps.append((cmd, f"Stage to Oracle VM Server ({song})"))
+
+    if req.isArrangeMe:
+        cmd_arrangeme = [
+            python, "-u", str(TOOLS_DIR / "arrangeme_bot.py"),
+            "--song", song,
+            "--artist", author,
+            "--difficulty", "Auto",
+            "--headless",
+            "--auto-publish"
+        ]
+        steps.append((cmd_arrangeme, f"ArrangeMe Upload & Auto-Publish ({song})"))
 
     total = len(steps)
     if total == 0:
@@ -496,6 +434,8 @@ async def _run_workflow(req: WorkflowRequest):
             return 20.0
         elif "cover art" in lbl:
             return 5.0
+        elif "arrangeme" in lbl:
+            return 60.0
         elif "stage to oracle" in lbl or "social upload" in lbl:
             return 15.0
         elif c in ["WAIT_FOR_PDF", "WAIT_FOR_CROP_CONFIRMATION", "WAIT_FOR_HOOK_CONFIRMATION"]:
@@ -882,7 +822,7 @@ def batch_processor_worker():
         while True:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
-            c.execute("SELECT song_name, author, theme, price, format, difficulty FROM batch_ingest_queue WHERE status = 'initialized' ORDER BY id ASC")
+            c.execute("SELECT song_name, author, theme, price, format, difficulty, is_arrangeme FROM batch_ingest_queue WHERE status = 'initialized' ORDER BY id ASC")
             rows = c.fetchall()
             conn.close()
             
@@ -898,7 +838,8 @@ def batch_processor_worker():
                 log_error("[Batch Worker] No more initialized queue items with ready audio files. Stopping loop.")
                 break
                 
-            song_name, author, theme, price, fmt, difficulty = target_item
+            song_name, author, theme, price, fmt, difficulty, is_arrangeme_raw = target_item
+            is_arrangeme = bool(is_arrangeme_raw)
             
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
@@ -906,7 +847,7 @@ def batch_processor_worker():
             conn.commit()
             conn.close()
             
-            log_error(f"[Batch Worker] Started processing '{song_name}'")
+            log_error(f"[Batch Worker] Started processing '{song_name}' (ArrangeMe exclusive: {is_arrangeme})")
             
             should_abort_queue = False
             try:
@@ -915,6 +856,7 @@ def batch_processor_worker():
                 if has_easy:
                     versions.append((" Easy", f"{song_name} Easy"))
                     
+                steps = []
                 # MuseScore launcher first
                 for suffix, folder_name in versions:
                     v_song = f"{song_name}{suffix}"
@@ -957,7 +899,7 @@ def batch_processor_worker():
                             python, "-u", str(TOOLS_DIR / "video_generator.py"),
                             "--video", vid_in, "--title", v_song, "--author", author,
                             "--type", vtype, "--zoom", zoom_val, "--shift", shift_val,
-                            "--midipath", midi_path, "--theme", theme, "--use_portrait_addon",
+                            "--midipath", midi_path, "--theme", theme,
                             "--force"
                         ]
                         
@@ -1013,7 +955,21 @@ def batch_processor_worker():
                         cmd_r2.extend(["--subtitle_hook", settings.get("subtitle_hook").strip()])
                     steps.append(cmd_r2)
                     # Catalog sync
-                    steps.append([python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website", "--author", author])
+                    cmd_cat = [python, "-u", str(TOOLS_DIR / "upload_bot.py"), "--song", v_song, "--price", price, "--kofi_id", "prod_dummy123", "--mode", "website", "--author", author]
+                    if is_arrangeme:
+                        cmd_cat.append("--is_arrangeme")
+                    steps.append(cmd_cat)
+
+                if is_arrangeme:
+                    cmd_arrangeme = [
+                        python, "-u", str(TOOLS_DIR / "arrangeme_bot.py"),
+                        "--song", song_name,
+                        "--artist", author,
+                        "--difficulty", "Auto",
+                        "--headless",
+                        "--auto-publish"
+                    ]
+                    steps.append(cmd_arrangeme)
                 
                 success = True
                 err_msg = ""
@@ -1307,7 +1263,7 @@ def run_individual_module(module: str, req: dict):
         vid_in = str(keysight_dir / f"{song}.mp4")
         midi_path = f"C:\\Cakewalk Projects\\{song}\\{song}.mid"
         subtitle = settings.get("subtitle", "")
-        cmd = [python, "-u", "video_generator.py", "--video", vid_in, "--title", song, "--author", author, "--type", "normal", "--zoom", "1.5", "--midipath", midi_path, "--theme", theme, "--use_portrait_addon"]
+        cmd = [python, "-u", "video_generator.py", "--video", vid_in, "--title", song, "--author", author, "--type", "normal", "--zoom", "1.5", "--midipath", midi_path, "--theme", theme]
         if subtitle:
             cmd.extend(["--subtitle", subtitle])
     elif module == "cover_generator":
@@ -1575,6 +1531,7 @@ async def batch_initialize(
             fmt = meta.get("format", "full_arrangement").strip()
             include_easy = meta.get("includeEasy", False)
             difficulty = "both" if include_easy else "original"
+            is_arrangeme = 1 if (meta.get("isArrangeMe") or meta.get("is_arrangeme")) else 0
 
             if not song_name or not author:
                 continue
@@ -1597,10 +1554,10 @@ async def batch_initialize(
             c.execute(
                 """
                 INSERT OR REPLACE INTO batch_ingest_queue 
-                (song_name, author, theme, price, format, difficulty, status, error_message, processed_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL)
+                (song_name, author, theme, price, format, difficulty, status, error_message, processed_at, is_arrangeme)
+                VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL, ?)
                 """,
-                (song_name, author, theme, price, fmt, difficulty)
+                (song_name, author, theme, price, fmt, difficulty, is_arrangeme)
             )
             initialized_songs.append(song_name)
 
@@ -1618,6 +1575,7 @@ class InitializeExistingRequest(BaseModel):
     price: str = "6.00"
     format: str = "full_arrangement"
     difficulty: str = "Original"
+    isArrangeMe: bool = False
 
 @router.post("/api/batch/initialize-existing")
 def initialize_existing_song(req: InitializeExistingRequest):
@@ -1627,6 +1585,7 @@ def initialize_existing_song(req: InitializeExistingRequest):
     price = req.price.strip()
     fmt = req.format.strip()
     difficulty = req.difficulty.strip().lower()
+    is_arrangeme = 1 if req.isArrangeMe else 0
 
     cakewalk_dir = settings.get("cakewalk_dir", r"C:\Cakewalk Projects")
     song_dir = Path(cakewalk_dir) / song_name
@@ -1646,10 +1605,10 @@ def initialize_existing_song(req: InitializeExistingRequest):
         c.execute(
             """
             INSERT OR REPLACE INTO batch_ingest_queue 
-            (song_name, author, theme, price, format, difficulty, status, error_message, processed_at, progress)
-            VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL, 0)
+            (song_name, author, theme, price, format, difficulty, status, error_message, processed_at, progress, is_arrangeme)
+            VALUES (?, ?, ?, ?, ?, ?, 'initialized', NULL, NULL, 0, ?)
             """,
-            (song_name, author, theme, price, fmt, difficulty)
+            (song_name, author, theme, price, fmt, difficulty, is_arrangeme)
         )
         conn.commit()
         conn.close()
@@ -1665,6 +1624,7 @@ class UpdateMetadataRequest(BaseModel):
     price: str
     format: str
     difficulty: str
+    isArrangeMe: Optional[bool] = None
 
 @router.post("/api/batch/update-metadata")
 def update_batch_metadata(req: UpdateMetadataRequest):
@@ -1678,14 +1638,25 @@ def update_batch_metadata(req: UpdateMetadataRequest):
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute(
-            """
-            UPDATE batch_ingest_queue 
-            SET author = ?, theme = ?, price = ?, format = ?, difficulty = ?
-            WHERE song_name = ?
-            """,
-            (author, theme, price, fmt, difficulty, song_name)
-        )
+        if req.isArrangeMe is not None:
+            is_arr = 1 if req.isArrangeMe else 0
+            c.execute(
+                """
+                UPDATE batch_ingest_queue 
+                SET author = ?, theme = ?, price = ?, format = ?, difficulty = ?, is_arrangeme = ?
+                WHERE song_name = ?
+                """,
+                (author, theme, price, fmt, difficulty, is_arr, song_name)
+            )
+        else:
+            c.execute(
+                """
+                UPDATE batch_ingest_queue 
+                SET author = ?, theme = ?, price = ?, format = ?, difficulty = ?
+                WHERE song_name = ?
+                """,
+                (author, theme, price, fmt, difficulty, song_name)
+            )
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1828,7 +1799,7 @@ def get_recent_cakewalk_projects():
 
 class ArrangeMePublishRequest(BaseModel):
     song: str
-    difficulty: str = "Original"
+    difficulty: str = "Auto"
     auto_publish: bool = False
     headless: bool = False
 
@@ -1845,7 +1816,7 @@ def publish_to_arrangeme(req: ArrangeMePublishRequest):
             auto_publish=req.auto_publish,
             headless=req.headless
         )
-        if "Fehler" in msg:
+        if "error" in msg.lower() or "fehler" in msg.lower():
             return JSONResponse(content={"status": "error", "message": msg}, status_code=500)
         return {"status": "success", "message": msg}
     except Exception as e:
@@ -1856,7 +1827,7 @@ def get_batch_queue():
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute("SELECT song_name, author, theme, price, format, difficulty, status, error_message, created_at, processed_at, hook_start, hook_end, progress FROM batch_ingest_queue ORDER BY id DESC")
+        c.execute("SELECT song_name, author, theme, price, format, difficulty, status, error_message, created_at, processed_at, hook_start, hook_end, progress, is_arrangeme FROM batch_ingest_queue ORDER BY id DESC")
         rows = c.fetchall()
         conn.close()
     except Exception as e:
@@ -1878,6 +1849,7 @@ def get_batch_queue():
             "hookStart": r[10],
             "hookEnd": r[11],
             "progress": r[12] or 0,
+            "isArrangeMe": bool(r[13]) if len(r) > 13 and r[13] else False,
         })
     return queue
 
@@ -2072,10 +2044,18 @@ async def regenerate_preview(req: dict):
     artist_txt = os.path.join(temp_dir, f"_artist_{uid}.txt")
     endscreen_txt = os.path.join(temp_dir, f"_endscreen_{uid}.txt")
     
+    is_easy = "easy" in song_name.lower()
+    import re
+    clean_title = re.sub(r'(?i)\b(easy|slow)\b', '', song_name).strip()
+    clean_title = re.sub(r'\s+', ' ', clean_title)
+
+    display_title = clean_title if is_easy else song_name
+    display_subtitle = (settings.get("subtitle_easy_normal") or "Easy Version") if is_easy else author
+
     with open(title_txt, "w", encoding="utf-8") as f:
-        f.write(song_name)
+        f.write(display_title)
     with open(artist_txt, "w", encoding="utf-8") as f:
-        f.write(author)
+        f.write(display_subtitle)
     with open(endscreen_txt, "w", encoding="utf-8") as f:
         f.write("Full video coming soon")
         
@@ -2475,6 +2455,7 @@ class RecyclingRenderRequest(BaseModel):
     outro_text: str = "Rate this 1-10 👇"
     segment_type: str = "climax"
     version_num: Optional[int] = None
+    theme: Optional[str] = None
 
 class RecyclingStageRequest(BaseModel):
     song: str
@@ -2731,6 +2712,20 @@ def render_recycling_video(req: RecyclingRenderRequest):
         next_num = max_num + 1
         video_title = f"{clean_song} Recycled {next_num}"
 
+    rec_theme = req.theme if hasattr(req, "theme") and req.theme else None
+    if not rec_theme:
+        try:
+            with sqlite3.connect(db_path) as conn:
+                row = conn.execute("SELECT theme FROM tracks WHERE LOWER(song_name) = LOWER(?)", (clean_song,)).fetchone()
+                if not row:
+                    row = conn.execute("SELECT theme FROM batch_ingest_queue WHERE LOWER(song_name) = LOWER(?)", (clean_song,)).fetchone()
+                if row and row[0]:
+                    rec_theme = row[0].strip().lower()
+        except Exception:
+            pass
+    if not rec_theme:
+        rec_theme = settings.get("theme", "warm")
+
     cmd = [
         python, "-u", str(TOOLS_DIR / "video_generator.py"),
         "--video", str(vid_in),
@@ -2739,11 +2734,11 @@ def render_recycling_video(req: RecyclingRenderRequest):
         "--type", "normal",
         "--zoom", str(req.zoom),
         "--shift", str(req.shift),
+        "--theme", str(rec_theme),
         "--start_time", str(req.start_time),
         "--end_time", str(req.end_time),
         "--time_offset", str(req.time_offset),
         "--output_dir", str(recycling_dir),
-        "--use_portrait_addon",
         "--force"
     ]
     if subtitle_val:

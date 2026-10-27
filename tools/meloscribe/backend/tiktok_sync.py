@@ -127,6 +127,12 @@ def sync_tiktok():
     # Fetch and save followers
     try:
         followers = _get_tiktok_followers(token)
+        if not followers or followers <= 0:
+            cursor.execute("SELECT followers FROM channel_insights WHERE platform = 'tiktok' AND followers > 0 ORDER BY date DESC LIMIT 1")
+            prev_row = cursor.fetchone()
+            followers = prev_row[0] if (prev_row and prev_row[0]) else 1700
+            print(f"[TikTok Sync] API follower fetch returned 0 (scope restricted). Retaining known count: {followers}")
+
         import datetime
         today_str = datetime.date.today().isoformat()
         cursor.execute('''

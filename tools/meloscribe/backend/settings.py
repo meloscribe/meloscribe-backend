@@ -26,7 +26,6 @@ DEFAULT_SETTINGS = {
     "threads_app_secret": "",
     "r2_bucket": "meloscribe-assets",
     "schedule_interval_days": 3,
-    "localUpload": False,
     "ai_subtitles_enabled": False,
     "ai_captions_enabled": False,
     "ai_hashtags_enabled": True,
@@ -40,66 +39,54 @@ DEFAULT_SETTINGS = {
     "subtitle_easy_slow": "Easy Tutorial",
     "manual_crop": False,
     "desc_template_youtube_video": (
-        "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+        "🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials):\n"
+        "👉 {song_link}\n"
         "🌐 Website: https://meloscribesheets.com\n\n"
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "🎹 Handcrafted piano arrangement for {song} - {author}{label}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself, the full learning package has you covered.\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
     ),
     "desc_template_youtube_shorts": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "🎼 Sheet Music & MIDI → Link in Bio / Description\n"
-        "🌐 meloscribesheets.com\n\n"
-        "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+        "Handcrafted piano arrangement for {song} by {author}.\n\n"
+        "🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials):\n"
+        "👉 https://meloscribesheets.com\n\n"
+        "#piano #pianocover #pianotutorial #synthesia #keysight #{song}"
     ),
     "desc_template_youtube": (
-        "🎼 Sheet Music (PDF) & MIDI: {song_link}\n"
+        "🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials):\n"
+        "👉 {song_link}\n"
         "🌐 Website: https://meloscribesheets.com\n\n"
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
+        "🎹 Handcrafted piano arrangement for {song} - {author}{label}\n\n"
+        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself, the full learning package has you covered.\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
     ),
     "desc_template_instagram": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
-        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
+        "Handcrafted piano arrangement for {song}. 🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
         "#piano #pianocover #pianotutorial #synthesia #music #pianomusic #{song}"
     ),
     "desc_template_facebook_post": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
+        "Handcrafted piano arrangement for {song} - {author}.\n\n"
+        "🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_facebook_reel": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
+        "Handcrafted piano arrangement for {song}. 🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_facebook": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
+        "Handcrafted piano arrangement for {song} - {author}.\n\n"
+        "🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
         "#music #song #piano #cover #cozy #learnpiano #pop #pianotutorial #{song}"
     ),
     "desc_template_threads": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
-        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
+        "Handcrafted piano arrangement for {song}. 🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
         "#piano #pianocover #pianotutorial #synthesia #music #{song}"
     ),
     "desc_template_tiktok": (
-        "🎹 {song} - {author}{label}\n\n"
-        "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "Sheet Music (PDF) & free Videos → Link in Bio\n\n"
-        "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-        "#piano #pianocover #pianotutorial #music #synthesia #cover #{song}"
+        "Handcrafted piano arrangement for {song}. 🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
+        "#piano #pianocover #pianotutorial #sheetmusic #{song}"
     ),
     "desc_template_kofi": (
         "Get the learning package for my '{song}' tutorial! This download includes:\n\n"
@@ -171,12 +158,13 @@ DEFAULT_SETTINGS = {
     "enableMetronome": True,
     "metro_offset": 0.0,
     "desc_template_pinterest": (
-        "Enjoy this piano arrangement of {song} by {author}! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-        "👉 Click the Pin to get the Sheet Music (PDF), MIDI & practice videos!\n\n"
+        "Handcrafted piano arrangement of {song} by {author}!\n\n"
+        "👉 Click the Pin to download the complete learning bundle (Sheets + MIDI + 2K Tutorials)!\n\n"
         "Follow for more aesthetic piano covers and tutorials.\n\n"
-        "#piano #pianocover #pianotutorial #sheetmusic #{song} {song_link}"
+        "#piano #pianocover #pianotutorial #sheetmusic #{song}"
     ),
-    "show_audit_tools": False
+    "show_audit_tools": False,
+    "environment": "live"
 }
 
 def load_settings():
@@ -193,10 +181,31 @@ def load_settings():
                 # Self-healing / migration checks for description templates
                 needs_save = False
                 for k in ["desc_template_youtube_video", "desc_template_youtube_shorts",
-                          "desc_template_facebook_post", "desc_template_facebook_reel", "desc_template_pinterest"]:
+                          "desc_template_facebook_post", "desc_template_facebook_reel", "desc_template_pinterest",
+                          "desc_template_tiktok", "desc_template_instagram", "desc_template_threads"]:
                     if k not in data:
                         data[k] = DEFAULT_SETTINGS[k]
                         settings[k] = DEFAULT_SETTINGS[k]
+                        needs_save = True
+
+                # Upgrade legacy templates to high-converting bundle copy
+                legacy_phrases = [
+                    "Sheet Music (PDF) & free Videos",
+                    "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.",
+                    "Whether you're here to listen or want to learn this piece yourself",
+                    "Click the Pin to get the Sheet Music (PDF)"
+                ]
+                template_keys = [
+                    "desc_template_tiktok", "desc_template_instagram", "desc_template_threads",
+                    "desc_template_youtube_shorts", "desc_template_youtube_video", "desc_template_youtube",
+                    "desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel",
+                    "desc_template_pinterest"
+                ]
+                for tk in template_keys:
+                    curr_val = data.get(tk, "")
+                    if not curr_val or any(lp in curr_val for lp in legacy_phrases):
+                        data[tk] = DEFAULT_SETTINGS[tk]
+                        settings[tk] = DEFAULT_SETTINGS[tk]
                         needs_save = True
 
                 # Upgrade legacy Facebook templates if containing URLs/links (Link in Bio is kept)

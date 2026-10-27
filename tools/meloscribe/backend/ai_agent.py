@@ -39,8 +39,8 @@ def get_server_api_key():
 GEMINI_API_KEY = get_gemini_key()
 genai.configure(api_key=GEMINI_API_KEY)
 
-MODEL_NAME = 'models/gemini-2.5-flash'
-FALLBACK_MODEL_NAME = 'models/gemini-flash-latest'
+MODEL_NAME = 'models/gemini-3.8-flash'
+FALLBACK_MODEL_NAME = 'models/gemini-2.5-flash'
 model = genai.GenerativeModel(MODEL_NAME)
 fallback_model = genai.GenerativeModel(FALLBACK_MODEL_NAME)
 
@@ -126,9 +126,70 @@ def fetch_recent_data():
     
     # Total Views
     total_views = c.execute("SELECT SUM(views) FROM videos").fetchone()[0] or 0
-    
-    # Recent top songs (last 14 days publish)
-    recent_top = [dict(r) for r in c.execute("SELECT song_name, SUM(views) as views FROM videos WHERE publish_date >= ? GROUP BY song_name ORDER BY views DESC LIMIT 5", (fourteen_days_ago,)).fetchall()]
+
+    # Lifetime Top Songs across all platforms with platform breakdown
+    lifetime_top_songs = []
+    try:
+        lifetime_top_songs = [dict(r) for r in c.execute("""
+            SELECT 
+                song_name,
+                SUM(views) as total_views,
+                SUM(likes) as total_likes,
+                SUM(saves) as total_saves,
+                SUM(shares) as total_shares,
+                SUM(CASE WHEN platform = 'tiktok' THEN views ELSE 0 END) as tiktok_views,
+                SUM(CASE WHEN platform = 'facebook' THEN views ELSE 0 END) as facebook_views,
+                SUM(CASE WHEN platform = 'youtube' THEN views ELSE 0 END) as youtube_views,
+                SUM(CASE WHEN platform = 'instagram' THEN views ELSE 0 END) as instagram_views,
+                SUM(CASE WHEN platform = 'instagram' THEN saves ELSE 0 END) as instagram_saves
+            FROM videos 
+            WHERE song_name IS NOT NULL AND song_name != ''
+            GROUP BY song_name 
+            ORDER BY total_views DESC 
+            LIMIT 15
+        """).fetchall()]
+    except Exception as e:
+        print(f"[AI Agent] Failed to fetch lifetime top songs: {e}")
+
+    # Platform Champions (Top 5 performers per platform to identify musical DNA)
+    platform_champions = {}
+    try:
+        platform_champions["tiktok_top_views"] = [dict(r) for r in c.execute("""
+            SELECT song_name, SUM(views) as views, COUNT(*) as video_count 
+            FROM videos WHERE platform = 'tiktok' AND song_name IS NOT NULL AND song_name != '' 
+            GROUP BY song_name ORDER BY views DESC LIMIT 5
+        """).fetchall()]
+        platform_champions["facebook_top_views"] = [dict(r) for r in c.execute("""
+            SELECT song_name, SUM(views) as views, COUNT(*) as video_count 
+            FROM videos WHERE platform = 'facebook' AND song_name IS NOT NULL AND song_name != '' 
+            GROUP BY song_name ORDER BY views DESC LIMIT 5
+        """).fetchall()]
+        platform_champions["instagram_top_saves"] = [dict(r) for r in c.execute("""
+            SELECT song_name, SUM(saves) as saves, SUM(views) as views, COUNT(*) as video_count 
+            FROM videos WHERE platform = 'instagram' AND song_name IS NOT NULL AND song_name != '' 
+            GROUP BY song_name ORDER BY saves DESC LIMIT 5
+        """).fetchall()]
+        platform_champions["youtube_top_views"] = [dict(r) for r in c.execute("""
+            SELECT song_name, SUM(views) as views, COUNT(*) as video_count 
+            FROM videos WHERE platform = 'youtube' AND song_name IS NOT NULL AND song_name != '' 
+            GROUP BY song_name ORDER BY views DESC LIMIT 5
+        """).fetchall()]
+    except Exception as e:
+        print(f"[AI Agent] Failed to fetch platform champions: {e}")
+
+    # 14-day velocity (views gained only on clips published in the last 14 days - upload momentum)
+    recent_top = [dict(r) for r in c.execute("""
+        SELECT song_name, SUM(views) as views_14d 
+        FROM videos 
+        WHERE publish_date >= ? AND song_name IS NOT NULL AND song_name != ''
+        GROUP BY song_name 
+        ORDER BY views_14d DESC 
+        LIMIT 5
+    """, (fourteen_days_ago,)).fetchall()]
+
+    # Catalog titles (so AI never proposes songs already published)
+    catalog = get_catalog()
+    published_catalog = [s.get("title") for s in catalog if s.get("title")]
     
     # Current Todos (Local fallback)
     todos = [dict(r) for r in c.execute("SELECT id, song_name, status FROM todos WHERE status='pending'").fetchall()]
@@ -366,10 +427,14 @@ def fetch_recent_data():
     conn.close()
     return {
         "total_lifetime_views": total_views,
+        "lifetime_top_songs": lifetime_top_songs,
+        "platform_champions": platform_champions,
+        "recent_14d_velocity": recent_top,
+        "recent_top_songs": recent_top,
+        "published_catalog": published_catalog,
         "latest_video_uploads": latest_video_uploads,
         "format_performance": format_stats,
         "length_performance": length_stats,
-        "recent_top_songs": recent_top,
         "current_todo_list": todos,
         "community_wishlist": community_wishlist,
         "upcoming_upload_queue": upcoming_upload_queue,
@@ -529,17 +594,22 @@ def upload_missing_assets_to_vm(song_name: str, slow_only: bool = True) -> str:
     def _do_upload(files_to_upload, s_name):
         try:
             remote_dir = f"/home/ubuntu/meloscribe/staging/{s_name}/TikToks"
-            mkdir_cmd = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 ubuntu@{SERVER_IP} "mkdir -p \\"{remote_dir}\\""'
+            temp_dir = f"/home/ubuntu/meloscribe/staging/upload_tmp_{int(time.time())}"
+            mkdir_cmd = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 ubuntu@{SERVER_IP} "mkdir -p \\"{remote_dir}\\" {temp_dir}"'
             subprocess.run(mkdir_cmd, shell=True, capture_output=True)
             
             for file_path in files_to_upload:
-                scp_cmd = f'scp -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "{str(file_path)}" ubuntu@{SERVER_IP}:"\\"{remote_dir}/{file_path.name}\\""'
+                scp_cmd = f'scp -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "{str(file_path)}" ubuntu@{SERVER_IP}:{temp_dir}/'
                 print(f"[Agent SCP] Uploading {file_path.name} to VM...")
                 res = subprocess.run(scp_cmd, shell=True, capture_output=True, text=True)
                 if res.returncode == 0:
-                    print(f"[Agent SCP] Successfully uploaded {file_path.name}")
+                    print(f"[Agent SCP] Successfully uploaded {file_path.name} to temp staging.")
                 else:
                     print(f"[Agent SCP] Failed {file_path.name}: {res.stderr}")
+
+            mv_cmd = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new ubuntu@{SERVER_IP} "mv -f \\"{temp_dir}/\\"* \\"{remote_dir}/\\" && rmdir {temp_dir}"'
+            subprocess.run(mv_cmd, shell=True, capture_output=True)
+            print(f"[Agent SCP] All assets for {s_name} finalized in {remote_dir}")
         except Exception as err:
             print(f"[Agent SCP] Error during background upload: {err}")
 
@@ -549,12 +619,12 @@ def upload_missing_assets_to_vm(song_name: str, slow_only: bool = True) -> str:
     file_list_str = ", ".join([f.name for f in candidates])
     return f"SCP-Upload fuer '{song_name}' gestartet: {file_list_str} wird im Hintergrund auf die VM uebertragen ({SERVER_DIR}/staging/{clean_song}/TikToks)."
 
-def trigger_arrangeme_upload(song_name: str, difficulty: str = "Original", auto_publish: bool = False, headless: bool = False) -> str:
+def trigger_arrangeme_upload(song_name: str, difficulty: str = "Auto", auto_publish: bool = False, headless: bool = False) -> str:
     """Startet den Playwright-Bot fuer das Hal Leonard ArrangeMe Portal (arrangeme_bot.py) im Hintergrund.
     
     Args:
-        song_name: Name des Songs (z.B. 'Sonne' oder 'Sweetest Rain').
-        difficulty: 'Original' oder 'Easy'.
+        song_name: Name des Songs (z.B. 'Sonne' oder 'Golden Brown').
+        difficulty: 'Auto' (erkennt automatisch ob Easy existiert fuer Dual-Upload), 'Original', 'Easy', oder 'Both'.
         auto_publish: Ob nach dem Ausfuellen automatisch 'Publish' geklickt werden soll.
         headless: Ob der Browser unsichtbar (headless) gestartet werden soll.
     """
@@ -572,7 +642,7 @@ def trigger_arrangeme_upload(song_name: str, difficulty: str = "Original", auto_
             
     bot_path = PROJECT_ROOT / "tools" / "arrangeme_bot.py"
     if not bot_path.exists():
-        return f"Fehler: Bot-Skript {bot_path} nicht gefunden."
+        return f"Error: Bot script {bot_path} not found."
         
     cmd = [
         get_python_exe(),
@@ -588,15 +658,18 @@ def trigger_arrangeme_upload(song_name: str, difficulty: str = "Original", auto_
         cmd.append("--headless")
         
     try:
+        log_file = PROJECT_ROOT / "tools" / "arrangeme_bot.log"
+        f_log = open(log_file, "a", encoding="utf-8")
         flags = 0x08000000 if os.name == 'nt' else 0
-        subprocess.Popen(cmd, cwd=str(bot_path.parent), creationflags=flags)
+        subprocess.Popen(cmd, cwd=str(bot_path.parent), creationflags=flags, stdout=f_log, stderr=subprocess.STDOUT)
         artist_msg = f" by {artist}" if artist else ""
+        diff_desc = "Original & Easy (Dual Upload)" if difficulty.lower() == "both" else difficulty
         return (
-            f"ArrangeMe-Upload-Modul wurde fuer '{s}'{artist_msg} (Schwierigkeit: {difficulty}) im Hintergrund gestartet! "
-            f"Der Browser {'laeuft headless' if headless else 'oeffnet sich'} und traegt Noten, Audio-Preview und Metadaten ein."
+            f"ArrangeMe upload started for '{s}'{artist_msg} ({diff_desc}) in background. "
+            f"Browser is {'running headless' if headless else 'opening'} to populate score, audio preview, YouTube link, and metadata."
         )
     except Exception as e:
-        return f"Fehler beim Starten von arrangeme_bot.py: {e}"
+        return f"Error starting arrangeme_bot.py: {e}"
 
 def stage_song_to_vm(song_name: str, schedule_date: str = "", schedule_time: str = "16:00", price: str = "6.00") -> str:
     """Fuehrt das vollstaendige Server-Staging (stage_to_server.py) fuer einen Song aus und reiht ihn in die Upload-Queue der VM ein.
@@ -1308,15 +1381,17 @@ def get_video_analytics(song_name: str = "") -> str:
     total_v = sum(r.get("views") or 0 for r in rows)
     total_l = sum(r.get("likes") or 0 for r in rows)
     total_c = sum(r.get("comments") or 0 for r in rows)
+    total_s = sum(r.get("saves") or 0 for r in rows)
+    total_sh = sum(r.get("shares") or 0 for r in rows)
     
     res = [
         f"Performance-Analyse fuer '{target_song}':",
         f"- Gesamt-Views ueber alle Plattformen: {total_v:,}",
-        f"- Gesamt-Likes: {total_l:,} | Kommentare: {total_c:,}",
+        f"- Gesamt-Likes: {total_l:,} | Saves: {total_s:,} | Shares: {total_sh:,} | Kommentare: {total_c:,}",
         f"- Aufgeschluesselte Uploads ({len(rows)} Videos):"
     ]
     for r in rows:
-        res.append(f"  * [{r.get('platform', '').upper()}] ({r.get('publish_date')}): {r.get('views', 0):,} Views, {r.get('likes', 0):,} Likes | Format: {r.get('format', 'Tutorial')}")
+        res.append(f"  * [{r.get('platform', '').upper()}] ({r.get('publish_date')}): {r.get('views', 0):,} Views, {r.get('likes', 0):,} Likes, {r.get('saves', 0):,} Saves | Format: {r.get('format', 'Tutorial')}")
     return "\n".join(res)
 
 def trigger_social_sync(platform: str = "all") -> str:
@@ -1484,7 +1559,8 @@ def generate_daily_briefing():
     learnings = get_learnings()
     
     prompt = f"""
-Rolle: Du bist der knallharte Daten-Analyst und AI Agent fuer „meloscribe“. Dein Ziel ist es, Tobias ein exaktes Status-Update zu geben, wie sein Content performt.
+Rolle: Du bist der Senior Music Producer, gnadenlose Content-Stratege und Lead-Datenanalyst für „meloscribe“.
+Dein Ziel: Tobias ein messerscharfes, datengetriebenes Status-Briefing liefern, wie sein Content performt und welche Songs als nächstes produziert werden müssen, um Views & Sheet-Music-Verkäufe zu maximieren.
 
 Projekt-Kontext:
 {project_rules}
@@ -1492,27 +1568,50 @@ Projekt-Kontext:
 Gelerntes Wissen & Richtlinien:
 {json.dumps([l.get('lesson') for l in learnings], indent=2, ensure_ascii=False)}
 
-Daten-Grundlage (Tobias's performance data):
+Daten-Grundlage (Tobias's Performance Data & Cross-Platform Metrics):
 {json.dumps(local_data, indent=2, ensure_ascii=False)}
 
 Aktuelle globale Trends (Spotify/Last.fm, YouTube Music, Google Trends):
 {json.dumps(trends, indent=2, ensure_ascii=False)}
 
-Deine Aufgabe:
-Erstelle ein Status-Update (Briefing) auf DEUTSCH.
-- Keine generischen Ratschlaege.
-- PFLICHT: Nenne exakt, welche Songs (aus den lokalen Daten!) aktuell am staerksten wachsen oder die meisten Views/Saves haben.
-- PFLICHT: Vergleiche die Plattformen (TikTok vs. YouTube vs. Instagram).
-- PFLICHT: Berücksichtige die am höchsten gevoteten Community-Wünsche von der Website (aus `community_wishlist`)! Wenn Hörer aktiv nach einem Song fragen, priorisiere ihn in deiner Analyse und deinen 10 Song-Vorschlägen.
-- PFLICHT: Nenne 10 GANZ KONKRETE neue Songs aus den globalen Trends und der Community Wishlist, die perfekt zur Zielgruppe (Klavierspieler Pop/Film) passen. Schlage NIEMALS Songs vor, die in `dismissed_suggestions` oder `current_todo_list` stehen!
+DEINE ANALYSE- & FILTER-PFLICHTEN:
 
+1. ZAHLEN-PRÄZISION & LIFETIME-METRIKEN:
+- Zitiere Zahlen IMMER exakt und faktenbasiert aus `lifetime_top_songs` und `platform_champions`.
+- Verwechsle NIEMALS das 14-Tage-Upload-Momentum (`recent_14d_velocity`) mit den Gesamtaufrufen eines Songs!
+- Wenn du über "Experience" sprichst: Nenne die tatsächlichen Gesamtaufrufe über alle Plattformen (über 229k Lifetime-Views, davon ca. 157k Facebook, 60k TikTok, 6.2k YouTube und 5.5k Instagram mit 97 Saves).
+- Wenn du kürzliche Uploads erwähnst, deklariere sie explizit als "in den letzten 14 Tagen".
+
+2. RIGOROSE FILTERPFLICHT BEI COMMUNITY-WÜNSCHEN (KEINE BLINDEN EMPFEHLUNGEN!):
+- Hinterfrage JEDEN Songvorschlag aus `community_wishlist` kritisch!
+- Nur weil ein einzelner Hörer auf der Website einen Song eingereicht hat (1 Vote), ist das KEIN Grund, ihn zu empfehlen!
+- Songs wie Cartoon-/Kinderlieder, Joke-Tracks, chaotischer Punk oder Stücke ohne tragende, virale Klaviermelodie (wie z.B. "Every Snowflake is Different") sind für meloscribe UNGEEIGNET und müssen von dir rigoros ABGELEHNT werden. Begründe kurz in der Analyse, warum solche Vorschläge ausscheiden!
+- Ein Community-Wishlist-Song wird NUR empfohlen, wenn:
+  a) Er starke Community-Resonanz hat (mindestens 3+ Votes) UND
+  b) Er sich herausragend für Solo-Klavier eignet und zur meloscribe-Zielgruppe passt.
+
+3. PLATTFORM-DNA & LOOKALIKE-SONG-SUGGESTIONS:
+Analysiere die Plattform-Dynamik anhand von `platform_champions` und `lifetime_top_songs`:
+- **TikTok & Instagram Saves Champions** (Atmosphärisch, melancholisch, Neoklassik, Cinematic, Gaming):
+  Titel wie *Experience*, *In This Shirt*, *Nuvole Bianche*, *Cornfield Chase*, *Aria Math*, *Golden Brown*.
+  Auf Instagram sind **SAVES** der stärkste Kauf-Indikator für Noten (*Experience*: 97 Saves, *Nuvole Bianche*: 52 Saves, *Sweetest Rain*: 37 Saves, *Succession theme*: 32 Saves)!
+  -> **Schlage 'Lookalike'-Songs mit exakt dieser musikalischen DNA vor**: z.B. Ludovico Einaudi (*Divenire*, *Una Mattina*), Yann Tiersen (*Amélie* / *Comptine d'un autre été*), Max Richter (*On the Nature of Daylight*), Radiohead (*Creep*), Cigarettes After Sex (*Apocalypse*), Lord Huron (*The Night We Met*), bôa (*Duvet*), Tom Odell (*Another Love*), Joe Hisaishi / Studio Ghibli.
+- **Facebook & YouTube Champions** (Epische Breitenwirkung, zeitlose Klassiker, nostalgische Ohrwürmer):
+  Titel wie *River Flows in You* (2M Views), *Golden Brown* (420k), *Carol of the Bells* (723k), *Mockingbird* (101k), *Hallelujah* (99k).
+  -> **Schlage Songs mit universeller melodischer Strahlkraft vor** (z.B. Yiruma, Secret Garden, weltbekannte Film- & Serien-Soundtracks).
+
+4. AUSSCHLUSS-REGELN:
+- Schlage NIEMALS Songs vor, die bereits im Shop existieren (`published_catalog`)! (z.B. kein *River Flows in You*, *In This Shirt*, *Experience*, *Golden Brown*, *No Surprises* etc. erneut vorschlagen).
+- Schlage NIEMALS Songs vor, die in `dismissed_suggestions` oder `current_todo_list` stehen!
+
+5. STRUKTUR DES BRIEFINGS:
 Output MUST be valid JSON matching this exact structure:
 {{
-  "recommendation": "Eine kurze, sehr spezifische Status-Zusammenfassung (2-3 Saetze): Welcher alte Song laeuft am besten? Welcher Trend- oder Wishlist-Song MUSS gespielt werden?",
-  "analysis": "Detaillierte Analyse (1-2 Absaetze). Verknuepfe harte Zahlen aus den Analytics mit den Trends und Kundenwünschen.",
-  "suggested_songs": ["Songname - Autor", "Songname - Autor", ...] // EXAKT 10 SONGS!
+  "recommendation": "Eine prägnante, datenbasierte Status-Zusammenfassung (2-3 Sätze): Welcher Champion treibt die Views/Saves (mit echten Gesamtzahlen)? Welche klare Priorität gilt für den nächsten Song?",
+  "analysis": "Detaillierte Analyse (1-2 Absätze). Vergleiche Plattform-Stärken (Facebook-Reichweite vs. TikTok-Soundtrack-Virality vs. Instagram-Saves als Notenkauf-Indikator). Hinterfrage Hörerwünsche kritisch und begründe, warum die empfohlenen Songs perfekt auf den Daten der Plattform-Gewinner aufbauen.",
+  "suggested_songs": ["Songname - Artist", "Songname - Artist", ...] // EXAKT 10 HOCHWERTIGE SONGS!
 }}
-WICHTIG: Die suggested_songs MUeSSEN im Format 'Songname - Autor' sein.
+WICHTIG: Die suggested_songs MÜSSEN im Format 'Songname - Artist' sein.
 Only output JSON. No markdown wrappers.
 """
     try:
@@ -1631,10 +1730,14 @@ DEIN WISSEN & KONTEXT:
 {json.dumps([{"title": s.get("title"), "artist": s.get("artist"), "difficulty": s.get("difficulty"), "price": s.get("price", "6.00"), "hasEasy": s.get("hasEasy", False), "arrangeme": bool(s.get("arrangemeLink"))} for s in catalog], ensure_ascii=False)}
 
 3. Live App- & Performance-Daten:
-- Lifetime Views: {local_data.get('total_lifetime_views')}
+- Lifetime Views Gesamt: {local_data.get('total_lifetime_views')}
+- Top Songs Lifetime & Plattform-Breakdown:
+{json.dumps(local_data.get('lifetime_top_songs'), ensure_ascii=False)}
+- Platform Champions (Top 5 Performer je Plattform):
+{json.dumps(local_data.get('platform_champions'), ensure_ascii=False)}
+- 14-Tage Upload-Momentum: {json.dumps(local_data.get('recent_14d_velocity'), ensure_ascii=False)}
 - Neueste Video-Uploads (chronologisch, allerneueste Uploads zuerst!):
 {json.dumps(local_data.get('latest_video_uploads'), ensure_ascii=False)}
-- Top Songs (letzte 14 Tage): {json.dumps(local_data.get('recent_top_songs'))}
 - Aktuelle Todos (Live-Synchronisiert): {json.dumps(local_data.get('current_todo_list'), ensure_ascii=False)}
 - Format-Performance: {json.dumps(local_data.get('format_performance'))}
 - Channel Insights: {json.dumps(local_data.get('channel_insights'))}
@@ -1666,8 +1769,8 @@ KRITISCHE PFLICHT-ANWEISUNG ZUR SELBSTVERBESSERUNG & GEDAECHTNIS-PFLEGE:
 
 VERHALTEN:
 - Du hast VOLLSTAeNDIGEN ZUGRIFF auf die Datenbank `analytics.db`, die Server-Queue `queue.db`, die Website-Wishlist (`suggestions`), den Shop-Katalog (`songs.json`) sowie saemtliche Social-Media-APIs (YouTube, TikTok, Facebook, Instagram, Threads, Pinterest).
-- Wenn Tobias nach der Wishlist, Song-Wünschen der Community, Website-Vorschlägen oder beliebten Hörer-Wünschen fragt:
-  Nutze `get_community_wishlist` oder zitiere die Daten aus Punkt 4 ('Website Wishlist')! Nenne exakte Songtitel, Interpreten und Stimmenanzahlen (Votes). Biete ihm aktiv an, beliebte Wishlist-Songs mit `manage_community_suggestion(action='add_to_todo', ...)` direkt als To-Do anzulegen!
+- Wenn Tobias nach der Wishlist, Song-Wünschen der Community, Website-Vorschlägen oder Song-Ideen fragt:
+  Hinterfrage jeden Songvorschlag kritisch! Prüfe Solo-Klavier-Eignung, melodische Tragfähigkeit, emotionale Ästhetik und Verkaufs-Potenzial. Lehne Fun-Songs, Joke-Tracks, chaotischen Punk oder unmelodische Lieder (wie 'Every Snowflake is Different') klar ab und begründe dies professionell. Schlage stattdessen Lookalike-Songs vor, die auf den bewiesenen Erfolgen unserer Plattform-Champions (Experience, In This Shirt, Nuvole Bianche, River Flows in You, Golden Brown) basieren. Nutze `get_community_wishlist` oder zitiere die Daten aus Punkt 4 ('Website Wishlist')! Nenne exakte Songtitel, Interpreten und Stimmenanzahlen (Votes). Biete ihm aktiv an, beliebte Wishlist-Songs mit `manage_community_suggestion(action='add_to_todo', ...)` direkt als To-Do anzulegen!
 - Wenn Tobias nach der Upload-Queue oder geplanten Veröffentlichungen fragt:
   Nutze `get_upload_queue`! Nenne geplante Termine, Songs, Plattformen (YouTube, TikTok, Instagram etc.) und den Status (pending, completed, failed).
 - Wenn Tobias nach dem Notenkatalog, Preisen, fehlenden Easy-Versionen oder ArrangeMe-Links fragt:

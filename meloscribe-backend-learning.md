@@ -2,6 +2,133 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-10-22: Facebook +4 Hours Scheduling Offset & Auto-Scheduling Cadence Drift Prevention
+- **Facebook Platform Schedule Staggering & Server Queue Calibration (`stage_to_server.py`, `upload_bot.py`, `queue.db`)**:
+  - *Context:* The user established a strict requirement that all Facebook video releases must publish +4 hours later than the standard release time (e.g. 16:00 CEST releases publish on Facebook at 20:00 CEST), while keeping other platforms (YouTube, Instagram, TikTok, Threads) on their base schedule.
+  - *Root Cause Analysis & Potential Cadence Drift:*
+    1. In `stage_to_server.py`, all social media platforms received identical timestamps (`dates['original_normal']`, `dates['original_tutorial']`, etc.).
+    2. Merely shifting Facebook tasks inside `queue.db` without adjusting `get_base_schedule_time()` would cause subtle time drift: `SELECT max(schedule_time) FROM upload_queue` would return Facebook's 20:00 timestamp (or Pinterest's 21:00 timestamp) as `max_pending`, causing the next song's base time to increment to 20:00 instead of 16:00, cascading into midnight releases.
+  - *Resolution:*
+    1. In `stage_to_server.py` (`register_task`), added an automated +4-hour delta when `mode == "facebook"`, correctly adjusting date and time across both standard releases and content recycling staging.
+    2. In `get_base_schedule_time()`, filtered out background Pinterest pins (`mode != 'pinterest'`) and locked `spaced_dt` to `req_dt.time()` (`datetime.datetime.combine((max_dt + timedelta(days=interval_days)).date(), req_dt.time())`), guaranteeing future staged songs always preserve their intended release hour (e.g. 16:00 CEST).
+    3. In `upload_bot.py`, added a defensive +4-hour offset to `args.datetime` for direct CLI/scheduler runs.
+    4. Synchronized changes across `meloscribe-app`, `meloscribe-backend`, and the live production Oracle VM (`/home/ubuntu/meloscribe/tools/upload_bot.py`).
+    5. Updated the upcoming pending Facebook release in `queue.db` on Oracle VM (Task 210: *Experience Easy (Tutorial)*) from `2026-10-24 16:00` to `2026-10-24 20:00`.
+
+### 2026-10-21: Pinterest SEO Description Optimization & Link Redundancy Removal
+- **Pinterest Description Redundant Links & SEO Keyword Strategy (`pinterest_poster.py`, `settings.json`, `settings.py`)**:
+  - *Context:* The user identified that scheduled and published Pinterest posts contained the full raw song link in the description text. On Pinterest, description text URLs are non-clickable plain text, look spammy, and take up character count that should be used for search ranking keywords. Furthermore, Pinterest posts already have the native clickable destination button/link configured via `pin_data["link"] = song_link`.
+  - *Root Cause:*
+    1. In `pinterest_poster.py`, the hardcoded default description generator inserted `{song_link}` right in the body: `✨ Sheet Music (PDF), MIDI & Tutorial:\n{song_link}`.
+    2. In `settings.json` and `settings.py`, `desc_template_pinterest` included `{song_link}` at the end of the hashtags.
+  - *Resolution:*
+    1. In `pinterest_poster.py`, removed `{song_link}` completely from the description text.
+    2. Replaced the unclickable link with a high-converting CTA directing viewers to the native clickable link on the Pin: `✨ Click the Pin to get the Sheet Music (PDF), MIDI & practice tutorial!`.
+    3. Enriched the description with high-ranking Pinterest SEO hashtags and search keywords: `#{clean_tag}`, `#{author_tag}`, `#easypiano`, `#learnpiano`, `#pianomusic`, `#aestheticpiano`, `#pianonotes`, `#solopiano`, `#pianopractice`.
+    4. Cleaned `{song_link}` from `settings.json` and `settings.py` across `meloscribe-app` and `meloscribe-backend`.
+    5. Deployed the updated `pinterest_poster.py` and `settings.json` to Oracle Cloud production VM (`152.70.23.171`) via SCP. All pending scheduled tasks (`I don't know`, `I don't know Easy`, `Je te laisserai des mots`, `Icarus`) dynamically generate descriptions at upload time and will immediately publish with the optimized copy.
+  - *Pinterest Video Transcode Polling Timeout & Clean Cover Image Fallback*:
+    - *Context:* The user noticed that certain Pinterest posts (such as *Golden Brown Easy* and *Sweetest Rain*) were published as static image Pins instead of video Pins.
+    - *Root Cause:* In `pinterest_poster.py`, `upload_video_media()` had a strict `max_wait_seconds = 180` (3 minutes) polling limit for Pinterest's server-side video transcoding (`GET /v5/media/{media_id}`). Heavy 1440x2560 60fps video files (e.g., *Golden Brown Easy* at 370.1 MB) or periods of high Pinterest server transcode load (e.g., *Sweetest Rain*) exceeded 180 seconds. When the timeout expired, `upload_video_media()` returned `None`, triggering the built-in safety fallback in `post_pin()`: `media_source = {"source_type": "image_url", "url": cover_url}`. Rather than failing the upload task, the bot safely published the clean cover art as an image Pin. Direct inspection of the Pinterest API confirmed both media IDs (`3959571195591309056` and `3961988367920086336`) did eventually succeed transcoding (`status: 'succeeded'`) shortly after the 180s cutoff.
+    - *Resolution:* Increased `max_wait_seconds` from 180s to **420s (7 minutes)** in `pinterest_poster.py` across `meloscribe-app`, `meloscribe-backend`, and Oracle VM (`152.70.23.171`), providing sufficient headroom for large files and high Pinterest transcode queue latency without prematurely triggering the image fallback.
+
+  - *Pinterest Video Pin Cover Requirement & Native Frame Extraction (`cover_image_key_frame_time`)*:
+    - *Context:* The user noticed that published Pinterest video Pins displayed an empty background image (clouds + empty keyboard without song title or falling notes), and only upon hover did the actual video with title and notes play.
+    - *Initial Regression & Root Cause:* In `pinterest_poster.py`, `post_pin()` previously passed `"cover_image_url": f"https://meloscribesheets.com/covers/{clean_song}_clean.jpg"` inside the `media_source` object. Removing `cover_image_url` entirely caused Pinterest API v5 to reject the upload with HTTP 400: `{"code":1,"message":"Please provide either cover_image_url or cover_image_content_type and cover_image_data or cover_image_key_frame_time"}`.
+    - *Resolution:* Pinterest API v5 strictly mandates at least one cover specification method for video Pins. Instead of passing an external static image URL or uploading raw image bytes, pass `"cover_image_key_frame_time": 2` (must be an integer, whole seconds from video start). At second 2, Meloscribe videos show the full song title, author typography, and falling notes. Pinterest natively grabs and renders this frame as the Pin's card thumbnail across all feeds, with zero external cover art or hover mismatch.
+    - *Files Updated:* `pinterest_poster.py` in `meloscribe-app`, `meloscribe-backend`, and `/home/ubuntu/meloscribe/tools/meloscribe/backend/pinterest_poster.py` on Oracle VM (`152.70.23.171`). Rescheduled all failed tasks (Tasks 233–236) which published successfully.
+
+### 2026-10-18: TikTok Safe Area Portrait Title Typography & Smart 2-Line Centering Architecture
+- **In-Video Portrait Title Position & TikTok Safe Area Clearance (`video_generator.py`)**:
+  - *Context:* The user noticed in TikTok video screenshots that single-line titles like *Experience* were positioned uncomfortably high up (`title_y = 390`), hugging the search bar header (`y ≈ 0..340`) while leaving a large empty gap before the subtitle and piano keys.
+  - *Root Cause:*
+    1. Previous hardcoded vertical positioning placed single-line titles at `y = 390` (and `y = 440` without subtitle). On modern mobile devices (iPhone Dynamic Island, Android notch, plus TikTok/Reels search navigation), the top UI covers down to `y = 340..350`. This left only ~40px breathing room, looking crowded.
+    2. In addition, `title_text = re.sub(r'\s+', ' ', title_text)` stripped all explicit newlines (`\n`), preventing intentional multiline formatting.
+    3. Long titles (e.g. *Welcome to the Black Parade*, *Comptine d'un autre été: L'Après-Midi*) exceeded the 1440px canvas width (>1490px at fontsize 130).
+    4. Crucially, in FFmpeg, putting multiline text into a single `drawtext` filter with `x=(w-text_w)/2` computes text width using the widest line and **left-aligns** all subsequent lines to line 1's X coordinate!
+  - *Resolution:*
+    1. **Dynamic `y_overlay`-Relative Positioning Across All Zooms**:
+       - Instead of fixed absolute coordinates, both Title and Subtitle are dynamically anchored to `y_overlay` (the moving top edge of the cropped video canvas):
+         - 1-Line: `author_y = y_overlay - 105`, `title_y = author_y - 125`.
+         - 2-Line: `author_y = y_overlay - 95`, `title2_y = author_y - 110`, `title1_y = title2_y - 105`.
+       - Ensures the distance from Subtitle to video edge is **always 105px** (or 95px for 2-line), completely eliminating large empty gaps regardless of whether zoom is 1.0, 1.3, 1.45, or 1.55.
+    2. **TikTok Safe Area Ceiling Clamping**:
+       - `title1_y` and `title_y` clamp at `y >= 365`, ensuring titles never push up into TikTok's top navigation bar (`y ≈ 0..340`) even under heavy crop zoom.
+    3. **Smart 2-Line Title Splitting (`split_title_lines`)**:
+       - Preserves manual newlines (`\n` or `\\n`).
+       - If rendered single-line width exceeds 1080px (measured via `PIL.ImageFont` on `arno_pro.ttf` at fontsize 130), dynamically tests all word boundaries to balance the pixel widths of Line 1 and Line 2.
+    4. **Dual-Layer FFmpeg Horizontal Centering**:
+       - 2-line titles write `title1_txt` and `title2_txt` separately and chain two independent `drawtext` layers in the filter complex, each with its own `x=(w-text_w)/2`.
+       - Fontsize scales to `108px` (Line 1 `title1_y`, Line 2 `title2_y`, Subtitle `author_y`, `subtitle_fontsize = 60`).
+       - Both lines are individually and perfectly centered on screen.
+    5. Synchronized across `meloscribe-app` and `meloscribe-backend`.
+
+### 2026-10-18: In-Video CTA Overlay Timing Architecture & Stripe Live Environment Default Sync
+- **In-Video CTA Overlay Disappearance & Outro Re-Appearance (`video_generator.py`)**:
+  - *Context:* The user noted that the bottom CTA text overlay (`Sheets in bio →` / `Want to play this?`) persisted on screen all the way until the end of the video, obscuring the performance area.
+  - *Root Cause:* In commit `a4154e1`, a third `drawtext` layer was re-introduced with `alpha='if(lt(t,9.3),0,if(lt(t,9.8),(t-9.3)/0.5,1))'` (or `alpha='if(lt(t,3),0,min(1,(t-3)/0.5))'` without morph text). This set alpha permanently to `1.0` through the remainder of the clip until the final outro fade.
+  - *Resolution:*
+    1. Redesigned portrait mode CTA timing in `tools/video_generator.py`:
+       - With `morph_text`: CTA appears at 3.0s, morph text appears at 6.3s, fades out cleanly by 9.3s, leaving the piano keys and stage empty.
+       - Without `morph_text`: CTA appears at 3.0s, fades out smoothly between 6.0s and 6.5s.
+       - Re-appearance: If the video is long enough (`fade_start - 3.5 >= 12.0s` with morph, or `>= 9.0s` without), the CTA reappears for ~3.5s right before `fade_start`, naturally dissolving as the outro slate arrives.
+    2. Synchronized across `meloscribe-app`, `meloscribe-backend`, and Oracle VM (`152.70.23.171`).
+- **Stripe Environment Badge Default Alignment (`settings.py`, `settings.json`, `App.jsx`)**:
+  - *Context:* The desktop app unexpectedly displayed the yellow "sandbox" badge in the header despite live orders and webhooks processing successfully on Stripe.
+  - *Root Cause:* `DEFAULT_SETTINGS` in `settings.py` and `settings.json` lacked an explicit `"environment": "live"` key. When the desktop frontend initialized, React `useState` defaulted to `'sandbox'` until manually toggled.
+  - *Resolution:* Added `"environment": "live"` to `DEFAULT_SETTINGS`, `settings.json`, and set `'live'` as default fallback in `App.jsx`. Synced to Oracle Cloud VM and confirmed `/api/settings` response.
+- **Newsletter Subscribers Status Grouping & Hierarchy (`routes_admin.py`, `WebsiteTab.jsx`)**:
+  - *Context:* In the desktop app's Website/Newsletter tab, subscribers were ordered strictly by `created_at DESC`. Confirmed active subscribers were interleaved with pending DOI leads.
+  - *Resolution:*
+    1. Updated SQL query in `routes_admin.py` to prioritize `CASE WHEN status = 'active' THEN 0 WHEN status = 'pending' THEN 1 ELSE 2 END ASC`, followed by `COALESCE(confirmed_at, created_at) DESC`.
+    2. Added `useMemo` in `WebsiteTab.jsx` for client-side hierarchical sorting and upgraded active badge to `badge--success` (green).
+    3. Added a clean visual section divider in the table demarcating pending double opt-in leads.
+- **Community Suggestions Completed Lifecycle & Open/Done Filtering (`routes_public.py`, `AiAdvisor.jsx`)**:
+  - *Context:* The user noticed that songs already arranged and completed (e.g. *Experience*, *River Flows in You*, *Sweetest Rain* / *Sweet rain*) were removed from open suggestions on the website, but continued to appear in the desktop app's suggestions card with "+ Todo" buttons.
+  - *Root Cause:*
+    1. On the website (`Suggestions.tsx`), suggestions matching catalog songs or marked `status === 'completed'` are automatically routed to the "Already Arranged" tab and excluded from open voting.
+    2. However, `/api/public/suggestions` returned all database rows unfiltered.
+    3. In `AiAdvisor.jsx`, suggestions were rendered without checking `sug.status !== 'completed'`.
+  - *Resolution:*
+    1. Added `status` query parameter support in `routes_public.py` (`open`, `completed`, or all).
+    2. Windows proxy sync now prunes deleted remote suggestions from local SQLite.
+    3. In `AiAdvisor.jsx`, separated suggestions into `Open` (default) and `Done` tabs. Open wishlist only displays actionable, unfulfilled requests. Completed requests display a green "Done" badge.
+    4. Deployed to Oracle VM (`152.70.23.171`) and rebuilt desktop app bundle.
+
+
+
+### 2026-10-12: Universal Concert Stage Floor Reflection & Retirement of Static Addon Overlays
+- **Universal Concert Stage Floor Keyboard Reflection (`video_generator.py`)**:
+  - *Context:* Previously, the dynamic piano floor reflection was isolated in an `else:` branch of `if args.use_portrait_addon:`. The automation pipeline (`routes_workflow.py`, `upload_bot.py`, `settings.json`) passed `--use_portrait_addon` by default, which loaded static theme textures (e.g. `warm addon.png` for Experience) and bypassed reflection completely. Only videos rendered without the flag (such as "Die drei ???") received the reflection.
+  - *Resolution:*
+    1. Removed static `addon.png` image loading and overlay branches from `video_generator.py`.
+    2. Made the glossy concert stage reflection (with satin diffusion `boxblur=10:2`, peak alpha 65, smoothstep 18px contact ramp) the default behavior across all color themes (Warm, Cold, Green, Violet, Platinum).
+    3. Retained `--no_reflection` flag for optional deactivation and marked `--use_portrait_addon` as deprecated.
+    4. Updated desktop UI in `MasterTab.jsx` (`enableReflection: 'piano stage reflection'`) and `routes_workflow.py`.
+    5. Removed obsolete static `* addon.png` and `* addon.jpg` files from `tools/`.
+    6. Synchronized across `meloscribe-app` and `meloscribe-backend`.
+
+### 2026-10-12: SCP Staging Idempotency & YouTube Scheduling Architecture
+- **SCP Staging Idempotency & Remote Size Checking (`stage_to_server.py`)**:
+  - *Context:* When resuming an interrupted staging upload, `stage_to_server.py` previously re-uploaded all files from index 0 sequentially, taking over an hour on large collections.
+  - *Resolution:* Added pre-upload check using `find {SERVER_DIR}/staging/{song}/TikToks {SERVER_DIR}/staging/{song}/Covers -type f -printf '%s %p\\n'`. Compares exact local byte sizes against remote files and skips identical files in <1 second. Replaced fragile `stat` glob syntax which threw errors on empty directories.
+- **YouTube Native Scheduling vs Oracle VM Staging Architecture**:
+  - *Finding:* YouTube Data API v3 (`publishAt`) returns permanent URLs immediately upon upload. However, YouTube strictly forbids replacing video streams for existing video IDs. Any re-render or edit requires re-uploading, generating a new URL and breaking ArrangeMe external links. Retaining Oracle VM staging preserves full editability of queued video files and schedules prior to broadcast.
+
+### 2026-10-02: TikTok API Direct Post Public Visibility & Redundant ntfy Elimination
+- **Redundant ntfy Notification on Native API Posting (`upload_bot.py`)**:
+  - *Context:* Prior to TikTok API integration, `upload_bot.py` sent the video caption, hashtags, and cover image to the user's phone via ntfy (`https://ntfy.sh/{ntfy_topic}`) so the creator could paste the description and publish manually in the TikTok mobile app.
+  - *Symptom:* When native TikTok API upload was introduced, the `send_ntfy_notification()` call inside `run_tiktok()` was kept in place right before `tiktok_poster.post_video()`. Even though the backend API uploaded the video automatically, the phone continued to receive manual posting pushes.
+  - *Resolution:* Removed `send_ntfy_notification()` from `run_tiktok()`. Native API uploads now post captions, hashtags, and authentic frame-0 covers directly without spamming redundant mobile push notifications.
+- **TikTok API Direct Post Default Visibility (`PUBLIC_TO_EVERYONE`)**:
+  - *Context:* During initial Direct Post testing, uploads were intentionally restricted to `privacy="SELF_ONLY"` (Private / Nur ich) via guard checks in `tiktok_poster.py` to prevent accidental public publishing of test clips.
+  - *Symptom:* Scheduled queue jobs (e.g. Task 191 on 2026-10-02) uploaded as private videos, requiring manual publishing on mobile.
+  - *Resolution:*
+    1. In `upload_bot.py`, defaulted `run_tiktok` to `privacy="PUBLIC_TO_EVERYONE"`, added `--tiktok_privacy` CLI argument, and updated terminal reporting.
+    2. In `tiktok_poster.py`, defaulted `privacy="PUBLIC_TO_EVERYONE"`, allowed all valid TikTok privacy levels (`PUBLIC_TO_EVERYONE`, `MUTUAL_FOLLOW_FRIENDS`, `SELF_ONLY`), and updated Direct Post request headers.
+    3. Verified live creator API capabilities via `/v2/post/publish/creator_info/query/` (`privacy_level_options: ["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"]`).
+    4. Synchronized patched files across `meloscribe-app`, `meloscribe-backend`, and the live production Oracle VM (`/home/ubuntu/meloscribe/tools/upload_bot.py` and `tiktok_poster.py`). Future queued tasks (such as Task 192 on 2026-10-05) now publish publicly automatically.
+
 ### 2026-09-29: YouTube Caption/Title Formatting & Video Highlight Thumbnail Detection Across Social Platforms
 - **YouTube Title/Caption Formatting**:
   - *Root Cause:* In `upload_bot.py`, `label` appended `" Tutorial"` when `args.profile == "tutorial"`. The YouTube upload call formatted titles with `f"{base_song} - {args.author}{label} | Piano Cover"`, generating double labels like `In This Shirt - The Irrepressibles Tutorial | Piano Cover`.
@@ -59,7 +186,7 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Seamless Multi-Core Visualizer Particle Pre-calculation**: `audio_visualizer.py` splits rendering across 12 CPU cores. Previously, each worker re-seeded `random.seed` and initialized separate particle arrays per ~20-second chunk (14,161 frames / 12 = ~1,180 frames = 19.6s), causing hard visual cuts every 20 seconds at chunk boundaries. Resolved by globally precalculating `ambient_fx_all` particle trajectories across all frames 0..total_frames sequentially (~0.05s) before worker pool dispatch.
 - **Test File Organization Rule**: Temporary test files/videos (e.g., test renders, 5s snippets, crop tests) MUST NEVER be saved inside production directories (`TikToks/`, `Scores/`, `Covers/`). Always save test files to `tools/temp/` or `scratch/`.
 - **NVENC Bitrate Cap Rule**: Hardware `h264_nvenc` VBR without `-b:v` causes video bitrates to balloon to 20-25 Mbps (producing 1.1 GB - 1.3 GB files for slow tutorials). Always set `-b:v 5M -maxrate:v 7M` for Portrait (9:16) and `-b:v 6.5M -maxrate:v 9M` for Widescreen (16:9) to keep file sizes within ~120 MB - 360 MB without visual quality loss.
-- **TikTok Cover Frame Injection Rule**: Cover frames at video end apply ONLY to Hochkant / Portrait (9:16) videos (`not args.wide`) for the final 0.2s (12 frames at 60fps) with 1:1 un-stretched scaling (`scale=1440:-1`, centered overlay). **Currently disabled via `ENABLE_LAST_FRAME_COVER = False` in `video_generator.py`** until TikTok developer app audit is completed. Set `ENABLE_LAST_FRAME_COVER = True` to re-enable when ready.
+- **TikTok Cover Frame Injection Rule**: Synthetic cover frames/slates (outro slates, 1-frame inserts) have been completely removed from `video_generator.py`. Direct Post uploads use authentic video Frame 0 (`cover_timestamp = 0`), which displays the clean title, notes, and keyboard. Videos render strictly as 100% uninterrupted piano performances.
 - **MuseScore 4 Template & Spatium Rule**: Staff space (`<spatium>`) is set to `1.4` mm. Top headers (`evenHeaderL`, `oddHeaderR`, `headerEvenLeft`, `headerOddRight`) MUST be cleared (`""`) so page numbers appear ONLY on bottom-center (`<oddFooterC>$p</oddFooterC>`). `musescore_launcher.py` modifies ALL `.mscx` and `.mss` files in the score archive.
 - **Process Cancellation (`/api/workflow/stop`)**: `run_tool` MUST NOT reset `active_workflow_task["stop_requested"] = False` on step entry. `stop_workflow()` uses `psutil` to kill the process tree AND issues `taskkill /F /IM scp.exe /IM ffmpeg.exe` to forcefully terminate detached/orphaned SSH/SCP/FFmpeg sub-processes.
 - **Hook MP3 Export Staging**: `upload_bot.py` automatically exports an isolated 192 kbps MP3 of the 9:16 Teaser/Hook video to `C:\Dev\meloscribe\mp3 preview\<song_name> Teaser.mp3` whenever `format_mode == "full_arrangement"` and a hook video is generated.
@@ -556,3 +683,11 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Introducing any new public endpoint under a new root path (such as `/api/events`) requires adding `"/api/events"` to `PUBLIC_ROUTES` in `main.py`; otherwise, valid public client beacons will be rejected with 500/403.
 - **Flexible Payload Schema:**
   - `OutboundEventRequest` accepts both `{ target, source }` and `{ partner, placement, partnerId }` seamlessly mapping to `affiliate_clicks` in `analytics.db`.
+
+---
+
+### 2026-10-12: ArrangeMe Fallback to Direct Stripe Catalog & Customer Fulfillment ZIPs
+- **Catalog State Reset in `upload_bot.py`**:
+  - Updating a song previously marked with `isArrangeMe: true` requires an explicit `else:` branch in `add_song_to_website()` to set `isArrangeMe = False` and `paymentsDisabled = False`, clearing `arrangemeUrl` and unblocking Stripe direct checkout on the website frontend.
+- **Customer Fulfillment ZIP Packages on Cloudflare R2**:
+  - Direct downloads via `routes_public.py` support both individual files (`.pdf`, `.mid`, `.mp4`) and a full `.zip` (`{Song} Full Package.zip`). For direct website arrangements, pre-building and uploading `{Song} Full Package.zip` to R2 guarantees complete customer fulfillment.

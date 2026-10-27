@@ -1019,7 +1019,7 @@ def pinterest_create_pin(payload: PinterestPinPayload):
         if base_song.lower().endswith(" easy"):
             base_song = base_song[:-5].strip()
         encoded_name = urllib.parse.quote(base_song)
-        cover_url = payload.cover_url or f"https://www.meloscribesheets.com/covers/{encoded_name}_clean.jpg"
+        cover_url = payload.cover_url or f"https://meloscribesheets.com/covers/{encoded_name}_clean.jpg"
         
         pin_data = {
             "link": payload.link,

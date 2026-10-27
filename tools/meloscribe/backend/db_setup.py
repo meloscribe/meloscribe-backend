@@ -221,15 +221,17 @@ def init_db():
     )
     ''')
 
-    # Migrate: add download_hash and download_count to purchases
-    for col, coltype in [
-        ('download_hash', 'TEXT'),
-        ('download_count', 'INTEGER DEFAULT 0')
-    ]:
+    # Migrate: add columns that may not exist in purchases
+    for col, coltype in [('download_hash', 'TEXT'), ('download_count', 'INTEGER DEFAULT 0'), ('downloaded_types', 'TEXT'), ('ip_addresses', 'TEXT'), ('buyer_name', 'TEXT'), ('locale', 'TEXT')]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
         except Exception:
             pass
+
+    # Performance Indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_purchases_txn ON purchases(transaction_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_purchases_hash ON purchases(download_hash)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_revenue_msg ON revenue(message)")
 
     # ── NOTIFY SUBSCRIBERS (email opt-in for new sheet music alerts) ──────────
     cursor.execute('''
@@ -250,9 +252,14 @@ def init_db():
         title      TEXT NOT NULL,
         artist     TEXT NOT NULL,
         votes      INTEGER DEFAULT 1,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        status     TEXT DEFAULT 'open'
     )
     ''')
+    try:
+        cursor.execute("ALTER TABLE suggestions ADD COLUMN status TEXT DEFAULT 'open'")
+    except Exception:
+        pass
 
     # ── RATE LIMITS (shared-state SQLite backend for workers) ──────────────────
     cursor.execute('''
@@ -282,6 +289,7 @@ def init_db():
         hook_start      REAL,
         hook_end        REAL,
         progress        REAL DEFAULT 0.0,
+        is_arrangeme    INTEGER DEFAULT 0,
         created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         processed_at    TIMESTAMP
     )
@@ -293,6 +301,11 @@ def init_db():
             cursor.execute(f'ALTER TABLE batch_ingest_queue ADD COLUMN {col} REAL DEFAULT 0.0')
         except Exception:
             pass  # Column already exists
+
+    try:
+        cursor.execute('ALTER TABLE batch_ingest_queue ADD COLUMN is_arrangeme INTEGER DEFAULT 0')
+    except Exception:
+        pass
 
     conn.commit()
     conn.close()

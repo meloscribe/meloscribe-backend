@@ -1055,11 +1055,12 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             "border_style": "rounded"
         }
 
+        cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
+
         if req.embedded:
             # Payment methods: Card, PayPal for all currencies; iDEAL and EPS only for EUR; Bancontact only for BE
             if currency == "eur":
                 pm_types = ["card", "paypal", "ideal", "eps"]
-                cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
                 if cf_country == "BE":
                     pm_types.append("bancontact")
             else:
@@ -2248,10 +2249,13 @@ def get_proxy_headers():
     return headers
 
 @router.get("/api/public/suggestions")
-def get_suggestions():
+def get_suggestions(status: str = None):
     if platform.system() == "Windows":
         try:
-            r = requests.get(f"{VM_API_BASE}/api/public/suggestions", headers=get_proxy_headers(), timeout=5.0)
+            params = {}
+            if status:
+                params["status"] = status
+            r = requests.get(f"{VM_API_BASE}/api/public/suggestions", params=params, headers=get_proxy_headers(), timeout=5.0)
             data = r.json()
             if r.status_code == 200 and isinstance(data, list):
                 try:
@@ -2272,6 +2276,12 @@ def get_suggestions():
                             INSERT OR REPLACE INTO suggestions (id, title, artist, votes, created_at, status)
                             VALUES (?, ?, ?, ?, ?, ?)
                         """, (sug.get("id"), sug.get("title"), sug.get("artist"), sug.get("votes", 1), sug.get("created_at"), sug.get("status", "open")))
+                    # When full list is fetched, purge local entries that no longer exist on server
+                    if not status:
+                        remote_ids = [s.get("id") for s in data if s.get("id")]
+                        if remote_ids:
+                            placeholders = ",".join(["?"] * len(remote_ids))
+                            c.execute(f"DELETE FROM suggestions WHERE id NOT IN ({placeholders})", remote_ids)
                     conn.commit()
                     conn.close()
                 except Exception as sync_e:
@@ -2332,7 +2342,13 @@ def get_suggestions():
             except Exception as auto_e:
                 print(f"[get_suggestions] Auto-complete check: {auto_e}")
 
-            c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions ORDER BY votes DESC, created_at DESC")
+            stat = (status or "").lower().strip()
+            if stat == "open":
+                c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions WHERE (status != 'completed' OR status IS NULL) ORDER BY votes DESC, created_at DESC")
+            elif stat == "completed":
+                c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions WHERE status = 'completed' ORDER BY votes DESC, created_at DESC")
+            else:
+                c.execute("SELECT id, title, artist, votes, created_at, COALESCE(status, 'open') FROM suggestions ORDER BY votes DESC, created_at DESC")
             rows = [{"id": r[0], "title": r[1], "artist": r[2], "votes": r[3], "created_at": r[4], "status": r[5]} for r in c.fetchall()]
             conn.close()
             return rows

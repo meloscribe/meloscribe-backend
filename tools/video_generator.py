@@ -28,12 +28,77 @@ def get_ffmpeg_exe():
 def escape_path_for_ffmpeg(p):
     return p.replace("\\", "/").replace(":", "\\:")
 
+def split_title_lines(raw_title, font_path=None, max_width=1080):
+    """
+    Intelligently splits a song title into 1 or 2 lines.
+    - Preserves explicit newlines ('\\n' or '\n').
+    - If font_path exists and PIL is available, measures rendered pixel width.
+    - If width > max_width, finds the optimal word split that balances the two lines visually.
+    - If PIL unavailable, falls back to length heuristic.
+    Returns (line1, line2). If 1 line, line2 is empty string.
+    """
+    title = raw_title.replace('\\n', '\n')
+    if '\n' in title:
+        parts = [p.strip() for p in title.split('\n', 1)]
+        return parts[0], parts[1]
+
+    words = title.split()
+    if len(words) <= 1:
+        return title.strip(), ""
+
+    measured = False
+    if font_path and os.path.exists(font_path):
+        try:
+            from PIL import ImageFont
+            font = ImageFont.truetype(font_path, 130)
+            def get_w(text):
+                bbox = font.getbbox(text)
+                return bbox[2] - bbox[0]
+
+            full_w = get_w(title)
+            if full_w <= max_width:
+                return title.strip(), ""
+
+            best_split = len(words) // 2
+            best_diff = float('inf')
+            for i in range(1, len(words)):
+                l1 = ' '.join(words[:i])
+                l2 = ' '.join(words[i:])
+                w1 = get_w(l1)
+                w2 = get_w(l2)
+                diff = abs(w1 - w2)
+                if max(w1, w2) < 1250 and diff < best_diff:
+                    best_diff = diff
+                    best_split = i
+            measured = True
+            return ' '.join(words[:best_split]), ' '.join(words[best_split:])
+        except Exception:
+            pass
+
+    if not measured:
+        if len(title) > 22:
+            mid = len(words) // 2
+            return ' '.join(words[:mid]), ' '.join(words[mid:])
+        return title.strip(), ""
+
 def get_video_duration(video_path):
     cmd = [get_ffprobe_exe(), '-v', 'error', '-show_entries', 'format=duration',
            '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
     result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
                             errors='replace', creationflags=CREATE_NO_WINDOW)
     return float(result.stdout.strip())
+
+def get_video_dimensions(video_path):
+    try:
+        cmd = [get_ffprobe_exe(), '-v', 'error', '-select_streams', 'v:0',
+               '-show_entries', 'stream=width,height',
+               '-of', 'json', video_path]
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                                errors='replace', creationflags=CREATE_NO_WINDOW)
+        data = json.loads(result.stdout)
+        return int(data['streams'][0]['width']), int(data['streams'][0]['height'])
+    except Exception:
+        return 2560, 1440
 
 def time_to_seconds(time_str):
     try:
@@ -78,7 +143,7 @@ def main():
     parser.add_argument('--visualizer', action='store_true', help='Enable fluid audio visualizer')
     parser.add_argument('--metronome', action='store_true', help='Enable audio metronome (tutorial mode only)')
     parser.add_argument('--theme', type=str, default='warm', help='Color theme to pass downwards')
-    parser.add_argument('--use_portrait_addon', action='store_true', help='Use dynamically scaled custom portrait addon images')
+    parser.add_argument('--use_portrait_addon', action='store_true', help='Deprecated: piano concert stage reflection is now standard for all portrait videos')
     parser.add_argument('--timesig', type=str, default='auto', help='Time signature override (e.g. 3/4, 4/4). Default: auto-detect from MIDI')
     parser.add_argument('--force', action='store_true', help='Force overwrite existing output video')
     parser.add_argument('--metro_offset', type=float, default=0.0, help='Shift metronome clicks by this many beats (e.g. 0.5)')
@@ -89,6 +154,9 @@ def main():
     parser.add_argument('--output_dir', type=str, default=None, help='Custom output directory for generated video')
     parser.add_argument('--time_offset', type=float, default=2.5, help='Lead-in offset in seconds between preview player and raw Keysight input')
     parser.add_argument('--outro_text', type=str, default=None, help='Custom outro/end text to display during final fadeout')
+    parser.add_argument('--title_image', type=str, default=None, help='Path to custom PNG title image (replaces text title)')
+    parser.add_argument('--cta_text', type=str, default=None, help='Custom CTA text override (defaults to "Want to play this? Sheets in bio →")')
+    parser.add_argument('--no_reflection', action='store_true', help='Disable dynamic concert stage keyboard reflection')
     args = parser.parse_args()
 
     
@@ -99,7 +167,6 @@ def main():
     settings = load_settings()
     
     tiktok_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
-    covers_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
     
     # Early Parameter Cache Check
     raw_name = os.path.splitext(os.path.basename(args.video))[0]
@@ -107,6 +174,35 @@ def main():
     out_base = args.title.strip() if (args.title and args.title.strip()) else clean_name
     if args.type == "tutorial" and not out_base.lower().endswith(" slow"):
         out_base = f"{out_base} slow"
+
+    # Auto-resolve theme if not specified or defaulted to warm
+    song_lookup_name = re.sub(r'(?i)\b(easy|teaser|slow|recycled(\s+\d+)?)\b', '', args.title or clean_name).strip()
+    if not args.theme or args.theme.lower() == "warm":
+        try:
+            db_path = os.path.join(tools_dir, "meloscribe", "backend", "analytics.db")
+            if os.path.exists(db_path):
+                import sqlite3
+                with sqlite3.connect(db_path, timeout=5.0) as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT theme FROM tracks WHERE LOWER(song_name) = LOWER(?)", (song_lookup_name,))
+                    row = c.fetchone()
+                    if not row or not row[0]:
+                        c.execute("SELECT theme FROM batch_ingest_queue WHERE LOWER(song_name) = LOWER(?)", (song_lookup_name,))
+                        row = c.fetchone()
+                    if row and row[0] and row[0].strip():
+                        args.theme = row[0].strip().lower()
+        except Exception:
+            pass
+
+    if args.theme:
+        args.theme = args.theme.strip().lower()
+        if args.theme == "purple":
+            args.theme = "violet"
+    else:
+        args.theme = settings.get("theme", "warm").strip().lower()
+        if args.theme == "purple":
+            args.theme = "violet"
+
     output_name = f"{out_base}_wide.mp4" if args.wide else (f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base)
     active_out_dir = args.output_dir if args.output_dir else tiktok_dir
     output_path = os.path.join(active_out_dir, output_name)
@@ -193,6 +289,8 @@ def main():
     metronome_path = os.path.join(temp_dir, f"metronome_{uid}.wav")
     
     title_txt = os.path.join(temp_dir, f"title_{uid}.txt")
+    title1_txt = os.path.join(temp_dir, f"title1_{uid}.txt")
+    title2_txt = os.path.join(temp_dir, f"title2_{uid}.txt")
     author_txt = os.path.join(temp_dir, f"author_{uid}.txt")
     outro1_txt = os.path.join(temp_dir, f"outro1_{uid}.txt")
     outro2_txt = os.path.join(temp_dir, f"outro2_{uid}.txt")
@@ -277,7 +375,7 @@ def main():
                 metro_offset = 0.0
                 if hasattr(args, "metro_offset") and args.metro_offset:
                     metro_offset = args.metro_offset
-                elif args.midipath and "god rest ye merry" in args.midipath.lower():
+                elif args.midipath and any(s in args.midipath.lower() for s in ["god rest ye merry", "3 fragezeichen", "fragezeichen"]):
                     metro_offset = 0.5
                 next_beat_tick = int(ticks_per_beat * metro_offset)
                 for msg in mid.merged_track:
@@ -354,18 +452,21 @@ def main():
             outro1_text = "Support me with"
             outro2_text = "a follow <3"
         
-        # Write text files
+        cta_text_wide_val = args.cta_text if args.cta_text else "Sheets in bio ↓"
         with open(title_txt, "w", encoding="utf-8") as f: f.write(title_text)
         with open(author_txt, "w", encoding="utf-8") as f: f.write(author_text)
         with open(outro1_txt, "w", encoding="utf-8") as f: f.write(outro1_text)
         with open(outro2_txt, "w", encoding="utf-8") as f: f.write(outro2_text)
-        with open(sheets_txt, "w", encoding="utf-8") as f: f.write("Sheets in bio ↓")
+        with open(sheets_txt, "w", encoding="utf-8") as f: f.write(cta_text_wide_val)
         
         t_title_esc = escape_path_for_ffmpeg(title_txt)
         t_author_esc = escape_path_for_ffmpeg(author_txt)
         t_outro1_esc = escape_path_for_ffmpeg(outro1_txt)
         t_outro2_esc = escape_path_for_ffmpeg(outro2_txt)
         t_sheets_esc = escape_path_for_ffmpeg(sheets_txt)
+        f_arno_esc = escape_path_for_ffmpeg(arno_pro)
+        f_montserrat_esc = escape_path_for_ffmpeg(montserrat)
+        f_montserrat_bold_esc = escape_path_for_ffmpeg(os.path.join(fonts_dir, 'Montserrat-Bold.ttf'))
         
         # Widescreen: keep native 16:9 resolution, no crop, no zoom, no shift
         # Title + Author + Sheets visible for 3s then fade out over 1s (visible 0-3, fade 3-4)
@@ -383,13 +484,29 @@ def main():
             
         icon_wm_path = os.path.join(tools_dir, "pfps", "monogram-transparent.png")
         if os.path.exists(icon_wm_path):
-            extra_inputs.extend(["-i", icon_wm_path])
+            extra_inputs.extend(["-loop", "1", "-i", icon_wm_path])
             wm_idx = current_input_idx
             current_input_idx += 1
-            pre_filters += f"[{wm_idx}:v]scale=68:-1,format=yuva420p,colorchannelmixer=aa=0.18[icon_wm_wide]; "
-            wm_filter_wide = "[t3][icon_wm_wide]overlay=x=w-overlay_w-70:y=60[t_wm]; "
+            pre_filters += f"[{wm_idx}:v]scale=68:-2,format=yuva420p,colorchannelmixer=aa=0.22[icon_wm_wide]; "
+            wm_filter_wide = "[t3][icon_wm_wide]overlay=x=main_w-overlay_w-70:y=60:eof_action=repeat[t_wm]; "
         else:
             wm_filter_wide = "[t3]null[t_wm]; "
+
+        # In-Video Subscribe/Like Hint (centered lower-third, appears at t=55.0s for 5.5s on longform videos >= 90s)
+        sub_hint_path = os.path.join(tools_dir, "pfps", "subscribe_hint_animated.mov")
+        sub_filter_wide = ""
+        sub_v_stream = "t_wm"
+        if os.path.exists(sub_hint_path) and new_duration >= 90.0:
+            extra_inputs.extend(["-itsoffset", "55.0", "-i", sub_hint_path])
+            sub_idx = current_input_idx
+            current_input_idx += 1
+            main_vid_w, _ = get_video_dimensions(input_video_path)
+            sub_w = min(860, int(round(main_vid_w * 0.336)))
+            if sub_w % 2 != 0:
+                sub_w += 1
+            pre_filters += f"[{sub_idx}:v]scale={sub_w}:-2[sub_ready]; "
+            sub_filter_wide = f"[t_wm][sub_ready]overlay=x=(main_w-overlay_w)/2:y='main_h*0.65':eof_action=pass[t_sub]; "
+            sub_v_stream = "t_sub"
 
         a_stream = "a_src"
         if args.metronome and args.type == 'tutorial':
@@ -411,33 +528,30 @@ def main():
             pre_filters +
             
             # Intro: larger centered, fades out after 3s
-            f"[{v_stream}]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_title_esc}':fontcolor=white:fontsize=150"
+            f"[{v_stream}]drawtext=fontfile='{f_arno_esc}':textfile='{t_title_esc}':fontcolor=white:fontsize=150"
             f":x=(w-text_w)/2:y=(h/2)-120"
             f":alpha='if(lt(t,3),1,if(lt(t,4),4-t,0))'[t1]; "
             
             # Author: below title, same fade timing
-            f"[t1]drawtext=fontfile='fonts/montserrat.ttf':textfile='{t_author_esc}':fontcolor=white:fontsize=75"
+            f"[t1]drawtext=fontfile='{f_montserrat_esc}':textfile='{t_author_esc}':fontcolor=white:fontsize=75"
             f":x=(w-text_w)/2:y=(h/2)+50"
             f":alpha='if(lt(t,3),1,if(lt(t,4),4-t,0))'[t2]; "
             
             # Sheets in bio: bottom area, same fade timing
-            f"[t2]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_sheets_esc}':fontcolor=white:fontsize=72"
+            f"[t2]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_sheets_esc}':fontcolor=white:fontsize=72"
             f":x=(w-text_w)/2:y=h-120"
             f":alpha='if(lt(t,3),1,if(lt(t,4),4-t,0))'[t3]; "
             
             # Subtle Icon Watermark (top right)
-            + wm_filter_wide +
+            + wm_filter_wide
+            + sub_filter_wide +
             
-            # Fade out video canvas behind the outro text
-            f"[t_wm]fade=t=out:st={fade_start}:d=1.5[v_faded]; "
-            f"[v_faded]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro1_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)-60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[t4]; "
-            f"[t4]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_outro2_esc}':fontcolor=white:fontsize=100:x=(w-text_w)/2:y=(h/2)+60:enable='between(t,{outro_start},{new_duration})':alpha='if(lt(t,{outro_start}),0,min(1,(t-{outro_start})/1))'[with_outro]; "
-            
-            f"[with_outro]setsar=1,format=yuv420p[final_v]; "
-            f"[{a_stream}]afade=t=out:st={fade_start}:d=1.5[final_a]"
+            # Widescreen: keep clean video and audio ending naturally (no black fade-out or white outro slate)
+            f"[{sub_v_stream}]setsar=1,format=yuv420p[final_v]; "
+            f"[{a_stream}]anull[final_a]"
         )
         
-        output_dir = tiktok_dir
+        output_dir = args.output_dir if args.output_dir else tiktok_dir
         os.makedirs(output_dir, exist_ok=True)
         output_name = f"{out_base}_wide.mp4"
         output_path = os.path.join(output_dir, output_name)
@@ -467,7 +581,11 @@ def main():
         
         title_text = args.title
         title_text = re.sub(r'(?i)\b(easy|teaser|slow|recycled(\s+\d+)?)\b', '', title_text).strip()
-        title_text = re.sub(r'\s+', ' ', title_text)
+        title_clean = title_text.replace('\\n', '\n')
+        title_lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in title_clean.split('\n') if line.strip()]
+        title_clean = '\n'.join(title_lines)
+        title1_text, title2_text = split_title_lines(title_clean, arno_pro, max_width=1080)
+        is_two_line_title = bool(title2_text)
 
         if args.subtitle is not None and args.subtitle.strip(" -"):
             author_text = args.subtitle.strip(" -")
@@ -520,21 +638,37 @@ def main():
         else:
             morph_text = ""
 
-        # Write text files to temp_dir
-        with open(title_txt, "w", encoding="utf-8") as f: f.write(title_text)
+        if args.cta_text:
+            cta_text_val = args.cta_text.strip()
+            if not any(a in cta_text_val for a in ["→", "->", "=>"]):
+                cta_text_val = f"{cta_text_val} →"
+        else:
+            cta_text_val = "Want to play this? Sheets in bio →"
+
+        with open(title_txt, "w", encoding="utf-8") as f: f.write(title_clean)
+        with open(title1_txt, "w", encoding="utf-8") as f: f.write(title1_text)
+        if is_two_line_title:
+            with open(title2_txt, "w", encoding="utf-8") as f: f.write(title2_text)
         with open(author_txt, "w", encoding="utf-8") as f: f.write(author_text)
         with open(outro1_txt, "w", encoding="utf-8") as f: f.write(outro1_text)
         with open(outro2_txt, "w", encoding="utf-8") as f: f.write(outro2_text)
-        with open(sheets_txt, "w", encoding="utf-8") as f: f.write("Sheets in bio →")
+        with open(sheets_txt, "w", encoding="utf-8") as f: f.write(cta_text_val)
         with open(morph_txt, "w", encoding="utf-8") as f: f.write(morph_text)
+        with open(watermark_txt, "w", encoding="utf-8") as f: f.write("@meloscribe")
         
         t_title_esc = escape_path_for_ffmpeg(title_txt)
+        t_title1_esc = escape_path_for_ffmpeg(title1_txt)
+        t_title2_esc = escape_path_for_ffmpeg(title2_txt) if is_two_line_title else ""
         t_author_esc = escape_path_for_ffmpeg(author_txt)
         t_outro1_esc = escape_path_for_ffmpeg(outro1_txt)
         t_outro2_esc = escape_path_for_ffmpeg(outro2_txt)
         t_sheets_esc = escape_path_for_ffmpeg(sheets_txt)
         t_morph_esc = escape_path_for_ffmpeg(morph_txt)
+        t_wm_esc = escape_path_for_ffmpeg(watermark_txt)
         f_outro_esc = escape_path_for_ffmpeg(outro_font)
+        f_arno_esc = escape_path_for_ffmpeg(arno_pro)
+        f_montserrat_esc = escape_path_for_ffmpeg(montserrat)
+        f_montserrat_bold_esc = escape_path_for_ffmpeg(os.path.join(fonts_dir, 'Montserrat-Bold.ttf'))
 
         
         scale_w = int(1440 * args.zoom)
@@ -550,13 +684,39 @@ def main():
         y_overlay = (2560 - scale_h) // 2
         bg_black_start_y = y_overlay + scale_h
         
-        # Position title lower for aesthetic optical balance
-        if not author_text:
-            title_y = 440
-            author_y = y_overlay - 120
+        # Position title & subtitle dynamically relative to video top edge (y_overlay)
+        # to ensure constant, perfect spacing across all zoom & crop values
+        if is_two_line_title:
+            title_fontsize = 108
+            subtitle_fontsize = 60
+            if not author_text:
+                title2_y = y_overlay - 100
+                title1_y = title2_y - 105
+                author_y = y_overlay - 50
+            else:
+                author_y = y_overlay - 60
+                title2_y = author_y - 120
+                title1_y = title2_y - 105
+            
+            # TikTok top search bar safe zone clamp (y >= 365)
+            if title1_y < 365:
+                shift = 365 - title1_y
+                title1_y += shift
+                title2_y += min(shift, 20)
+            title_y = title1_y
         else:
-            title_y = 390
-            author_y = y_overlay - 110
+            title_fontsize = 130
+            subtitle_fontsize = 62
+            if not author_text:
+                title_y = y_overlay - 120
+                author_y = y_overlay - 50
+            else:
+                author_y = y_overlay - 65
+                title_y = author_y - 150
+            
+            # TikTok top search bar safe zone clamp (y >= 365)
+            if title_y < 365:
+                title_y = 365
         
         pre_filters = (
             f"[0:v]trim=start={trim_start}:end={trim_end},setpts=PTS-STARTPTS[v_trimmed]; "
@@ -593,48 +753,120 @@ def main():
             post_merge = ""
             merged_stream = "merged"
 
-        addon_merge_str = ""
+        ref_merge_str = ""
         base_merged = "merged"
-        if args.use_portrait_addon:
-            addon_img = os.path.join(tools_dir, f"{args.theme} addon.png")
-            if not os.path.exists(addon_img):
-                addon_img = os.path.join(tools_dir, f"{args.theme} addon.jpg")
-            if os.path.exists(addon_img):
-                extra_inputs.extend(["-i", addon_img])
-                addon_idx = current_input_idx
-                current_input_idx += 1
-                addon_y = bg_black_start_y
-                addon_h = 2560 - addon_y
-                scale_expr = f"'max(1440, iw*{addon_h}/ih)':'max({addon_h}, ih*1440/iw)'"
-                crop_expr = f"1440:{addon_h}:'(iw-1440)/2':'(ih-{addon_h})/2'"
-                pre_filters += f"[{addon_idx}:v]scale={scale_expr},crop={crop_expr}[addon_cropped]; "
-                addon_merge_str = f"[merged_base][addon_cropped]overlay=0:{addon_y}[merged]; "
-                base_merged = "merged_base"
+        # Glossy concert stage floor keyboard reflection (soft ambient satin sheen)
+        ref_mask_path = os.path.join(tools_dir, "img", "ref_mask_1440x240.png")
+        if not os.path.exists(ref_mask_path):
+            try:
+                from PIL import Image, ImageDraw
+                m = Image.new('L', (1440, 240))
+                d = ImageDraw.Draw(m)
+                fade_px = 18
+                start_ratio = 0.35
+                for my in range(240):
+                    decay = (1.0 - (my / 240.0)) ** 1.8
+                    if my < fade_px:
+                        t = my / float(fade_px)
+                        smooth = t * t * (3.0 - 2.0 * t)
+                        fade = start_ratio + (1.0 - start_ratio) * smooth
+                        decay *= fade
+                    val = int(65 * decay)
+                    d.line([(0, my), (1440, my)], fill=max(0, min(255, val)))
+                m.save(ref_mask_path)
+            except Exception:
+                pass
+        if os.path.exists(ref_mask_path) and not getattr(args, "no_reflection", False):
+            extra_inputs.extend(["-loop", "1", "-t", str(new_duration), "-i", ref_mask_path])
+            mask_idx = current_input_idx
+            current_input_idx += 1
+            ref_h = 240
+            pre_filters += (
+                f"[{fg_stream}]split=2[fg_main][fg_for_ref]; "
+                f"[fg_for_ref]crop=1440:{ref_h}:0:{scale_h - ref_h},vflip,boxblur=10:2,format=rgba[ref_flipped]; "
+                f"[{mask_idx}:v]format=gray[mask_gray]; "
+                f"[ref_flipped][mask_gray]alphamerge[ref_ready]; "
+            )
+            fg_stream = "fg_main"
+            ref_merge_str = f"[merged_base][ref_ready]overlay=0:{bg_black_start_y}[merged]; "
+            base_merged = "merged_base"
+
+        # Title Image vs Text
+        timg_path = os.path.abspath(args.title_image) if args.title_image else None
+        if timg_path and os.path.exists(timg_path):
+            extra_inputs.extend(["-i", timg_path])
+            timg_idx = current_input_idx
+            current_input_idx += 1
+            timg_w = 460
+            timg_y = 240
+            pre_filters += f"[{timg_idx}:v]scale={timg_w}:-1[title_img_scaled]; "
+            title_layer = f"[{merged_stream}][title_img_scaled]overlay=x=(main_w-overlay_w)/2:y={timg_y}[t1]; "
+            author_y = 560
+        elif is_two_line_title:
+            title_layer = (
+                f"[{merged_stream}]drawtext=fontfile='{f_arno_esc}':textfile='{t_title1_esc}':fontcolor=white:fontsize={title_fontsize}:x=(w-text_w)/2:y={title1_y}:alpha='1'[t0_l1]; "
+                f"[t0_l1]drawtext=fontfile='{f_arno_esc}':textfile='{t_title2_esc}':fontcolor=white:fontsize={title_fontsize}:x=(w-text_w)/2:y={title2_y}:alpha='1'[t1]; "
+            )
+        else:
+            title_layer = f"[{merged_stream}]drawtext=fontfile='{f_arno_esc}':textfile='{t_title1_esc}':fontcolor=white:fontsize={title_fontsize}:x=(w-text_w)/2:y={title_y}:alpha='1'[t1]; "
 
         # Subtle brand icon watermark overlay (bottom right corner)
         icon_wm_path = os.path.join(tools_dir, "pfps", "monogram-transparent.png")
         if os.path.exists(icon_wm_path):
-            extra_inputs.extend(["-i", icon_wm_path])
+            extra_inputs.extend(["-loop", "1", "-i", icon_wm_path])
             wm_idx = current_input_idx
             current_input_idx += 1
-            pre_filters += f"[{wm_idx}:v]scale=76:-1,format=yuva420p,colorchannelmixer=aa=0.22[icon_wm_scaled]; "
-            wm_overlay_portrait = "[t3][icon_wm_scaled]overlay=x=w-overlay_w-75:y=h-overlay_h-80[t4]; "
+            pre_filters += f"[{wm_idx}:v]scale=76:-1,format=yuva420p,colorchannelmixer=aa=0.28[icon_wm_scaled]; "
+            wm_overlay_portrait = "[t3][icon_wm_scaled]overlay=x=main_w-overlay_w-75:y=main_h-overlay_h-80:eof_action=repeat[t4]; "
         else:
             wm_overlay_portrait = "[t3]null[t4]; "
 
+        cta_fontsize = 62 if len(cta_text_val) > 20 else 78
+        morph_fontsize = 62 if len(morph_text) > 20 else 78
+
+        # CTA Timing: Appear after 3s, disappear cleanly after a few seconds,
+        # and if the video is long enough, reappear briefly for ~3.5s before the outro.
+        if morph_text:
+            has_end_cta = (fade_start - 3.5) >= 12.0
+            if has_end_cta:
+                end_cta_st = round(fade_start - 3.5, 2)
+                end_cta_fd = round(end_cta_st + 0.5, 2)
+                end_cta_alpha = f"if(lt(t,{end_cta_st}),0,if(lt(t,{end_cta_fd}),(t-{end_cta_st})/0.5,1))"
+                cta_layers = (
+                    f"[t2]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_sheets_esc}':fontcolor=white:fontsize={cta_fontsize}:x=(w-text_w)/2:y=2150:alpha='if(lt(t,3),0,if(lt(t,4),t-3,if(lt(t,5.8),1,if(lt(t,6.3),(6.3-t)/0.5,0))))'[t2_sheets]; "
+                    f"[t2_sheets]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_morph_esc}':fontcolor=white:fontsize={morph_fontsize}:x=(w-text_w)/2:y=2150:alpha='if(lt(t,6.3),0,if(lt(t,6.8),(t-6.3)/0.5,if(lt(t,8.8),1,if(lt(t,9.3),(9.3-t)/0.5,0))))'[t2_morph]; "
+                    f"[t2_morph]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_sheets_esc}':fontcolor=white:fontsize={cta_fontsize}:x=(w-text_w)/2:y=2150:alpha='{end_cta_alpha}'[t3]; "
+                )
+            else:
+                cta_layers = (
+                    f"[t2]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_sheets_esc}':fontcolor=white:fontsize={cta_fontsize}:x=(w-text_w)/2:y=2150:alpha='if(lt(t,3),0,if(lt(t,4),t-3,if(lt(t,5.8),1,if(lt(t,6.3),(6.3-t)/0.5,0))))'[t2_sheets]; "
+                    f"[t2_sheets]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_morph_esc}':fontcolor=white:fontsize={morph_fontsize}:x=(w-text_w)/2:y=2150:alpha='if(lt(t,6.3),0,if(lt(t,6.8),(t-6.3)/0.5,if(lt(t,8.8),1,if(lt(t,9.3),(9.3-t)/0.5,0))))'[t3]; "
+                )
+        else:
+            has_end_cta = (fade_start - 3.5) >= 9.0
+            intro_expr = "if(lt(t,3),0,if(lt(t,3.5),(t-3)/0.5,if(lt(t,6.0),1,if(lt(t,6.5),(6.5-t)/0.5,0))))"
+            if has_end_cta:
+                end_cta_st = round(fade_start - 3.5, 2)
+                end_cta_fd = round(end_cta_st + 0.5, 2)
+                outro_expr = f"if(lt(t,{end_cta_st}),0,if(lt(t,{end_cta_fd}),(t-{end_cta_st})/0.5,1))"
+                cta_alpha = f"max({intro_expr},{outro_expr})"
+            else:
+                cta_alpha = intro_expr
+            cta_layers = (
+                f"[t2]drawtext=fontfile='{f_montserrat_bold_esc}':textfile='{t_sheets_esc}':fontcolor=white:fontsize={cta_fontsize}:x=(w-text_w)/2:y=2150:alpha='{cta_alpha}'[t3]; "
+            )
+
         filter_complex = (
             pre_filters + 
-            f"[bg_orig]scale=360:640,boxblur=10:3,scale=1440:2560:flags=bicubic,colorchannelmixer=rr=0.5:gg=0.5:bb=0.5,drawbox=x=0:y={bg_black_start_y}:w=1440:h=2560:color=black:t=fill[bg_blur]; "
+            f"[bg_orig]scale=360:640,boxblur=10:3,scale=1440:2560:flags=bicubic,colorchannelmixer=rr=0.58:gg=0.58:bb=0.58,drawbox=x=0:y={bg_black_start_y}:w=1440:h=2560:color=black@0.80:t=fill[bg_blur]; "
             
             f"[bg_blur][{fg_stream}]overlay=0:{y_overlay}[{base_merged}]; "
-            + addon_merge_str
-            + post_merge +
-            
-            f"[{merged_stream}]drawtext=fontfile='fonts/arno_pro.ttf':textfile='{t_title_esc}':fontcolor=white:fontsize=130:x=(w-text_w)/2:y={title_y}:alpha='1'[t1]; "
-            f"[t1]drawtext=fontfile='fonts/montserrat.ttf':textfile='{t_author_esc}':fontcolor=white:fontsize=65:x=(w-text_w)/2:y={author_y}:alpha='1'[t2]; "
-            f"[t2]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_sheets_esc}':fontcolor=white:fontsize=78:x=(w-text_w)/2:y=2150:alpha='if(lt(t,3),0,if(lt(t,4),t-3,if(lt(t,5.8),1,if(lt(t,6.3),(6.3-t)/0.5,0))))'[{'t2_sheets' if morph_text else 't3'}]; "
-            + (f"[t2_sheets]drawtext=fontfile='fonts/Montserrat-Bold.ttf':textfile='{t_morph_esc}':fontcolor=white:fontsize=78:x=(w-text_w)/2:y=2150:alpha='if(lt(t,6.3),0,if(lt(t,6.8),(t-6.3)/0.5,if(lt(t,8.8),1,if(lt(t,9.3),(9.3-t)/0.5,0))))'[t3]; " if morph_text else "") +
-            wm_overlay_portrait +
+            + ref_merge_str
+            + post_merge
+            + title_layer +
+            f"[t1]drawtext=fontfile='{f_montserrat_esc}':textfile='{t_author_esc}':fontcolor=white:fontsize={subtitle_fontsize}:x=(w-text_w)/2:y={author_y}:alpha='1'[t2]; "
+            + cta_layers
+            + wm_overlay_portrait +
             
             # Fade out the background video canvas behind the outro text
             f"[t4]fade=t=out:st={fade_start}:d=1.5[v_faded]; "
@@ -652,18 +884,7 @@ def main():
         output_name = f"{out_base}.mp4" if not out_base.lower().endswith(".mp4") else out_base
         output_path = os.path.join(output_dir, output_name)
         
-        # Inject TikTok Cover at the very end of the video ONLY for Hochkant / Portrait (9:16) videos (Currently disabled via ENABLE_LAST_FRAME_COVER)
-        ENABLE_LAST_FRAME_COVER = False  # Set to True when TikTok developer app audit is completed!
-        cover_path = os.path.join(covers_dir, f"{out_base}.jpg")
-        if ENABLE_LAST_FRAME_COVER and not args.wide and os.path.exists(cover_path):
-            extra_inputs.extend(["-loop", "1", "-t", str(new_duration), "-i", cover_path])
-            cover_idx = current_input_idx
-            current_input_idx += 1
-            cover_t_start = max(0.0, new_duration - 0.2)
-            filter_complex += f"; [{cover_idx}:v]scale=1440:-1[cover_scaled]; "
-            filter_complex += f"[pre_cover][cover_scaled]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2:enable='between(t,{cover_t_start:.4f},{new_duration:.4f})'[with_cover]; "
-            filter_complex += f"[with_cover]setsar=1,format=yuv420p[final_v]"
-            filter_complex = filter_complex.replace("[v_fade]setsar=1,format=yuv420p[final_v];", "[v_fade]setsar=1,format=yuv420p[pre_cover];")
+
     
     tmp_output_path = output_path + ".tmp.mp4"
 
@@ -723,6 +944,7 @@ def main():
     ] + vcodec_args + [
         "-fps_mode", "cfr",
         "-r", "60",
+        "-t", f"{new_duration:.3f}",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart",
         tmp_output_path
@@ -800,6 +1022,22 @@ def main():
 
         print(f"PROGRESS:100%")
         print(f"Done! Saved at: {output_path}")
+
+        # When widescreen is rendered, generate dedicated YouTube file with animated MeloScribe outro
+        if args.wide:
+            try:
+                from meloscribe_outro import create_and_append_youtube_outro
+                yt_output_path = output_path.replace("_wide.mp4", "_wide_yt.mp4")
+                print(f"[YouTube Pipeline] Assembling dedicated YouTube widescreen video with outro...")
+                create_and_append_youtube_outro(
+                    clean_wide_path=output_path,
+                    output_yt_path=yt_output_path,
+                    song_title=args.title,
+                    song_author=author_text
+                )
+                print(f"[YouTube Pipeline] YouTube widescreen video ready at: {yt_output_path}")
+            except Exception as yte:
+                print(f"[YouTube Pipeline] Warning: Could not generate YouTube widescreen outro: {yte}")
     except Exception as fe:
         print(f"FFmpeg execution error: {fe}")
         sys.exit(1)

@@ -17,11 +17,25 @@ try:
 except ImportError:
     from tiktok_auth import get_valid_token
 
-INIT_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
+INIT_URL = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+INBOX_URL = "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
+
+def get_ffprobe_exe() -> str:
+    # Check local ffmpeg bin relative to tools
+    backend_dir = Path(__file__).resolve().parent
+    tools_dir = backend_dir.parent.parent / "tools"
+    local_probe = tools_dir / "ffmpeg" / "bin" / "ffprobe.exe"
+    if local_probe.exists():
+        return str(local_probe)
+    # Also check backend parent
+    alt_probe = backend_dir.parent / "ffmpeg" / "bin" / "ffprobe.exe"
+    if alt_probe.exists():
+        return str(alt_probe)
+    return "ffprobe"
 
 def get_video_duration_ms(video_path: str) -> int:
     try:
-        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+        cmd = [get_ffprobe_exe(), '-v', 'error', '-show_entries', 'format=duration',
                '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
         result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
         duration_sec = float(result.stdout.strip())
@@ -30,10 +44,11 @@ def get_video_duration_ms(video_path: str) -> int:
         print(f"[TikTok API] Warning: Failed to get duration, defaulting cover to 0ms. ({e})")
         return 0
 
-def post_video(video_path: str, title: str, privacy: str = "SELF_ONLY") -> bool:
+def post_video(video_path: str, title: str, privacy: str = "PUBLIC_TO_EVERYONE", cover_timestamp_ms: int = None) -> bool:
     """
-    Uploads an MP4 video to TikTok inbox/drafts.
-    Uses chunked file upload to bypass timeouts.
+    Uploads an MP4 video to TikTok using the Direct Post API with custom cover timestamp.
+    Defaults to PUBLIC_TO_EVERYONE.
+    Uses chunked file upload to support large video files.
     """
     if not os.path.exists(video_path):
         print(f"[TikTok API] ERROR: Video not found at {video_path}")
@@ -43,6 +58,11 @@ def post_video(video_path: str, title: str, privacy: str = "SELF_ONLY") -> bool:
     if not token:
         print("[TikTok API] ERROR: No valid auth token. Please run tiktok_setup.py first.")
         return False
+
+    # Validate privacy level against allowed options
+    valid_privacies = ("PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY")
+    if privacy not in valid_privacies:
+        privacy = "PUBLIC_TO_EVERYONE"
 
     # 1. Prepare File Info
     file_size = os.path.getsize(video_path)
@@ -59,16 +79,35 @@ def post_video(video_path: str, title: str, privacy: str = "SELF_ONLY") -> bool:
         chunk_size = 20 * 1024 * 1024
         total_chunks = file_size // chunk_size
 
-    print(f"\n[TikTok API] Initializing Inbox Upload for '{os.path.basename(video_path)}'")
-    print(f"             Size: {file_size / (1024*1024):.2f} MB | Chunks: {total_chunks}")
+    # Default cover timestamp to 0ms (uses authentic opening video frame)
+    duration_ms = get_video_duration_ms(video_path)
+    if cover_timestamp_ms is not None:
+        cover_timestamp = max(0, min(cover_timestamp_ms, duration_ms))
+    else:
+        cover_timestamp = 0
 
-    # 2. Init Upload
+    # Trim title to safe limit (TikTok API max 2200 chars)
+    safe_title = (title[:1990] + "...") if len(title) > 2000 else title
+
+    print(f"\n[TikTok API] Initializing Upload for '{os.path.basename(video_path)}'")
+    print(f"             Size: {file_size / (1024*1024):.2f} MB | Chunks: {total_chunks}")
+    print(f"             Privacy: {privacy} | Cover Timestamp: {cover_timestamp}ms (Duration: {duration_ms}ms)")
+
+    # 2. Init Upload: Direct Post via TikTok Content Posting API v2
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=UTF-8"
     }
 
     init_payload = {
+        "post_info": {
+            "title": safe_title,
+            "privacy_level": privacy,
+            "disable_duet": False,
+            "disable_comment": False,
+            "disable_stitch": False,
+            "video_cover_timestamp_ms": cover_timestamp
+        },
         "source_info": {
             "source": "FILE_UPLOAD",
             "video_size": file_size,
@@ -77,18 +116,37 @@ def post_video(video_path: str, title: str, privacy: str = "SELF_ONLY") -> bool:
         }
     }
 
+    upload_mode = f"Direct Post ({privacy})"
     try:
+        # Check creator info first
+        creator_info_url = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
+        c_resp = requests.post(creator_info_url, headers=headers)
+        if c_resp.status_code == 200:
+            c_data = c_resp.json().get("data", {})
+            print(f"[TikTok API] Creator: @{c_data.get('creator_username')} | Allowed privacy: {c_data.get('privacy_level_options')}")
+        else:
+            print(f"[TikTok API] Warning: creator_info query returned {c_resp.status_code}")
+
         resp = requests.post(INIT_URL, json=init_payload, headers=headers)
-        if resp.status_code != 200:
-            print(f"[TikTok API] Init failed! {resp.status_code}: {resp.text}")
+        data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+
+        if resp.status_code != 200 or (data.get("error", {}).get("code") != "ok"):
+            err_code = data.get("error", {}).get("code", resp.status_code)
+            err_msg = data.get("error", {}).get("message", resp.text)
+            print(f"\n[TikTok API] ERROR: Direct Post initialization failed ({resp.status_code})!")
+            print(f"             Code: {err_code}")
+            print(f"             Message: {err_msg}")
+            if err_code == "unaudited_client_can_only_post_to_private_accounts":
+                print("\n[TikTok API] HINT: Your TikTok Developer Client is currently in Sandbox/Unaudited mode.")
+                print("             TikTok requires the TikTok mobile account (@meloscribe) to be set to")
+                print("             'Privates Konto' (Private Account = ON) in the mobile app settings")
+                print("             (Profil -> Einstellungen und Datenschutz -> Datenschutz -> Privates Konto).")
+                print("             Alternatively, configure the audited Production Client Key/Secret in settings.json.")
             return False
-            
-        data = resp.json()
-        if "error" in data and data["error"].get("code") != "ok":
-            print(f"[TikTok API] Init error: {data['error']}")
-            return False
-            
+
         upload_url = data["data"]["upload_url"]
+        publish_id = data["data"].get("publish_id", "")
+        print(f"[TikTok API] Initialized via {upload_mode} (publish_id: {publish_id})")
     except Exception as e:
         print(f"[TikTok API] Exception during initialization: {e}")
         return False

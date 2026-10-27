@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI Multimodal Audio Hook & Segment Detector for MeloScribe.
+AI Multimodal Audio Hook & Segment Detector for meloscribe.
 Extracts compressed audio from the Keysight video and utilizes Gemini 2.5 Flash
 with multimodal audio listening to accurately identify the 1-3 best musical hooks/choruses,
 avoiding mathematical density traps (e.g. 16th-note verse arpeggios in 'River Flows in You').
@@ -367,7 +367,7 @@ def fallback_to_midi(midi_path: str, video_path: Optional[str]) -> List[Dict[str
     return out
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MeloScribe AI Audio Segment Detector")
+    parser = argparse.ArgumentParser(description="meloscribe AI Audio Segment Detector")
     parser.add_argument("--song", type=str, default="Believer", help="Song title")
     parser.add_argument("--author", type=str, default="Imagine Dragons", help="Song artist")
     parser.add_argument("--video", type=str, default=None, help="Explicit video path")

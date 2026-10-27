@@ -249,7 +249,7 @@ def generate_metronome_track(midi_path: str, video_duration: float, audio_delay:
     next_beat_tick = 0
     if metro_offset:
         next_beat_tick = int(ticks_per_beat * metro_offset)
-    elif midi_path and "god rest ye merry" in midi_path.lower():
+    elif midi_path and any(s in midi_path.lower() for s in ["god rest ye merry", "3 fragezeichen", "fragezeichen"]):
         next_beat_tick = int(ticks_per_beat * 0.5)
     
     for msg in mid.merged_track:
@@ -498,11 +498,18 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
         title_txt = os.path.join(temp_dir, f"_title_{uid1}.txt")
         artist_txt = os.path.join(temp_dir, f"_artist_{uid1}.txt")
         endscreen_web_txt = os.path.join(temp_dir, f"_endscreen_web_{uid1}.txt")
-        
+        is_easy = "easy" in song_name.lower()
+        import re
+        clean_title = re.sub(r'(?i)\b(easy|slow)\b', '', song_name).strip()
+        clean_title = re.sub(r'\s+', ' ', clean_title)
+
+        display_title = clean_title if is_easy else song_name
+        display_subtitle = (settings.get("subtitle_easy_normal") or "Easy Version") if is_easy else author
+
         with open(title_txt, "w", encoding="utf-8") as f:
-            f.write(song_name)
+            f.write(display_title)
         with open(artist_txt, "w", encoding="utf-8") as f:
-            f.write(author)
+            f.write(display_subtitle)
         with open(endscreen_web_txt, "w", encoding="utf-8") as f:
             f.write("Unlock sheets below")
             
@@ -655,25 +662,28 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
                 shift_val = str(shift_val)
                 theme_val = settings.get("theme", "warm")
 
-                cmd_teaser = [
-                    sys.executable, os.path.join(tools_dir, "video_generator.py"),
-                    "--video", input_source,
-                    "--title", f"{song_name} Teaser",
-                    "--author", author,
-                    "--subtitle", hook_sub.strip(),
-                    "--start_time", str(teaser_start),
-                    "--end_time", str(teaser_end),
-                    "--zoom", zoom_val,
-                    "--shift", shift_val,
-                    "--theme", theme_val,
-                    "--use_portrait_addon",
-                    "--force"
-                ]
-                if midi_p:
-                    cmd_teaser.extend(["--midipath", midi_p])
-                if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
-                    cmd_teaser.append("--visualizer")
-                rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
+                if os.path.exists(teaser_dest) and os.path.getsize(teaser_dest) > 1000000:
+                    print(f"[Previews] 9:16 Social Media Teaser already exists on disk -> {teaser_dest} (skipping re-render)")
+                    rc_teaser = 0
+                else:
+                    cmd_teaser = [
+                        sys.executable, os.path.join(tools_dir, "video_generator.py"),
+                        "--video", input_source,
+                        "--title", f"{song_name} Teaser",
+                        "--author", author,
+                        "--subtitle", hook_sub.strip(),
+                        "--start_time", str(teaser_start),
+                        "--end_time", str(teaser_end),
+                        "--zoom", zoom_val,
+                        "--shift", shift_val,
+                        "--theme", theme_val,
+                        "--force"
+                    ]
+                    if midi_p:
+                        cmd_teaser.extend(["--midipath", midi_p])
+                    if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
+                        cmd_teaser.append("--visualizer")
+                    rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
                     
                 if rc_teaser == 0 and os.path.exists(teaser_dest):
                     print(f"[Previews] Success: Created 9:16 Social Media Teaser video in TikToks -> {teaser_dest}")
@@ -873,7 +883,7 @@ def annotate_trending_metrics(songs, db_file):
         print(f"[Trending Ranking] Warning: failed to compute trending: {e}")
     return songs
 
-def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dave Kerr", **kwargs):
+def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dave Kerr", is_arrangeme=False, **kwargs):
     # Auto-generate previews first!
     try:
         generate_previews(song_name, format_mode or "viral_part", **kwargs)
@@ -960,9 +970,9 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
         else: # warm
             gradient = "from-orange-500/20 via-dark-700 to-orange-500/5"
             
-        # Auto-generate Stripe Price ID if kofi_id is a dummy and it is not a free song
-        final_price_id = kofi_id
-        if kofi_id.startswith("prod_dummy") and "free" not in clean_price.lower():
+        # Auto-generate Stripe Price ID if kofi_id is a dummy and it is not a free song (and not ArrangeMe)
+        final_price_id = "" if is_arrangeme else kofi_id
+        if not is_arrangeme and kofi_id.startswith("prod_dummy") and "free" not in clean_price.lower():
             generated_id = get_or_create_stripe_price(clean_name, difficulty, clean_price)
             if generated_id:
                 final_price_id = generated_id
@@ -983,19 +993,52 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
             except:
                 pass
 
+        # Auto-detect PDF page count from Scores directory
+        def _get_score_page_count(title_str, check_easy=False):
+            scores_dir = r"c:\Dev\meloscribe\Scores"
+            if not os.path.exists(scores_dir):
+                return None
+            try:
+                import pypdf
+                fname = f"{title_str} Easy.pdf" if check_easy else f"{title_str}.pdf"
+                exact = os.path.join(scores_dir, fname)
+                if not os.path.exists(exact):
+                    for f in os.listdir(scores_dir):
+                        if f.lower() == fname.lower():
+                            exact = os.path.join(scores_dir, f)
+                            break
+                if os.path.exists(exact):
+                    r = pypdf.PdfReader(exact)
+                    return len(r.pages)
+            except Exception as e:
+                print(f"[Website Sync] PDF page count detection error: {e}")
+            return None
+
+        detected_pdf_pages = _get_score_page_count(clean_name, check_easy=False)
+        detected_easy_pages = _get_score_page_count(clean_name, check_easy=True)
+
         new_song = {
             "id": next_id,
             "title": clean_name,
             "artist": author,
             "difficulty": difficulty,
             "price": clean_price,
-            "kofiId": final_price_id,
-            "stripePriceId": final_price_id,
+            "kofiId": "" if is_arrangeme else final_price_id,
+            "stripePriceId": "" if is_arrangeme else final_price_id,
             "coverImage": f"/covers/{clean_name}_clean.jpg",
             "audioPreviewUrl": f"/audio-previews/{clean_name}.mp3",
             "gradient": gradient,
-            "theme": theme
+            "theme": theme,
+            "isArrangeMe": True if is_arrangeme else False,
+            "paymentsDisabled": True if is_arrangeme else False
         }
+        if detected_pdf_pages:
+            new_song["pdfPages"] = detected_pdf_pages
+        if detected_easy_pages:
+            new_song["easyPdfPages"] = detected_easy_pages
+        if is_arrangeme:
+            new_song["arrangemeUrl"] = ""
+            new_song["arrangemeEasyUrl"] = ""
         if preview_start is not None and float(preview_start) > 0:
             new_song["previewStart"] = round(float(preview_start), 1)
         
@@ -1009,6 +1052,23 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
         
         if existing_idx is not None:
             existing = songs_list[existing_idx]
+            if detected_pdf_pages:
+                existing["pdfPages"] = detected_pdf_pages
+            if detected_easy_pages:
+                existing["easyPdfPages"] = detected_easy_pages
+            if is_arrangeme:
+                existing["isArrangeMe"] = True
+                existing["paymentsDisabled"] = True
+                if "arrangemeUrl" not in existing:
+                    existing["arrangemeUrl"] = ""
+                if "arrangemeEasyUrl" not in existing:
+                    existing["arrangemeEasyUrl"] = ""
+            else:
+                existing["isArrangeMe"] = False
+                existing["paymentsDisabled"] = False
+                existing.pop("arrangemeUrl", None)
+                existing.pop("arrangemeEasyUrl", None)
+
             if is_easy:
                 existing["hasEasy"] = True
                 if existing.get("difficulty") == "Original" or existing.get("hasOriginal"):
@@ -1017,7 +1077,10 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 else:
                     existing["difficulty"] = "Easy"
                 existing["easyPrice"] = clean_price
-                if not final_price_id.startswith("prod_dummy"):
+                if is_arrangeme:
+                    existing["easyStripePriceId"] = ""
+                    existing["easyKofiId"] = ""
+                elif not final_price_id.startswith("prod_dummy"):
                     existing["easyStripePriceId"] = final_price_id
                     existing["easyKofiId"] = final_price_id
                 elif not existing.get("easyStripePriceId"):
@@ -1033,7 +1096,10 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 else:
                     existing["difficulty"] = "Original"
                 existing["price"] = clean_price
-                if not final_price_id.startswith("prod_dummy"):
+                if is_arrangeme:
+                    existing["stripePriceId"] = ""
+                    existing["kofiId"] = ""
+                elif not final_price_id.startswith("prod_dummy"):
                     existing["stripePriceId"] = final_price_id
                     existing["kofiId"] = final_price_id
                 elif not existing.get("stripePriceId"):
@@ -1052,8 +1118,8 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 new_song["hasEasy"] = True
                 new_song["hasOriginal"] = False
                 new_song["easyPrice"] = clean_price
-                new_song["easyStripePriceId"] = final_price_id
-                new_song["easyKofiId"] = final_price_id
+                new_song["easyStripePriceId"] = "" if is_arrangeme else final_price_id
+                new_song["easyKofiId"] = "" if is_arrangeme else final_price_id
             else:
                 new_song["hasOriginal"] = True
                 new_song["hasEasy"] = False
@@ -1080,6 +1146,14 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                     json.dump(songs_list, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 print(f"[Website Sync] Warning: could not write local songs.json: {e}")
+
+        backend_json_path = r"c:\Dev\meloscribe-backend\tools\meloscribe\backend\songs.json"
+        if os.path.exists(backend_json_path):
+            try:
+                with open(backend_json_path, "w", encoding="utf-8") as f:
+                    json.dump(songs_list, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[Website Sync] Warning: could not write backend songs.json: {e}")
             
         # Copy all matching covers (clean, wide, standard, variants) to website directory so they are committed to Git
         settings = get_settings()
@@ -1125,6 +1199,28 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                         "ubuntu@152.70.23.171:/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json"
                     ], check=False, creationflags=creation_flags)
                     print("[Website Sync] Successfully synced songs.json to production VM!")
+
+                    # Automatically broadcast new arrangement newsletter to active subscribers
+                    try:
+                        import requests
+                        from settings import load_settings
+                        admin_passcode = load_settings().get("admin_passcode", "579110")
+                        res_bc = requests.post(
+                            "https://api.meloscribe.dev/api/admin/newsletter/broadcast",
+                            json={"song_name": clean_name},
+                            headers={"x-admin-passcode": str(admin_passcode), "Content-Type": "application/json"},
+                            timeout=20.0
+                        )
+                        if res_bc.status_code == 200:
+                            bc_data = res_bc.json()
+                            if bc_data.get("status") == "success":
+                                print(f"[Newsletter] Broadcast newsletter sent for '{clean_name}' to {bc_data.get('sent')} active subscribers!")
+                            elif bc_data.get("status") == "skipped":
+                                print(f"[Newsletter] Broadcast skipped: {bc_data.get('message')}")
+                        else:
+                            print(f"[Newsletter] Warning: broadcast returned HTTP {res_bc.status_code}")
+                    except Exception as bc_err:
+                        print(f"[Newsletter] Warning: auto-broadcast failed: {bc_err}")
         except Exception as push_err:
             print(f"[Website Sync] Warning: Git push / VM sync error: {push_err}")
         return True
@@ -1220,120 +1316,17 @@ def refresh_pinterest_token():
         return False
 
 def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None):
-    # Auto-refresh token before posting
-    refresh_pinterest_token()
-    
-    print(f"[Pinterest Bot] Creating Pin for '{song_name}' (profile: {profile}, author: {author})...")
-    tokens_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "meloscribe", "backend", "pinterest_tokens.json")
-    if not os.path.exists(tokens_path):
-        print("[Pinterest Bot] Error: 'pinterest_tokens.json' not found. Skipping.")
-        return False
-        
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, tools_dir)
+    sys.path.insert(0, os.path.join(tools_dir, "meloscribe", "backend"))
     try:
-        import json
-        import urllib.parse
-        import requests
+        from meloscribe.backend import pinterest_poster
+    except ImportError:
+        import pinterest_poster
         
-        with open(tokens_path, "r", encoding="utf-8") as f:
-            tokens = json.load(f)
-            
-        access_token = tokens.get("pinterest_access_token")
-        if not access_token:
-            print("[Pinterest Bot] Error: No access token found in tokens file.")
-            return False
-            
-        # Determine Board ID BEFORE stripping " Easy"
-        if not board_id:
-            is_easy = song_name.lower().endswith(" easy")
-            board_id = tokens.get("pinterest_board_easy") if is_easy else tokens.get("pinterest_board_intermediate")
-            if not board_id:
-                # Fallback to old key structures
-                board_id = tokens.get("pinterest_board_normal") or tokens.get("pinterest_board_slow") or tokens.get("pinterest_board_id")
-            
-        if not board_id:
-            print("[Pinterest Bot] Error: No Pinterest Board ID configured.")
-            return False
-            
-        # Clean song name for assets and hashtags
-        base_song = song_name
-        if base_song.lower().endswith(" recycled"):
-            base_song = base_song[:-9].strip()
-        if base_song.lower().endswith(" easy"):
-            base_song = base_song[:-5].strip()
-            
-        # Build image URL
-        encoded_name = urllib.parse.quote(base_song)
-        cover_url = f"https://www.meloscribesheets.com/covers/{encoded_name}_clean.jpg"
-        
-        # Build Title
-        is_tut = "tutorial" in profile.lower() or "slow" in profile.lower()
-        label_part = "Easy" if is_easy else "Original"
-        if is_tut:
-            label_part += " Tutorial"
-            
-        # Try format {song} - {author} {label}
-        title = f"🎹 {base_song} - {author} {label_part}"
-        if len(title) > 100:
-            title = f"🎹 {base_song} - {label_part}"
-        if len(title) > 100:
-            title = title[:97] + "..."
-            
-        # Build Description
-        settings = get_settings()
-        default_tpl = (
-            "Enjoy this piano arrangement of {song} by {author}! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-            "👉 Click the Pin to get the Sheet Music (PDF), MIDI & practice videos!\n\n"
-            "Follow for more aesthetic piano covers and tutorials.\n\n"
-            "#piano #pianocover #pianotutorial #sheetmusic #{song}"
-        )
-        desc_template = settings.get("desc_template_pinterest") or tokens.get("desc_template_pinterest") or default_tpl
-        if is_tut:
-            desc_template = desc_template.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
-        desc = format_description_template(desc_template, song_name, author, label_part)
-        if len(desc) > 500:
-            desc = desc[:497] + "..."
-            
-        # Make link
-        slug = base_song.lower()
-        slug = re.sub(r'[^a-z0-9]+', '-', slug)
-        slug = slug.strip('-')
-        version_suffix = "&version=easy" if is_easy else ""
-        song_link = f"https://meloscribesheets.com/sheets?song={slug}{version_suffix}"
-        
-        # Pin data structure
-        pin_data = {
-            "link": song_link,
-            "title": title,
-            "description": desc,
-            "board_id": board_id,
-            "media_source": {
-                "source_type": "image_url",
-                "url": cover_url
-            }
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-        
-        url = "https://api.pinterest.com/v5/pins"
-        resp = requests.post(url, json=pin_data, headers=headers, timeout=15)
-        if resp.status_code == 403 and "use API Sandbox" in resp.text:
-            print("[Pinterest Bot] Error: App is in Trial mode. Please request Standard Access in the Pinterest Developer Portal (https://developers.pinterest.com/apps/1582487/) to create production pins.")
-            return False
+    is_easy = song_name.lower().endswith(" easy") or profile == "easy"
+    return pinterest_poster.post_pin(song_name, author, profile, is_easy=is_easy, board_id=board_id)
 
-        if resp.status_code in [200, 201]:
-            pin_info = resp.json()
-            print(f"[Pinterest Bot] Success: Created Pin ID {pin_info.get('id')} on Board ID {board_id}!")
-            return True
-        else:
-            print(f"[Pinterest Bot] Error (status {resp.status_code}): {resp.text}")
-            return False
-            
-    except Exception as e:
-        print(f"[Pinterest Bot] Exception failed: {e}")
-        return False
 
 def run_kofi(song_name, price, is_full=True, yt_shorts_url=None):
     tools_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1809,7 +1802,7 @@ def run_kofi(song_name, price, is_full=True, yt_shorts_url=None):
 # The old Metricool browser automation (~1000 lines) was removed during the cleanup.
 # All uploads now use native platform APIs: yt_poster.py, ig_poster.py, fb_poster.py, tiktok_poster.py.
 
-def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
+def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal", privacy="PUBLIC_TO_EVERYONE"):
     import datetime
     import sys
     
@@ -1820,7 +1813,7 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
     from meloscribe.backend import tiktok_poster
     
     print(f"🚀 Initializing TikTok API Upload module for '{song_name}'...")
-    print(f"Profile: {profile.upper()}")
+    print(f"Profile: {profile.upper()} | Privacy: {privacy}")
     
     settings = get_settings()
     tiktok_dir = settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks")
@@ -1879,11 +1872,8 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
 
     if not full_title:
         tiktok_tpl = settings.get("desc_template_tiktok") or (
-            "🎹 {song} - {author}{label}\n\n"
-            "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.\n\n"
-            "Sheet Music (PDF) & free Videos -> Link in Bio\n\n"
-            "Check out my profile for more aesthetic piano covers and tutorials!\n\n"
-            "#piano #pianocover #pianotutorial #music #synthesia #cover"
+            "Handcrafted piano arrangement for {song}. 🎼 Download the complete learning bundle (Sheets + MIDI + 2K Tutorials) via the link in bio.\n\n"
+            "#piano #pianocover #pianotutorial #sheetmusic #{song}"
         )
         if is_tut:
             tiktok_tpl = tiktok_tpl.replace("Enjoy this piano arrangement", "Enjoy this piano tutorial")
@@ -1914,29 +1904,13 @@ def run_tiktok(song_name, author_name, schedule_dt=None, profile="normal"):
                 image_path = cand_path
                 break
 
-    # Build clear display title for ntfy (e.g. "Song (Best Part)" instead of "Song Teaser")
-    ntfy_song_title = base_song
-    if is_easy and not ntfy_song_title.lower().endswith(" easy"):
-        ntfy_song_title += " Easy"
-    if is_tut:
-        ntfy_song_title += " Tutorial"
-    elif is_teaser:
-        ntfy_song_title += " (Best Part)"
-
-    # Send description and cover image to user's phone via ntfy
-    print(f"Sending caption, hashtags, and cover image to ntfy for '{ntfy_song_title}'...")
-    send_ntfy_notification(
-        title=f"TikTok: {ntfy_song_title}",
-        body=full_title,
-        image_path=image_path
-    )
-    
     # 3. Upload via official API
-    print("Uploading natively via TikTok Content Posting API (Private / SELF_ONLY)...")
-    success = tiktok_poster.post_video(video_path, full_title, privacy="SELF_ONLY")
+    print(f"Uploading natively via TikTok Content Posting API ({privacy})...")
+    success = tiktok_poster.post_video(video_path, full_title, privacy=privacy)
     
     if success:
-        print("✅ TikTok Upload successful via API! (Video is private, you can publish it manually on your phone)")
+        privacy_note = "public" if privacy == "PUBLIC_TO_EVERYONE" else ("friends only" if privacy == "MUTUAL_FOLLOW_FRIENDS" else "private")
+        print(f"✅ TikTok Upload successful via API! (Video is {privacy_note})")
     else:
         print("❌ TikTok API Upload failed.")
         sys.exit(1)
@@ -2089,11 +2063,21 @@ def upload_to_r2(song_name, format_mode="full_arrangement", hook_start=None, hoo
                 title_txt = os.path.join(temp_dir, f"_title_{uid}.txt")
                 artist_txt = os.path.join(temp_dir, f"_artist_{uid}.txt")
                 
-                with open(title_txt, "w", encoding="utf-8") as f:
-                    f.write(song_name)
-                    
+                is_easy = "easy" in song_name.lower()
+                import re
+                clean_title = re.sub(r'(?i)\b(easy|slow)\b', '', song_name).strip()
+                clean_title = re.sub(r'\s+', ' ', clean_title)
+
                 is_slow = "slow" in vid_name.lower()
-                subtitle_text = "Slowed Down Tutorial" if is_slow else author
+                if is_easy:
+                    display_title = clean_title
+                    subtitle_text = (settings.get("subtitle_easy_slow") or "Easy Tutorial") if is_slow else (settings.get("subtitle_easy_normal") or "Easy Version")
+                else:
+                    display_title = song_name
+                    subtitle_text = "Slowed Down Tutorial" if is_slow else author
+
+                with open(title_txt, "w", encoding="utf-8") as f:
+                    f.write(display_title)
                 with open(artist_txt, "w", encoding="utf-8") as f:
                     f.write(subtitle_text)
                     
@@ -2207,6 +2191,7 @@ if __name__ == "__main__":
     parser.add_argument("--schedule_time", default=None, help="Schedule time as 'HH:MM'")
     parser.add_argument("--pinterest_board_id", default=None, help="Pinterest board ID to override JSON configuration")
     parser.add_argument("--tiktok_token", default=None, help="TikTok OAuth Token override")
+    parser.add_argument("--tiktok_privacy", default="PUBLIC_TO_EVERYONE", choices=["PUBLIC_TO_EVERYONE", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"], help="TikTok video privacy level")
     parser.add_argument("--profile", default="normal", choices=["normal", "tutorial", "easy", "easy_tutorial", "hook"])
     parser.add_argument("--format", default=None, choices=["viral_part", "full_arrangement"], help="Format upload mode")
     parser.add_argument("--full", action="store_true", help="Use full learning package description for Ko-Fi")
@@ -2219,6 +2204,7 @@ if __name__ == "__main__":
     parser.add_argument("--hook_start", type=float, default=None, help="Hook start time in seconds")
     parser.add_argument("--hook_end", type=float, default=None, help="Hook end time in seconds")
     parser.add_argument("--subtitle_hook", type=str, default=None, help="Custom subtitle for Hook/Teaser video")
+    parser.add_argument("--is_arrangeme", action="store_true", help="ArrangeMe exclusive/copyrighted piece (skip Stripe price, mark isArrangeMe=True, empty direct checkout)")
     
     args = parser.parse_args()
     
@@ -2237,6 +2223,9 @@ if __name__ == "__main__":
             format_mode = "full_arrangement"  # default
             
     if args.mode == "kofi":
+        if args.is_arrangeme:
+            print(f"[Ko-Fi Sync] Skipping Ko-Fi upload for '{args.song}' because it is marked as ArrangeMe / Copyrighted.")
+            sys.exit(0)
         run_kofi(args.song, args.price, is_full=(format_mode == "full_arrangement"), yt_shorts_url=args.youtube_url)
     elif args.mode == "website":
         if not args.kofi_id:
@@ -2244,7 +2233,8 @@ if __name__ == "__main__":
             sys.exit(1)
         success = add_song_to_website(
             args.song, args.price, args.kofi_id, format_mode,
-            author=args.author, enable_visualizer_hook=not args.no_visualizer_hook
+            author=args.author, enable_visualizer_hook=not args.no_visualizer_hook,
+            is_arrangeme=args.is_arrangeme
         )
         if not success:
             sys.exit(1)
@@ -2313,20 +2303,54 @@ if __name__ == "__main__":
             format_mode = "viral_part"
         else:
             print("[YouTube Uploader] Duration > 60s -> Uploading as Long-form (Widescreen 16:9).")
-            video_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}_wide.mp4")
-            if not os.path.exists(video_path):
-                print(f"[YouTube Uploader] Warning: Widescreen video not found at {video_path}, using portrait fallback.")
+            yt_wide_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}_wide_yt.mp4")
+            std_wide_path = os.path.join(settings.get("tiktok_dir", r"C:\Dev\meloscribe\TikToks"), f"{args.song}{suffix}_wide.mp4")
+            if os.path.exists(yt_wide_path):
+                video_path = yt_wide_path
+                print(f"[YouTube Uploader] Found dedicated YouTube widescreen video with outro: {yt_wide_path}")
+            elif os.path.exists(std_wide_path):
+                video_path = std_wide_path
+                print(f"[YouTube Uploader] Using standard widescreen video: {std_wide_path}")
+            else:
+                print(f"[YouTube Uploader] Warning: Widescreen video not found, using portrait fallback.")
                 video_path = portrait_path
             format_mode = "full_arrangement"
             
-        # Resolve thumbnail: prioritize video highlight frame where keys & notes are max active
-        highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
-        if highlight_thumb and os.path.exists(highlight_thumb):
-            thumbnail_path = highlight_thumb
-            print(f"[YouTube Uploader] Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
+        # Resolve thumbnail: prioritize custom designed cover artwork, fallback to climax highlight frame
+        covers_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
+        thumbnail_path = None
+        candidate_thumbs = []
+        if format_mode == "full_arrangement":
+            candidate_thumbs.extend([
+                os.path.join(covers_dir, f"{args.song}{suffix}_wide.jpg"),
+                os.path.join(covers_dir, f"{args.song}_wide.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}_wide.jpg"),
+                os.path.join(covers_dir, f"{base_song}_wide.jpg"),
+                os.path.join(covers_dir, f"{args.song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{args.song}.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{base_song}.jpg"),
+            ])
         else:
-            thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
-            thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
+            candidate_thumbs.extend([
+                os.path.join(covers_dir, f"{args.song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{args.song}.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{base_song}.jpg"),
+            ])
+        
+        for cand in candidate_thumbs:
+            resolved = resolve_case_insensitive_path(cand)
+            if resolved and os.path.exists(resolved):
+                thumbnail_path = resolved
+                print(f"[YouTube Uploader] Using cover artwork thumbnail: {thumbnail_path}")
+                break
+                
+        if not thumbnail_path or not os.path.exists(thumbnail_path):
+            highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
+            if highlight_thumb and os.path.exists(highlight_thumb):
+                thumbnail_path = highlight_thumb
+                print(f"[YouTube Uploader] Fallback: Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
         
         if format_mode == "full_arrangement":
             default_yt_tpl = (
@@ -2461,6 +2485,8 @@ if __name__ == "__main__":
             try:
                 from zoneinfo import ZoneInfo
                 dt_obj = datetime.datetime.strptime(args.datetime, "%Y-%m-%d %H:%M")
+                # For Facebook, uploads must always be scheduled +4 hours later (e.g. 16:00 -> 20:00 CEST)
+                dt_obj = dt_obj + datetime.timedelta(hours=4)
                 dt_obj = dt_obj.replace(tzinfo=ZoneInfo("Europe/Berlin"))
             except Exception as e:
                 print(f"Warning: Failed to parse datetime '{args.datetime}': {e}")
@@ -2508,21 +2534,41 @@ if __name__ == "__main__":
                 video_path = portrait_path
             format_mode = "full_arrangement"
             
-        # Resolve thumbnail: prioritize video highlight frame where keys & notes are max active
-        highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
-        if highlight_thumb and os.path.exists(highlight_thumb):
-            thumbnail_path = highlight_thumb
-            print(f"[Facebook Uploader] Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
-        elif format_mode == "full_arrangement":
-            wide_thumb = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}_wide.jpg")
-            wide_thumb = resolve_case_insensitive_path(wide_thumb)
-            if os.path.exists(wide_thumb):
-                thumbnail_path = wide_thumb
-            else:
-                thumbnail_path = resolve_case_insensitive_path(os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg"))
+        # Resolve thumbnail: prioritize custom designed cover artwork, fallback to climax highlight frame
+        covers_dir = settings.get("covers_dir", r"C:\Dev\meloscribe\Covers")
+        thumbnail_path = None
+        candidate_thumbs = []
+        if format_mode == "full_arrangement":
+            candidate_thumbs.extend([
+                os.path.join(covers_dir, f"{args.song}{suffix}_wide.jpg"),
+                os.path.join(covers_dir, f"{args.song}_wide.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}_wide.jpg"),
+                os.path.join(covers_dir, f"{base_song}_wide.jpg"),
+                os.path.join(covers_dir, f"{args.song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{args.song}.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{base_song}.jpg"),
+            ])
         else:
-            thumbnail_path = os.path.join(settings.get("covers_dir", r"C:\Dev\meloscribe\Covers"), f"{args.song}{suffix}.jpg")
-            thumbnail_path = resolve_case_insensitive_path(thumbnail_path)
+            candidate_thumbs.extend([
+                os.path.join(covers_dir, f"{args.song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{args.song}.jpg"),
+                os.path.join(covers_dir, f"{base_song}{suffix}.jpg"),
+                os.path.join(covers_dir, f"{base_song}.jpg"),
+            ])
+            
+        for cand in candidate_thumbs:
+            resolved = resolve_case_insensitive_path(cand)
+            if resolved and os.path.exists(resolved):
+                thumbnail_path = resolved
+                print(f"[Facebook Uploader] Using cover artwork thumbnail: {thumbnail_path}")
+                break
+                
+        if not thumbnail_path or not os.path.exists(thumbnail_path):
+            highlight_thumb, highlight_ts = extract_video_highlight_frame(video_path)
+            if highlight_thumb and os.path.exists(highlight_thumb):
+                thumbnail_path = highlight_thumb
+                print(f"[Facebook Uploader] Fallback: Using video highlight frame thumbnail at {highlight_ts:.2f}s: {thumbnail_path}")
         
         # Build direct sheet music link & comment text
         slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
@@ -2573,7 +2619,7 @@ if __name__ == "__main__":
         if not success:
             sys.exit(1)
     elif args.mode == "tiktok":
-        run_tiktok(args.song, args.author, schedule_dt=getattr(args, 'datetime', None), profile=args.profile)
+        run_tiktok(args.song, args.author, schedule_dt=getattr(args, 'datetime', None), profile=args.profile, privacy=getattr(args, 'tiktok_privacy', 'PUBLIC_TO_EVERYONE'))
     elif args.mode == "threads":
         try:
             from meloscribe.backend.threads_poster import post_video as threads_post
