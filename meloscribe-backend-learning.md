@@ -2,6 +2,30 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-08: Gmail "Promotions" (Werbung) Tab Avoidance & Newsletter Deliverability Strategy (`routes_public.py`)
+- **Root Cause Analysis for Emails Diverted to Gmail "Promotions" Tab**:
+  1. **One-Click Unsubscribe Protocol Header:** `send_newsletter_email()` sent `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` in the SMTP payload. Gmail uses this RFC 8058 header as a definitive classifier for bulk marketing mail. Google does NOT require this header for small-volume senders (<5,000/day).
+  2. **Promotional Words & Buzzwords:** Terms like "Newsletter abmelden", "Katalog", "Lernpaket", and "Kostenlos" in German/English templates triggered Gmail's heuristic text scanner.
+  3. **Flyer Layout Heuristics:** Centered marketing cards with heavy `box-shadow`, HTML `<table>` elements, glowing badges, and bright gradient CTA buttons scored high on promotional layout parsers.
+- **Resolution & Proven Best Practice**:
+  1. Removed `List-Unsubscribe` / `List-Unsubscribe-Post` headers from Resend API calls; kept compliant footer unsubscribe links.
+  2. Replaced promotional jargon across all 5 languages (e.g. "Newsletter abmelden" -> "Abmelden", "Lernpaket/Katalog" -> "Die Noten und das Arrangement für ...").
+  3. Replaced HTML `<table>` structures with simple semantic `<div>` bullet lines.
+  4. Redesigned email with subtle brand accents (2px top hairline), clean solid cyan button, and neutral white signature.
+  5. Verified live: Test email delivered directly into Gmail's Primary ("Allgemein") inbox with zero user filters or manual rules needed.
+
+### 2026-10-27: SCP Staging Connection Stall & Windows Shell Quote Mangling (`stage_to_server.py`)
+- **Stalled SCP Video Uploads and Broken Size-Checking via `find` on Spaces in Song Titles**:
+  - *Context:* Staging of "Floating in Reverie" hung indefinitely at 74% (`Floating in Reverie.mp4 [5/18]`) without progressing for over 40 minutes.
+  - *Root Cause Analysis:*
+    1. **Windows Quote Stripping in `run_ssh_command` & `run_scp_command`:** Both helpers invoked OpenSSH through `subprocess.run(..., shell=True)` with double-quote escaping. On Windows cmd.exe, quotes around paths containing spaces (`/home/ubuntu/meloscribe/staging/Floating in Reverie/TikToks`) were stripped before reaching the remote shell, causing the remote `find` command to fail with `cannot access '.../Floating': No such file or directory`. Consequently, `remote_sizes` returned empty and the script was unable to detect or skip already uploaded files on resume.
+    2. **Missing SSH Keepalives on SCP Transfers:** `scp` was invoked with only `-o ConnectTimeout=5`, which exclusively governs initial TCP connection establishment. When a packet stall occurred 105 MB into the 142 MB file transfer, `scp` lacked `-o ServerAliveInterval=15 -o ServerAliveCountMax=3` and had no timeout in Python, resulting in an indefinite freeze.
+  - *Resolution:*
+    1. Refactored `run_ssh_command` and `run_scp_command` to execute OpenSSH as list-based arguments without `shell=True`, eliminating Windows command-prompt quote stripping.
+    2. Added `-o ServerAliveInterval=15` and `-o ServerAliveCountMax=3` to drop and fail stalled sockets within 45 seconds instead of hanging forever.
+    3. Wrapped remote directory paths with single quotes in `check_cmd` and `mkdir_cmd`, ensuring paths with spaces are cleanly interpreted by the remote shell.
+    4. Synchronized the fix across `meloscribe-app` and `meloscribe-backend`.
+
 ### 2026-10-22: Facebook +4 Hours Scheduling Offset & Auto-Scheduling Cadence Drift Prevention
 - **Facebook Platform Schedule Staggering & Server Queue Calibration (`stage_to_server.py`, `upload_bot.py`, `queue.db`)**:
   - *Context:* The user established a strict requirement that all Facebook video releases must publish +4 hours later than the standard release time (e.g. 16:00 CEST releases publish on Facebook at 20:00 CEST), while keeping other platforms (YouTube, Instagram, TikTok, Threads) on their base schedule.
