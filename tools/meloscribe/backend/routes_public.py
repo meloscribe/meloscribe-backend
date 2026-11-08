@@ -427,87 +427,87 @@ CONFIRMATION_TEMPLATES = {
 NEWSLETTER_TEMPLATES = {
     "en": {
         "subject": "New Sheet Music: {song_name} ({artist})",
-        "greeting": "Hey Pianist,",
-        "intro": "The handcrafted sheet music and learning package for <strong>{song_name}</strong> is now live in our catalog.",
-        "box_title": "Included in this learning package:",
-        "feat_1_title": "Accurate Sheet Music",
-        "feat_1_desc": "Clean, studio-grade printable PDF",
-        "feat_2_title": "Full MIDI Files",
+        "greeting": "Hey,",
+        "intro": "The sheet music and arrangement for <strong>{song_name}</strong> by {artist} is now ready.",
+        "box_title": "What's included:",
+        "feat_1_title": "Sheet Music",
+        "feat_1_desc": "Clean printable PDF",
+        "feat_2_title": "MIDI Files",
         "feat_2_desc": "Both hands + separated practice tracks",
-        "feat_3_title": "Synced Video Tutorials",
-        "feat_3_desc": "Original performance & slow practice tempo",
-        "cta": "Listen & Play Now",
-        "preview_note": "Free audio preview available on website",
+        "feat_3_title": "Video Tutorials",
+        "feat_3_desc": "Original tempo & slow practice",
+        "cta": "Listen & View Sheet Music",
+        "preview_note": "Audio preview available on the website",
         "happy_practicing": "Happy practicing,",
-        "footer_reason": "You received this email because you subscribed to piano arrangement updates on",
+        "footer_reason": "You received this email as a subscriber on",
         "unsubscribe": "Unsubscribe"
     },
     "de": {
         "subject": "Neue Noten: {song_name} ({artist})",
-        "greeting": "Hey Pianist,",
-        "intro": "Das handgefertigte Noten- und Lernpaket für <strong>{song_name}</strong> ist ab sofort in unserem Katalog verfügbar.",
-        "box_title": "In diesem Lernpaket enthalten:",
-        "feat_1_title": "Präzise Noten",
-        "feat_1_desc": "Druckfähiges, hochwertiges PDF",
-        "feat_2_title": "Vollständige MIDI-Dateien",
-        "feat_2_desc": "Beide Hände + getrennt zum Üben",
-        "feat_3_title": "Synchronisierte Tutorials",
+        "greeting": "Hey,",
+        "intro": "Die Noten und das Arrangement für <strong>{song_name}</strong> ({artist}) sind ab sofort verfügbar.",
+        "box_title": "Mit dabei:",
+        "feat_1_title": "Noten",
+        "feat_1_desc": "Druckfähiges PDF",
+        "feat_2_title": "MIDI-Dateien",
+        "feat_2_desc": "Beide Hände + getrennte Spuren",
+        "feat_3_title": "Video-Tutorials",
         "feat_3_desc": "Original-Tempo & Slow Practice",
-        "cta": "Jetzt anhören & spielen",
-        "preview_note": "Kostenlose Audio-Vorschau auf der Website verfügbar",
+        "cta": "Noten & Audio ansehen",
+        "preview_note": "Audio-Vorschau direkt auf der Website anhören",
         "happy_practicing": "Viel Spaß beim Üben,",
-        "footer_reason": "Du erhältst diese E-Mail, weil du dich für Noten-Updates angemeldet hast auf",
-        "unsubscribe": "Newsletter abmelden"
+        "footer_reason": "Du erhältst diese E-Mail als Abonnent auf",
+        "unsubscribe": "Abmelden"
     },
     "fr": {
         "subject": "Nouvelles partitions : {song_name} ({artist})",
-        "greeting": "Bonjour pianiste,",
-        "intro": "Le pack d'apprentissage complet pour <strong>{song_name}</strong> est maintenant disponible dans notre catalogue.",
-        "box_title": "Contenu du pack d'apprentissage :",
-        "feat_1_title": "Partitions précises",
-        "feat_1_desc": "PDF imprimable de qualité studio",
-        "feat_2_title": "Fichiers MIDI complets",
-        "feat_2_desc": "Deux mains + pistes séparées pour l'entraînement",
-        "feat_3_title": "Tutoriels vidéo synchronisés",
-        "feat_3_desc": "Performance originale & tempo ralenti",
-        "cta": "Écouter & Jouer maintenant",
-        "preview_note": "Extrait audio gratuit disponible sur le site",
+        "greeting": "Bonjour,",
+        "intro": "Les partitions pour <strong>{song_name}</strong> ({artist}) sont maintenant disponibles.",
+        "box_title": "Contenu inclus :",
+        "feat_1_title": "Partitions",
+        "feat_1_desc": "PDF imprimable",
+        "feat_2_title": "Fichiers MIDI",
+        "feat_2_desc": "Deux mains + pistes séparées",
+        "feat_3_title": "Tutoriels vidéo",
+        "feat_3_desc": "Tempo original & ralenti",
+        "cta": "Voir les partitions & audio",
+        "preview_note": "Extrait audio disponible sur le site",
         "happy_practicing": "Bonne pratique,",
-        "footer_reason": "Vous recevez cet e-mail car vous vous êtes inscrit(e) aux nouveautés sur",
+        "footer_reason": "Vous recevez cet e-mail en tant qu'abonné sur",
         "unsubscribe": "Se désabonner"
     },
     "es": {
         "subject": "Nueva partitura: {song_name} ({artist})",
-        "greeting": "¡Hola pianista!,",
-        "intro": "El paquete de aprendizaje completo para <strong>{song_name}</strong> ya está disponible en nuestro catálogo.",
-        "box_title": "Incluido en este paquete de aprendizaje:",
-        "feat_1_title": "Partitura precisa",
-        "feat_1_desc": "PDF imprimible de alta calidad",
-        "feat_2_title": "Archivos MIDI completos",
+        "greeting": "Hola,",
+        "intro": "La partitura y el arreglo para <strong>{song_name}</strong> ({artist}) ya están disponibles.",
+        "box_title": "Incluido:",
+        "feat_1_title": "Partitura",
+        "feat_1_desc": "PDF imprimible",
+        "feat_2_title": "Archivos MIDI",
         "feat_2_desc": "Ambas manos + separadas para practicar",
-        "feat_3_title": "Tutoriales sincronizados",
-        "feat_3_desc": "Interpretación original y tempo lento",
-        "cta": "Escuchar y Tocar ahora",
-        "preview_note": "Vista previa de audio gratuita disponible en la web",
+        "feat_3_title": "Tutoriales en video",
+        "feat_3_desc": "Tempo original y lento",
+        "cta": "Ver partitura y audio",
+        "preview_note": "Vista previa de audio disponible en la web",
         "happy_practicing": "¡Disfruta practicando!,",
-        "footer_reason": "Recibes este correo porque te suscribiste a las novedades en",
+        "footer_reason": "Recibes este correo como suscriptor en",
         "unsubscribe": "Darse de baja"
     },
     "it": {
         "subject": "Nuovi spartiti: {song_name} ({artist})",
-        "greeting": "Ciao pianista,",
-        "intro": "Il pacchetto di apprendimento completo per <strong>{song_name}</strong> è ora disponibile nel nostro catalogo.",
-        "box_title": "Cosa è incluso in questo pacchetto:",
-        "feat_1_title": "Spartito accurato",
-        "feat_1_desc": "PDF stampabile di alta qualità",
-        "feat_2_title": "File MIDI completi",
-        "feat_2_desc": "Entrambe le mani + separate per esercitarsi",
-        "feat_3_title": "Tutorial video sincronizzati",
-        "feat_3_desc": "Esecuzione originale e tempo lento",
-        "cta": "Ascolta e Suona ora",
-        "preview_note": "Anteprima audio gratuita disponibile sul sito web",
+        "greeting": "Ciao,",
+        "intro": "Gli spartiti per <strong>{song_name}</strong> ({artist}) sono ora disponibili.",
+        "box_title": "Incluso:",
+        "feat_1_title": "Spartiti",
+        "feat_1_desc": "PDF stampabile",
+        "feat_2_title": "File MIDI",
+        "feat_2_desc": "Entrambe le mani + separate",
+        "feat_3_title": "Tutorial video",
+        "feat_3_desc": "Tempo originale e lento",
+        "cta": "Visualizza spartiti e audio",
+        "preview_note": "Anteprima audio disponibile sul sito",
         "happy_practicing": "Buon esercizio,",
-        "footer_reason": "Hai ricevuto questa email perché ti sei iscritto agli aggiornamenti su",
+        "footer_reason": "Hai ricevuto questa email come iscritto su",
         "unsubscribe": "Annulla iscrizione"
     }
 }
@@ -676,30 +676,19 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
       </p>
 
       <!-- Structured Learning Package Feature Box -->
-      <div style="background-color: #0b0e17; border: 1px solid #1e293b; border-radius: 10px; padding: 16px 18px; margin: 18px 0 24px 0;">
-        <p style="color: #cbd5e1; font-size: 11px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.8px;">
+      <div style="background-color: #0b0e17; border: 1px solid #1e293b; border-radius: 10px; padding: 16px 18px; margin: 18px 0 22px 0;">
+        <p style="color: #94a3b8; font-size: 11px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.8px;">
           {box_title}
         </p>
-        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
-          <tr>
-            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
-            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
-              <strong style="color: #ffffff;">{feat_1_title}</strong> — {feat_1_desc}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
-            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
-              <strong style="color: #ffffff;">{feat_2_title}</strong> — {feat_2_desc}
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
-            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
-              <strong style="color: #ffffff;">{feat_3_title}</strong> — {feat_3_desc}
-            </td>
-          </tr>
-        </table>
+        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_1_title}</strong> — {feat_1_desc}
+        </div>
+        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_2_title}</strong> — {feat_2_desc}
+        </div>
+        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_3_title}</strong> — {feat_3_desc}
+        </div>
       </div>
 
       <!-- Subtle CTA Button -->
@@ -724,8 +713,7 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
 
   <!-- Minimalist Footer -->
   <p style="text-align: center; font-size: 11.5px; color: #64748b; margin-top: 20px; line-height: 1.6;">
-    {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a>.<br>
-    <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
+    {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> &bull; <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
 </html>
