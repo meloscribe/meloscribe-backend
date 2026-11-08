@@ -231,7 +231,11 @@ git add . && git commit -m "..." && git push
   - Instagram: Sets `thumb_offset` to highlight millisecond timestamp in `ig_poster.py`, eliminating the end-of-video dark fadeout bug.
   - Facebook: Passes highlight thumbnail to `/{video_id}/thumbnails` with `is_preferred: true` in `fb_poster.py`.
   - Synced and deployed to production VM (`152.70.23.171`).
-- [x] Staging SCP Upload Idempotency: Added remote file size pre-check in `stage_to_server.py` using Linux `find` to skip previously staged files on resume in <1s.
+- [x] Staging SCP Upload Robustness & Floating in Reverie Production Deployment:
+  - Eliminated Windows Shell Quote Stripping: Refactored `run_ssh_command` and `run_scp_command` in `stage_to_server.py` to invoke OpenSSH / SCP via process argument lists instead of `shell=True`. Quotes around Linux paths containing spaces (`Floating in Reverie`) are now cleanly preserved.
+  - SSH Socket Keepalives: Added `-o ServerAliveInterval=15 -o ServerAliveCountMax=3` to SCP and SSH execution, ensuring socket stalls drop within 45s rather than hanging indefinitely.
+  - Idempotent Staging Resumption: Single-quoted paths in `find` enable rapid byte-size checking on resume; already uploaded files are skipped in <1s.
+  - Server Queue Registration: Successfully completed staging of all 18 assets for *Floating in Reverie* and registered 18 publication slots in `queue.db` across YouTube, Instagram, Facebook (+4h offset), TikTok, Threads, and Pinterest (Teaser: 2026-10-28, Normal: 2026-10-31, Tutorial: 2026-11-03).
 - [x] Experience (Ludovico Einaudi) Direct Stripe Integration & Website Catalog Deployment:
   - Switched *Experience* from ArrangeMe copyright routing to direct website sale (`isArrangeMe: false`, `paymentsDisabled: false`).
   - Created & linked live Stripe Price IDs: `price_1UPhVQQ4cuBqoYoXHwOY1bIS` (Original, 6.00 €) and `price_1UPhVRQ4cuBqoYoX1xSuqYqW` (Easy, 6.00 €).
@@ -257,6 +261,17 @@ git add . && git commit -m "..." && git push
   - Raised Pinterest Video Transcode Polling Timeout from 180s to 420s (7 min) to prevent premature fallback to Cover Image Pins on large video renders or high-traffic transcode queues. Deleted the 2 image Pins and successfully re-posted *Sweetest Rain* (Pin ID: `1084100941601235432`) and *Golden Brown Easy* (Pin ID: `1084100941601235557`) as full video Pins.
   - Completely Purged `cover_image_url` from Pinterest Video Uploads: Identified that `post_pin()` previously passed `_clean.jpg` (empty stage background without title or notes) as `cover_image_url` for video uploads. Pinterest used this empty graphic as the static board thumbnail instead of extracting native video frames with titles and notes. Completely removed `cover_image_url` from `media_source` across `meloscribe-app`, `meloscribe-backend`, and live Oracle VM.
   - Scheduled Clean Video Re-Uploads in `queue.db`: Enqueued all 12 songs (Tasks 234–245: *Experience*, *Experience Easy*, *In This Shirt*, *River Flows in You*, *River Flows in You Easy*, *Sweetest Rain*, *Golden Brown*, *Golden Brown Easy*, *Sonne*, *I don't know*, *I don't know Easy*, *Je te laisserai des mots*) directly behind *Icarus*, spanning from tomorrow 2026-10-22 17:00 through 2026-10-26 13:00 at 3 posts/day. All 12 will post as pure video Pins with native video thumbnails and no cover image.
+
+- [x] Newsletter Promotions Folder Avoidance & Subtle Brand Redesign:
+  - Deliverability Optimization: Removed `List-Unsubscribe` and `List-Unsubscribe-Post` headers from Resend API requests for low-volume notification dispatches (<5,000/day threshold), preventing automated classification into Gmail's "Promotions" (Werbung) tab while retaining compliant footer unsubscribe links.
+  - Subject Line Cleanup: Stripped emoji (`🎹`) and commercial marketing suffixes across all 5 languages (`New Sheet Music: {song_name} ({artist})` / `Neue Noten: {song_name} ({artist})`), preventing promotional keyword filtering.
+  - Subtler Brand Aesthetic:
+    - Removed loud neon `NEW ARRANGEMENT RELEASE` pill badge.
+    - Reduced top gradient bar to subtle 2px hairline (`#00f5ff` to `#ff2d92`).
+    - Standardized feature box bullets to uniform subtle cyan dots `•` (`color: #00f5ff;`) instead of alternating neon diamonds.
+    - Replaced rainbow gradient CTA button with high-contrast, modern solid cyan `#00f5d4` button with dark `#080a0f` text.
+    - Updated closing signature: `meloscribe` is rendered in pure neutral white (`#ffffff`) without colored cyan/magenta splitting.
+  - Admin Test Dispatch Fix: Synced `routes_admin.py` to production Oracle VM with `test_email` and `target_locale` parameter handling and `admin_get_newsletter_dispatches` endpoint. Deployed live to VM and restarted `meloscribe-backend.service`.
 
 ## Active Blockers / Next Steps
 

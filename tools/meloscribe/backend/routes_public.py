@@ -426,8 +426,7 @@ CONFIRMATION_TEMPLATES = {
 
 NEWSLETTER_TEMPLATES = {
     "en": {
-        "subject": "🎹 New Piano Arrangement: {song_name} ({artist}) — meloscribe",
-        "badge": "NEW ARRANGEMENT RELEASE",
+        "subject": "New Sheet Music: {song_name} ({artist})",
         "greeting": "Hey Pianist,",
         "intro": "The handcrafted sheet music and learning package for <strong>{song_name}</strong> is now live in our catalog.",
         "box_title": "Included in this learning package:",
@@ -444,8 +443,7 @@ NEWSLETTER_TEMPLATES = {
         "unsubscribe": "Unsubscribe"
     },
     "de": {
-        "subject": "🎹 Neues Klavier-Arrangement: {song_name} ({artist}) — meloscribe",
-        "badge": "NEUES ARRANGEMENT RELEASE",
+        "subject": "Neue Noten: {song_name} ({artist})",
         "greeting": "Hey Pianist,",
         "intro": "Das handgefertigte Noten- und Lernpaket für <strong>{song_name}</strong> ist ab sofort in unserem Katalog verfügbar.",
         "box_title": "In diesem Lernpaket enthalten:",
@@ -462,8 +460,7 @@ NEWSLETTER_TEMPLATES = {
         "unsubscribe": "Newsletter abmelden"
     },
     "fr": {
-        "subject": "🎹 Nouvel arrangement piano : {song_name} ({artist}) — meloscribe",
-        "badge": "NOUVEL ARRANGEMENT PIANO",
+        "subject": "Nouvelles partitions : {song_name} ({artist})",
         "greeting": "Bonjour pianiste,",
         "intro": "Le pack d'apprentissage complet pour <strong>{song_name}</strong> est maintenant disponible dans notre catalogue.",
         "box_title": "Contenu du pack d'apprentissage :",
@@ -480,8 +477,7 @@ NEWSLETTER_TEMPLATES = {
         "unsubscribe": "Se désabonner"
     },
     "es": {
-        "subject": "🎹 Nuevo arreglo de piano: {song_name} ({artist}) — meloscribe",
-        "badge": "NUEVO ARREGLO DE PIANO",
+        "subject": "Nueva partitura: {song_name} ({artist})",
         "greeting": "¡Hola pianista!,",
         "intro": "El paquete de aprendizaje completo para <strong>{song_name}</strong> ya está disponible en nuestro catálogo.",
         "box_title": "Incluido en este paquete de aprendizaje:",
@@ -498,8 +494,7 @@ NEWSLETTER_TEMPLATES = {
         "unsubscribe": "Darse de baja"
     },
     "it": {
-        "subject": "🎹 Nuovo arrangiamento per pianoforte: {song_name} ({artist}) — meloscribe",
-        "badge": "NUOVO ARRANGIAMENTO PER PIANOFORTE",
+        "subject": "Nuovi spartiti: {song_name} ({artist})",
         "greeting": "Ciao pianista,",
         "intro": "Il pacchetto di apprendimento completo per <strong>{song_name}</strong> è ora disponibile nel nostro catalogo.",
         "box_title": "Cosa è incluso in questo pacchetto:",
@@ -640,7 +635,6 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
     unsubscribe_url = f"https://api.meloscribe.dev/api/notify/unsubscribe?token={token}"
 
     subject = tpl["subject"].format(song_name=song_name, artist=artist)
-    badge = tpl["badge"]
     greeting = tpl["greeting"]
     intro = tpl["intro"].format(song_name=song_name, artist=artist)
     box_title = tpl["box_title"]
@@ -661,82 +655,75 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
 <head><meta charset="utf-8"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 24px 12px;">
   <!-- Main Card Container -->
-  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
+  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
     
-    <!-- Signature Meloscribe Top Gradient Bar: Cyan to Magenta -->
-    <div style="height: 3px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
+    <!-- Subtle Meloscribe Top Hairline: Cyan to Magenta -->
+    <div style="height: 2px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
 
-    <div style="padding: 30px 24px;">
-      <!-- Release Pill Badge with Magenta Glow -->
-      <div style="text-align: center; margin-bottom: 18px;">
-        <span style="display: inline-block; background-color: rgba(255, 45, 146, 0.12); border: 1px solid rgba(255, 45, 146, 0.4); color: #ff2d92; font-size: 11px; font-weight: 800; letter-spacing: 1.5px; padding: 5px 14px; border-radius: 20px; text-transform: uppercase;">
-          {badge}
-        </span>
-      </div>
-
+    <div style="padding: 28px 24px;">
       <!-- Song Title & Artist -->
-      <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; text-align: center; margin: 0 0 6px 0; line-height: 1.25; letter-spacing: -0.3px;">
+      <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; text-align: center; margin: 0 0 4px 0; line-height: 1.3; letter-spacing: -0.2px;">
         {song_name}
       </h1>
-      <p style="color: #94a3b8; font-size: 15px; text-align: center; margin: 0 0 24px 0; font-weight: 500;">
+      <p style="color: #94a3b8; font-size: 14.5px; text-align: center; margin: 0 0 22px 0; font-weight: 500;">
         by <span style="color: #e2e8f0; font-weight: 600;">{artist}</span>
       </p>
 
       <!-- Clean Personal Intro -->
-      <p style="color: #ffffff; font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">{greeting}</p>
-      <p style="color: #94a3b8; line-height: 1.6; font-size: 14.5px; margin: 0 0 22px 0;">
+      <p style="color: #ffffff; font-size: 15px; font-weight: 600; margin: 0 0 6px 0;">{greeting}</p>
+      <p style="color: #94a3b8; line-height: 1.6; font-size: 14px; margin: 0 0 20px 0;">
         {intro}
       </p>
 
-      <!-- Structured Learning Package Feature Box with Magenta Border & Cyan Accents -->
-      <div style="background-color: #0c0e17; border: 1px solid #1e293b; border-left: 3px solid #ff2d92; border-radius: 12px; padding: 18px 20px; margin: 20px 0 26px 0;">
-        <p style="color: #ff2d92; font-size: 11.5px; font-weight: 800; margin: 0 0 12px 0; text-transform: uppercase; letter-spacing: 0.8px;">
+      <!-- Structured Learning Package Feature Box -->
+      <div style="background-color: #0b0e17; border: 1px solid #1e293b; border-radius: 10px; padding: 16px 18px; margin: 18px 0 24px 0;">
+        <p style="color: #cbd5e1; font-size: 11px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.8px;">
           {box_title}
         </p>
         <table border="0" cellpadding="0" cellspacing="0" width="100%" style="border-collapse: collapse;">
           <tr>
-            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #00f5ff; font-size: 13px;">✦</td>
-            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
+            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
               <strong style="color: #ffffff;">{feat_1_title}</strong> — {feat_1_desc}
             </td>
           </tr>
           <tr>
-            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #ff2d92; font-size: 13px;">✦</td>
-            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
+            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
               <strong style="color: #ffffff;">{feat_2_title}</strong> — {feat_2_desc}
             </td>
           </tr>
           <tr>
-            <td style="padding: 6px 0; vertical-align: top; width: 22px; color: #00f5ff; font-size: 13px;">✦</td>
-            <td style="padding: 6px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
+            <td style="padding: 5px 0; vertical-align: top; width: 18px; color: #00f5ff; font-size: 14px; line-height: 1.4;">•</td>
+            <td style="padding: 5px 0; color: #cbd5e1; font-size: 13px; line-height: 1.5;">
               <strong style="color: #ffffff;">{feat_3_title}</strong> — {feat_3_desc}
             </td>
           </tr>
         </table>
       </div>
 
-      <!-- High-Impact CTA Button (Cyan-to-Magenta Brand Gradient) -->
-      <div style="text-align: center; margin: 26px 0 14px 0;">
-        <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; background: linear-gradient(135deg, #00f5d4 0%, #ff2d92 100%); color: #ffffff; font-weight: 800; font-size: 15px; padding: 14px 38px; border-radius: 12px; text-decoration: none; box-shadow: 0 4px 22px rgba(255, 45, 146, 0.38); text-shadow: 0 1px 2px rgba(0,0,0,0.35); letter-spacing: 0.3px;">
+      <!-- Subtle CTA Button -->
+      <div style="text-align: center; margin: 24px 0 12px 0;">
+        <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; color: #080a0f; font-weight: 700; font-size: 14.5px; padding: 12px 34px; border-radius: 8px; text-decoration: none; letter-spacing: 0.2px;">
           {cta}
         </a>
       </div>
 
       <!-- Audio Preview Callout -->
-      <p style="color: #94a3b8; font-size: 12.5px; text-align: center; margin: 0 0 24px 0;">
-        🎧 {preview_note}
+      <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0 0 22px 0;">
+        {preview_note}
       </p>
 
-      <!-- Signature with Signature Melo (cyan) Scribe (magenta) -->
-      <p style="color: #94a3b8; font-size: 14px; margin: 22px 0 0 0; line-height: 1.6;">
+      <!-- Signature without colored split -->
+      <p style="color: #94a3b8; font-size: 13.5px; margin: 20px 0 0 0; line-height: 1.6;">
         {happy_practicing}<br>
-        <span style="font-size: 17px; font-weight: 900; letter-spacing: 1px;"><span style="color: #00f5ff;">melo</span><span style="color: #ff2d92;">scribe</span></span>
+        <span style="font-size: 15px; font-weight: 700; color: #ffffff; letter-spacing: 0.5px;">meloscribe</span>
       </p>
     </div>
   </div>
 
   <!-- Minimalist Footer -->
-  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 22px; line-height: 1.6;">
+  <p style="text-align: center; font-size: 11.5px; color: #64748b; margin-top: 20px; line-height: 1.6;">
     {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a>.<br>
     <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
@@ -777,11 +764,7 @@ https://meloscribesheets.com
                 "reply_to": "info@meloscribe.dev",
                 "subject": subject,
                 "html": html_body,
-                "text": text_body,
-                "headers": {
-                    "List-Unsubscribe": f"<{unsubscribe_url}>",
-                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-                }
+                "text": text_body
             },
             timeout=10
         )
@@ -895,8 +878,9 @@ def broadcast_new_arrangement_newsletter(song_id: str = None, song_title: str = 
         return {"status": "error", "message": f"Database error: {e}"}
 
 
-# In-memory cache for IP to currency mappings
+# In-memory cache for IP to (country, currency) mappings
 ip_currency_cache = {}
+ip_country_cache = {}
 
 def get_currency_from_country(country: str) -> str:
     eurozone = {"AT", "BE", "CY", "EE", "FI", "FR", "DE", "GR", "HR", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PT", "SK", "SI", "ES"}
@@ -907,13 +891,13 @@ def get_currency_from_country(country: str) -> str:
     else:
         return "usd"
 
-def get_currency_from_request(request: Request) -> str:
+def get_geo_info_from_request(request: Request) -> tuple:
+    """Resolve visitor country and currency via Cloudflare header or client IP GeoIP lookup."""
     # 1. Check Cloudflare country header first
     country = request.headers.get("cf-ipcountry")
     if country:
         country = country.upper().strip()
-        print(f"[GeoIP] Resolved country via CF-IPCountry: {country}")
-        return get_currency_from_country(country)
+        return country, get_currency_from_country(country)
 
     # 2. Extract real client IP
     client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else None)
@@ -923,28 +907,34 @@ def get_currency_from_request(request: Request) -> str:
         
         # Avoid local/internal IPs
         if client_ip in ("127.0.0.1", "localhost", "::1") or client_ip.startswith("192.168.") or client_ip.startswith("10."):
-            return "eur"
+            return "DE", "eur"
 
         # Check in-memory cache
-        global ip_currency_cache
-        if client_ip in ip_currency_cache:
-            return ip_currency_cache[client_ip]
+        global ip_country_cache, ip_currency_cache
+        if client_ip in ip_country_cache:
+            c = ip_country_cache[client_ip]
+            return c, ip_currency_cache.get(client_ip, get_currency_from_country(c))
 
         # Query high-speed GeoIP API
         try:
             r = requests.get(f"http://ip-api.com/json/{client_ip}", timeout=1.5)
             if r.status_code == 200:
                 data = r.json()
-                country = data.get("countryCode", "").upper()
-                if country:
-                    currency = get_currency_from_country(country)
-                    ip_currency_cache[client_ip] = currency
-                    print(f"[GeoIP] Resolved country via API for IP {client_ip}: {country} -> {currency}")
-                    return currency
+                c = data.get("countryCode", "").upper()
+                if c:
+                    curr = get_currency_from_country(c)
+                    ip_country_cache[client_ip] = c
+                    ip_currency_cache[client_ip] = curr
+                    print(f"[GeoIP] Resolved country via API for IP {client_ip}: {c} -> {curr}")
+                    return c, curr
         except Exception as e:
             print(f"[GeoIP] Error resolving IP {client_ip}: {e}")
 
-    return "eur"
+    return "unknown", "eur"
+
+def get_currency_from_request(request: Request) -> str:
+    _, curr = get_geo_info_from_request(request)
+    return curr
 
 # -------------------------------------------------------------------
 # Checkout session & Webhooks
@@ -978,12 +968,13 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         if req.difficulty == "Easy" and song.get("easyPrice"):
             price_str = song.get("easyPrice")
             
+        geo_country, auto_currency = get_geo_info_from_request(request)
         if "$" in price_str:
             currency = "usd"
         elif "£" in price_str:
             currency = "gbp"
         else:
-            currency = get_currency_from_request(request)
+            currency = auto_currency
             
         try:
             digits = re.findall(r"\d+", price_str)
@@ -1055,7 +1046,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
             "border_style": "rounded"
         }
 
-        cf_country = (request.headers.get("cf-ipcountry") or "").upper().strip()
+        cf_country = geo_country
 
         if req.embedded:
             # Payment methods: Card, PayPal for all currencies; iDEAL and EPS only for EUR; Bancontact only for BE
@@ -1107,7 +1098,8 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 metadata={
                     "song_title": song_name_meta,
                     "download_hash": download_hash,
-                    "locale": req.language
+                    "locale": req.language,
+                    "country": cf_country or "unknown"
                 }
             )
             return {"url": session.url}

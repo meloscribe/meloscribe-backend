@@ -2,6 +2,7 @@ import re
 import os
 import sys
 import json
+import subprocess
 import sqlite3
 import platform
 import requests
@@ -218,6 +219,17 @@ if platform.system() == "Windows":
             if "x-admin-passcode" in request.headers:
                 headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
             r = requests.post(f"{VM_API_BASE}/api/admin/newsletter/broadcast", json=body, headers=headers, timeout=30.0)
+            return JSONResponse(content=r.json(), status_code=r.status_code)
+        except Exception as e:
+            return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
+
+    @router.get("/api/admin/newsletter/dispatches")
+    async def get_local_newsletter_dispatches(request: Request):
+        try:
+            headers = get_proxy_headers()
+            if "x-admin-passcode" in request.headers:
+                headers["x-admin-passcode"] = request.headers["x-admin-passcode"]
+            r = requests.get(f"{VM_API_BASE}/api/admin/newsletter/dispatches", headers=headers, timeout=15.0)
             return JSONResponse(content=r.json(), status_code=r.status_code)
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
@@ -1268,6 +1280,28 @@ else:
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
+    @router.get("/api/admin/newsletter/dispatches")
+    async def admin_get_newsletter_dispatches(request: Request):
+        verify_admin(request)
+        try:
+            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            c = conn.cursor()
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS newsletter_dispatches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT,
+                    song_id TEXT,
+                    sent_at TEXT,
+                    count_sent INTEGER
+                )
+            """)
+            c.execute("SELECT id, song_name, song_id, sent_at, count_sent FROM newsletter_dispatches ORDER BY id DESC")
+            rows = [{"id": r[0], "song_name": r[1], "song_id": r[2], "sent_at": r[3], "count_sent": r[4]} for r in c.fetchall()]
+            conn.close()
+            return {"dispatches": rows}
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=500)
+
     @router.post("/api/admin/newsletter/broadcast")
     async def admin_broadcast_newsletter(request: Request):
         verify_admin(request)
@@ -1281,6 +1315,8 @@ else:
             from routes_public import broadcast_new_arrangement_newsletter
             result = broadcast_new_arrangement_newsletter(
                 song_title=song_name,
+                test_email=body.get("test_email"),
+                target_locale=body.get("target_locale"),
                 force=body.get("force", False)
             )
             return JSONResponse(content=result, status_code=200)
