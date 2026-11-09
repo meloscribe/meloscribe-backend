@@ -279,6 +279,14 @@ git add . && git commit -m "..." && git push
   - Cleaned Emojis in `purchases.status`: Replaced `"🟢 Active"` with `"active"` in `routes_public.py` (webhook + fallback) and `routes_admin.py:2135`, and executed `UPDATE purchases SET status = 'active' WHERE status LIKE '%Active%'` on production DB.
   - Redeployed to Oracle Cloud VM, restarted `meloscribe-backend.service`, and regenerated all datasets in `C:\Dev\meloscribe-analytics`.
 
+- [x] Two-Layer Dynamic MIDI Copyright Protection & Forensic Velocity Fingerprinting (2026-11-09):
+  - Implemented `watermark_midi()` in `routes_public.py`:
+    - Layer 1 (Visible DAW Header): Injects Track 0 Meta Messages (`track_name`, `copyright`, `text`) visible upon opening in DAWs (Cakewalk, Ableton, FL Studio) and visualizers. E.g. `Licensed to: {email} (Order #{order_ref}) - meloscribesheets.com`.
+    - Layer 2 (Forensic Velocity Fingerprint): Encodes deterministic 32-bit SHA-256 hash of `transaction_id` into the first 32 `note_on` events via minimal $\pm 1$ velocity parity modulation (completely inaudible, imperceptible in visualizers).
+  - On-Demand Download Pipeline: Wired into `get_order_details` and `download_file` in `routes_public.py` for `type in ("midi", "midi_slow")`.
+  - Forensic Scanner CLI: Created `tools/forensic_midi_scanner.py` allowing instant attribution of any leaked MIDI file to buyer email, purchase date, and IP address, fully resistant to text-stripping.
+  - Verified and deployed live to Oracle VM (`152.70.23.171`).
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.
