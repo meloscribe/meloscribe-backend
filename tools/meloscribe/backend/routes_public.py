@@ -114,6 +114,72 @@ def watermark_pdf(pdf_bytes: bytes, buyer_name: str, email: str, transaction_id:
         print(f"[Watermark] Error watermarking PDF: {e}")
         return pdf_bytes
 
+def watermark_midi(midi_bytes: bytes, buyer_name: str, email: str, transaction_id: str, order_ref: str = None) -> bytes:
+    import io
+    import hashlib
+    try:
+        import mido
+    except ImportError:
+        print("[Watermark] mido not installed, returning raw MIDI bytes.")
+        return midi_bytes
+
+    try:
+        if not order_ref:
+            order_ref = transaction_id[:12] if transaction_id else "direct"
+            
+        email_clean = (email or "customer@example.com").strip()
+        name_clean = (buyer_name or "").strip()
+        licensee = f"{name_clean} <{email_clean}>" if name_clean else email_clean
+        
+        header_text = f"Licensed to: {licensee} (Order #{order_ref}) - meloscribesheets.com"
+        copyright_text = f"Copyright (c) Meloscribe (meloscribesheets.com). Licensed exclusively to {licensee} (Order #{order_ref}). Unauthorized resale or redistribution is prohibited."
+        
+        # 1. Deterministic 32-bit hash of transaction_id
+        h = hashlib.sha256(str(transaction_id or 'meloscribe').strip().encode("utf-8")).digest()
+        fp_32 = int.from_bytes(h[:4], byteorder="big", signed=False)
+        fp_bits = [(fp_32 >> (31 - i)) & 1 for i in range(32)]
+        
+        mid = mido.MidiFile(file=io.BytesIO(midi_bytes))
+        
+        # 2. Visible Deterrent Header (Track 0 meta-events)
+        if not mid.tracks:
+            mid.tracks.append(mido.MidiTrack())
+            
+        meta_to_prepend = [
+            mido.MetaMessage('track_name', name=header_text, time=0),
+            mido.MetaMessage('copyright', text=copyright_text, time=0),
+            mido.MetaMessage('text', text=f"Order: {transaction_id} | Owner: {email_clean} | meloscribesheets.com", time=0)
+        ]
+        
+        filtered_track0 = [m for m in mid.tracks[0] if not (m.is_meta and m.type in ('track_name', 'copyright'))]
+        mid.tracks[0] = mido.MidiTrack(meta_to_prepend + filtered_track0)
+        
+        # 3. Forensic Velocity Fingerprinting across first 32 note_on events (velocity > 0)
+        bit_idx = 0
+        for track in mid.tracks:
+            for msg in track:
+                if bit_idx >= 32:
+                    break
+                if msg.type == 'note_on' and msg.velocity > 0:
+                    target_bit = fp_bits[bit_idx]
+                    if (msg.velocity % 2) != target_bit:
+                        if msg.velocity >= 127:
+                            msg.velocity -= 1
+                        elif msg.velocity <= 1:
+                            msg.velocity += 1
+                        else:
+                            msg.velocity += 1
+                    bit_idx += 1
+            if bit_idx >= 32:
+                break
+                
+        out_buf = io.BytesIO()
+        mid.save(file=out_buf)
+        return out_buf.getvalue()
+    except Exception as e:
+        print(f"[Watermark] Error watermarking MIDI: {e}")
+        return midi_bytes
+
 def watermark_video(original_video_bytes: bytes, song_name: str, type: str) -> bytes:
     import subprocess
     import tempfile
@@ -1644,9 +1710,9 @@ def request_download(hash: str, type: str, request: Request):
         conn.commit()
     conn.close()
     
-    # For PDF, use proxy endpoint to apply watermark on demand.
-    # For videos and MIDIs, generate direct presigned R2 URL instantly (1 ms) to make download start immediately!
-    if type == "pdf":
+    # For PDF and MIDI, use proxy endpoint to apply dynamic watermark on demand.
+    # For videos, generate direct presigned R2 URL instantly (1 ms) to make download start immediately!
+    if type in ("pdf", "midi", "midi_slow"):
         download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
         return {"download_url": download_file_url, "download_count": new_count}
     else:
@@ -1840,6 +1906,21 @@ def download_file(hash: str, type: str, request: Request):
                 "Content-Disposition": f'attachment; filename="{song_name}.pdf"'
             }
             return Response(content=watermarked_bytes, media_type="application/pdf", headers=headers)
+        elif type in ("midi", "midi_slow"):
+            print(f"[Download File] Fetching '{file_key}' from R2 for MIDI copyright watermarking & velocity fingerprinting...")
+            midi_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
+            original_midi_bytes = midi_obj['Body'].read()
+            
+            order_ref = txn_id[:12] if txn_id else "direct"
+            watermarked_midi_bytes = watermark_midi(original_midi_bytes, buyer_name, email, txn_id, order_ref=order_ref)
+            
+            from fastapi.responses import Response
+            out_filename = f"{song_name} slow.mid" if type == "midi_slow" else f"{song_name}.mid"
+            headers = {
+                "Content-Disposition": f'attachment; filename="{out_filename}"',
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
+            }
+            return Response(content=watermarked_midi_bytes, media_type="audio/midi", headers=headers)
         else:
             filename = file_key.split('/')[-1]
             presigned_url = s3.generate_presigned_url(
