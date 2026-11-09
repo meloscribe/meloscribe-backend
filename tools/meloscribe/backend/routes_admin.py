@@ -2132,7 +2132,7 @@ else:
 
         c.execute(
             "INSERT INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name, created_at, download_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (transaction_id, email, saved_song_name, req.amount, req.currency, "🟢 Active", download_hash, req.locale, buyer_name, created_at)
+            (transaction_id, email, saved_song_name, req.amount, req.currency, "active", download_hash, req.locale, buyer_name, created_at)
         )
         conn.commit()
         conn.close()

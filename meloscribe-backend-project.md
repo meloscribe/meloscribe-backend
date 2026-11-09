@@ -273,6 +273,12 @@ git add . && git commit -m "..." && git push
     - Updated closing signature: `meloscribe` is rendered in pure neutral white (`#ffffff`) without colored cyan/magenta splitting.
   - Admin Test Dispatch Fix: Synced `routes_admin.py` to production Oracle VM with `test_email` and `target_locale` parameter handling and `admin_get_newsletter_dispatches` endpoint. Deployed live to VM and restarted `meloscribe-backend.service`.
 
+- [x] Revenue Deduplication & Purchase Status Normalization (2026-11-09):
+  - Fixed Phantom Revenue Bug in `routes_public.py`: Added strict deduplication check `SELECT id FROM revenue WHERE message LIKE ?` (`f"%{checkout_id}%"`) before inserting rows into `revenue` across Stripe Webhook, Stripe API Fallback (`get_hash_by_checkout`), and Paddle API Fallback, preventing polling/reloading from generating ghost revenue.
+  - Purged 10 Duplicate & Test Revenue Rows: Removed 9 phantom duplicate records (`pi_3UTDH8Q4cuBqoYoX2Cf7OR1i`, `pi_3UWyTjQ4cuBqoYoX1CJre8Nu`, `pi_3UY75NQ4cuBqoYoX0au5tcZl`) and 1 test purchase (`pi_3UFLt8Q4cuBqoYoX2QBRmFaN`, id=74) from `analytics.db` on Oracle VM, correcting total revenue to exactly 184.00 €/$ (38 transactions: 24 Stripe + 14 Ko-Fi).
+  - Cleaned Emojis in `purchases.status`: Replaced `"🟢 Active"` with `"active"` in `routes_public.py` (webhook + fallback) and `routes_admin.py:2135`, and executed `UPDATE purchases SET status = 'active' WHERE status LIKE '%Active%'` on production DB.
+  - Redeployed to Oracle Cloud VM, restarted `meloscribe-backend.service`, and regenerated all datasets in `C:\Dev\meloscribe-analytics`.
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.

@@ -1238,7 +1238,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 c = conn.cursor()
                 c.execute(
                     "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, email, song_title, amount_total, currency, "🟢 Active", download_hash, locale, buyer_name)
+                    (session_id, email, song_title, amount_total, currency, "active", download_hash, locale, buyer_name)
                 )
                 is_new = c.rowcount > 0
                 
@@ -1247,10 +1247,12 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     (locale, buyer_name, session_id)
                 )
                 
-                c.execute(
-                    "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (amount_total, currency, "stripe", event_type, email, f"Stripe txn {session_id}", song_title)
-                )
+                c.execute("SELECT id FROM revenue WHERE message LIKE ?", (f"%{session_id}%",))
+                if not c.fetchone():
+                    c.execute(
+                        "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (amount_total, currency, "stripe", event_type, email, f"Stripe txn {session_id}", song_title)
+                    )
                 conn.commit()
                 conn.close()
                 log_webhook(f"[Stripe Webhook] Recorded purchase successfully (new: {is_new})")
@@ -1405,7 +1407,7 @@ def get_hash_by_checkout(checkout_id: str):
                     c = conn.cursor()
                     c.execute(
                         "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (checkout_id, email, song_title, amount_total, currency, "🟢 Active", download_hash, locale, buyer_name)
+                        (checkout_id, email, song_title, amount_total, currency, "active", download_hash, locale, buyer_name)
                     )
                     is_new = c.rowcount > 0
                     
@@ -1414,10 +1416,12 @@ def get_hash_by_checkout(checkout_id: str):
                         (locale, buyer_name, checkout_id)
                     )
                     
-                    c.execute(
-                        "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (amount_total, currency, "stripe", "checkout.session.completed", email, f"Stripe txn {checkout_id} (API Fallback)", song_title)
-                    )
+                    c.execute("SELECT id FROM revenue WHERE message LIKE ?", (f"%{checkout_id}%",))
+                    if not c.fetchone():
+                        c.execute(
+                            "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (amount_total, currency, "stripe", "checkout.session.completed", email, f"Stripe txn {checkout_id} (API Fallback)", song_title)
+                        )
                     conn.commit()
                     conn.close()
                     print(f"[Stripe API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
@@ -1480,10 +1484,12 @@ def get_hash_by_checkout(checkout_id: str):
                             (locale, buyer_name, checkout_id)
                         )
                         
-                        c.execute(
-                            "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            (grand_total, currency, "paddle", "transaction.completed", email, f"Paddle txn {checkout_id} (API Fallback)", song_title)
-                        )
+                        c.execute("SELECT id FROM revenue WHERE message LIKE ?", (f"%{checkout_id}%",))
+                        if not c.fetchone():
+                            c.execute(
+                                "INSERT INTO revenue (amount, currency, source, event_type, buyer, message, song_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (grand_total, currency, "paddle", "transaction.completed", email, f"Paddle txn {checkout_id} (API Fallback)", song_title)
+                            )
                         conn.commit()
                         conn.close()
                         print(f"[Paddle API Fallback] Recorded purchase for '{song_title}' by {email} with hash {download_hash} (new: {is_new})")
