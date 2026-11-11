@@ -287,6 +287,11 @@ git add . && git commit -m "..." && git push
   - Forensic Scanner CLI: Created `tools/forensic_midi_scanner.py` allowing instant attribution of any leaked MIDI file to buyer email, purchase date, and IP address, fully resistant to text-stripping.
   - Verified and deployed live to Oracle VM (`152.70.23.171`).
 
+- [x] Content Recycling Pipeline Alignment, Pinterest Exclusion & Persistent Hook/Used Clips Tracking (2026-11-12):
+  - Strict Pinterest Exclusion: Filtered out Pinterest from `routes_workflow.py` (`stage_recycling_video`), `stage_to_server.py` (`is_recycling` mode), and `upload_bot.py` (`run_pinterest`), ensuring recycled video cuts are strictly prohibited from Pinterest uploads.
+  - Persistent File & DB Synchronization (`song_hooks.json`): Created and synchronized `tools/meloscribe/backend/song_hooks.json` for catalog release hook tracking (*River Flows in You*, *Golden Brown*, *Sweetest Rain*, *In This Shirt*, *Experience*, *Floating in Reverie*, *Goodbye To A Lover Again*) and automated dual-persistence in `confirm_hook`.
+  - Reused Clips Aggregation API: Enhanced `/api/recycling/hook-info` to query, normalize, and return all previously used recycling clips (`used_clips`) for the selected song from `recycling_history` and local metadata files, feeding the desktop app timeline visualizer and collision guards.
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.

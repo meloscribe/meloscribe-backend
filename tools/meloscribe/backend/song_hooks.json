@@ -1,0 +1,52 @@
+{
+  "River Flows in You": {
+    "hook_start": 110.3,
+    "hook_end": 134.5,
+    "duration": 24.2,
+    "source": "settings_teaser",
+    "created_at": "2026-09-20 17:21:20"
+  },
+  "Golden Brown": {
+    "hook_start": 193.0,
+    "hook_end": 213.0,
+    "duration": 20.0,
+    "source": "existing_teaser",
+    "created_at": "2026-09-20 17:21:20"
+  },
+  "Sweetest Rain": {
+    "hook_start": 108.0,
+    "hook_end": 127.5,
+    "duration": 19.5,
+    "source": "existing_teaser",
+    "created_at": "2026-09-20 17:21:20"
+  },
+  "In This Shirt": {
+    "hook_start": 217.7,
+    "hook_end": 253.7,
+    "duration": 36.0,
+    "source": "master_tab",
+    "created_at": "2026-09-22 11:36:13"
+  },
+  "Experience": {
+    "hook_start": 234.1,
+    "hook_end": 258.4,
+    "duration": 24.3,
+    "source": "master_tab",
+    "created_at": "2026-10-11 16:45:26"
+  },
+  "Floating in Reverie": {
+    "hook_start": 28.5,
+    "hook_end": 53.5,
+    "duration": 25.0,
+    "source": "master_tab",
+    "created_at": "2026-10-27 19:17:36"
+  },
+  "Goodbye To A Lover Again": {
+    "hook_start": 78.5,
+    "hook_end": 104.8,
+    "duration": 26.3,
+    "source": "master_tab",
+    "created_at": "2026-11-06 18:22:09"
+  }
+}
+

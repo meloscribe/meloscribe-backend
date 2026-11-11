@@ -204,6 +204,46 @@ def get_checkout_analytics_data():
         "pi_3UL2OjQ4cuBqoYoX2b68bXxZ": "PH",
         "pi_3ULMX1Q4cuBqoYoX0Ktmofp1": "TW",
         "pi_3ULUFVQ4cuBqoYoX1Hz7rW3P": "DE",
+        # October 2026 checkouts backfill
+        "pi_3UWCWvQ4cuBqoYoX0uvD3u1V": "IL",
+        "pi_3UW1GjQ4cuBqoYoX2u494jXE": "PT",
+        "pi_3UVu0FQ4cuBqoYoX2lG35nfo": "LU",
+        "pi_3UVoejQ4cuBqoYoX0IMAuGdl": "AT",
+        "pi_3UUkTxQ4cuBqoYoX2smd89wa": "PH",
+        "pi_3UUR14Q4cuBqoYoX1WVjI3dH": "PH",
+        "pi_3UU9XXQ4cuBqoYoX29cCdO9B": "MY",
+        "pi_3UU0XgQ4cuBqoYoX0a4jlEiv": "DE",
+        "pi_3UU0W4Q4cuBqoYoX1Sxhcw5x": "DE",
+        "pi_3UTtbWQ4cuBqoYoX1pv4Zaj7": "MY",
+        "pi_3UTh74Q4cuBqoYoX0dNJIPwY": "DE",
+        "pi_3UTUbRQ4cuBqoYoX0lyCx5jk": "PH",
+        "pi_3UTDH8Q4cuBqoYoX2Cf7OR1i": "MX",
+        "pi_3USN0KQ4cuBqoYoX2jfiukc5": "PL",
+        "pi_3USLv7Q4cuBqoYoX2ueYQFBg": "TR",
+        "pi_3USLuSQ4cuBqoYoX0QSDUTVP": "TR",
+        "pi_3USLstQ4cuBqoYoX2qLGSxkr": "TR",
+        "pi_3USLsEQ4cuBqoYoX1lJD4upc": "TR",
+        "pi_3USLrDQ4cuBqoYoX0FkoSmd0": "TR",
+        "pi_3USLqsQ4cuBqoYoX0cIvBpQZ": "TR",
+        "pi_3USLjKQ4cuBqoYoX2RWtoHuV": "NL",
+        "pi_3USLiyQ4cuBqoYoX0sRXBKAy": "NL",
+        "pi_3USKXvQ4cuBqoYoX0kAMKwYn": "BR",
+        "pi_3USIr3Q4cuBqoYoX0vtZNBJG": "HK",
+        "pi_3USH9fQ4cuBqoYoX0uf20ZVI": "KH",
+        "pi_3US5wJQ4cuBqoYoX1lKEYfU8": "BR",
+        "pi_3URt8WQ4cuBqoYoX0DXZruoN": "GB",
+        "pi_3URrK0Q4cuBqoYoX28vcOX9i": "AU",
+        "pi_3URkpeQ4cuBqoYoX1AwM48Z4": "US",
+        "pi_3URYyiQ4cuBqoYoX2YVWhFoV": "ID",
+        "pi_3URXGeQ4cuBqoYoX00q3o4LO": "DE",
+        "pi_3URWzZQ4cuBqoYoX0r5pXmLz": "DE",
+        "pi_3URWHtQ4cuBqoYoX0kJQZ8lV": "DE",
+        "pi_3URWHjQ4cuBqoYoX24vW17iR": "DE",
+        "pi_3URVQlQ4cuBqoYoX2A2IlhZq": "ES",
+        "pi_3URVQMQ4cuBqoYoX0Ud1rX2G": "DE",
+        "pi_3URVNkQ4cuBqoYoX2kZbND1Z": "ES",
+        "cs_live_b1S1pMpF2lj9ahaTv5rPnYZApicCNgiBoY8tcMvj1nqwkVTODYldLWjIft": "DE",
+        "cs_live_b1zG0gnUZ467Xp9YxdqjmYQ3ympQmjSw4JiHSSCANk7Ahlxzo5D2xa05MY": "DE",
     }
 
     current_month_str = datetime.datetime.now().strftime('%Y-%m')
@@ -272,8 +312,13 @@ def get_checkout_analytics_data():
         buyer_name = c_details.get("name") or ""
         c_addr = (c_details.get("address") or {}) if isinstance(c_details, dict) else {}
         
+        meta_country = (meta.get("country") or "").strip()
+        if meta_country.lower() == "unknown":
+            meta_country = ""
+
         country = (
-            meta.get("country")
+            meta_country
+            or KNOWN_PI_COUNTRIES.get(s.get("id"))
             or c_addr.get("country")
             or "unknown"
         )
@@ -409,8 +454,12 @@ def get_checkout_analytics_data():
         pm_details = (charge_zero.get("payment_method_details") or {}) if isinstance(charge_zero, dict) else {}
         card_details = (pm_details.get("card") or {}) if isinstance(pm_details, dict) else {}
 
+        meta_country = (meta.get("country") or "").strip()
+        if meta_country.lower() == "unknown":
+            meta_country = ""
+
         country = (
-            meta.get("country")
+            meta_country
             or KNOWN_PI_COUNTRIES.get(pi_id)
             or b_addr.get("country")
             or card_details.get("country")

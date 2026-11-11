@@ -690,13 +690,13 @@ def main():
             title_fontsize = 108
             subtitle_fontsize = 60
             if not author_text:
-                title2_y = y_overlay - 100
-                title1_y = title2_y - 105
-                author_y = y_overlay - 50
+                title2_y = y_overlay - 140
+                title1_y = title2_y - 120
+                author_y = y_overlay - 70
             else:
-                author_y = y_overlay - 60
-                title2_y = author_y - 120
-                title1_y = title2_y - 105
+                author_y = y_overlay - 105
+                title2_y = author_y - 135
+                title1_y = title2_y - 120
             
             # TikTok top search bar safe zone clamp (y >= 365)
             if title1_y < 365:
@@ -708,11 +708,11 @@ def main():
             title_fontsize = 130
             subtitle_fontsize = 62
             if not author_text:
-                title_y = y_overlay - 120
-                author_y = y_overlay - 50
+                title_y = y_overlay - 160
+                author_y = y_overlay - 70
             else:
-                author_y = y_overlay - 65
-                title_y = author_y - 150
+                author_y = y_overlay - 110
+                title_y = author_y - 175
             
             # TikTok top search bar safe zone clamp (y >= 365)
             if title_y < 365:

@@ -1204,9 +1204,10 @@ def confirm_hook(req: ConfirmHookRequest):
     active_workflow_task["waiting_for_hook"] = False
     active_workflow_task["pause_requested"] = False
 
-    # Persist in song_hooks table to prevent recycling overlap
+    # Persist in song_hooks table and song_hooks.json to prevent recycling overlap
     song_name = active_workflow_task.get("song") or fresh_settings.get("song", "")
     if song_name:
+        clean_hook_song = song_name.strip()
         try:
             db_path = Path(__file__).resolve().parent / "analytics.db"
             with sqlite3.connect(db_path) as conn:
@@ -1222,10 +1223,29 @@ def confirm_hook(req: ConfirmHookRequest):
                 """)
                 conn.execute(
                     "INSERT OR REPLACE INTO song_hooks (song_name, hook_start, hook_end, source) VALUES (?, ?, ?, ?)",
-                    (song_name.strip(), h_start, h_end, "master_tab")
+                    (clean_hook_song, h_start, h_end, "master_tab")
                 )
         except Exception as e:
             logger.warning(f"Failed to persist hook into song_hooks: {e}")
+
+        # Also persist to song_hooks.json for human-readable file tracking
+        try:
+            hooks_json_path = Path(__file__).resolve().parent / "song_hooks.json"
+            hooks_data = {}
+            if hooks_json_path.exists():
+                with open(hooks_json_path, "r", encoding="utf-8") as f:
+                    hooks_data = json.load(f)
+            hooks_data[clean_hook_song] = {
+                "hook_start": float(h_start),
+                "hook_end": float(h_end),
+                "duration": round(float(h_end) - float(h_start), 2),
+                "source": "master_tab",
+                "created_at": datetime.now().isoformat()
+            }
+            with open(hooks_json_path, "w", encoding="utf-8") as f:
+                json.dump(hooks_data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to persist hook into song_hooks.json: {e}")
 
     proc = active_workflow_task.get("current_process")
     if proc:
@@ -1415,13 +1435,14 @@ async def add_website_song(request: Request):
             with open(songs_path, "w", encoding="utf-8") as f:
                 json.dump(songs, f, indent=2, ensure_ascii=False)
             
-        threading.Thread(target=run_git_push, daemon=True).start()
+        target_song_title = payload.get("title") if isinstance(payload, dict) else None
+        threading.Thread(target=run_git_push, args=(target_song_title,), daemon=True).start()
         return {"status": "success"}
     except Exception as e:
         log_error("Website Songs", f"Failed to save song: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-def run_git_push():
+def run_git_push(song_title: str = None):
     try:
         frontend_dir = r"C:\Dev\meloscribe-frontend"
         if os.path.exists(frontend_dir):
@@ -1441,6 +1462,19 @@ def run_git_push():
                     "ubuntu@152.70.23.171:/home/ubuntu/meloscribe/tools/meloscribe/backend/songs.json"
                 ], check=True, creationflags=CREATION_FLAGS)
                 print("[VM Sync] Successfully uploaded songs.json to production VM!")
+
+                if song_title:
+                    try:
+                        from shared import load_settings
+                        admin_passcode = load_settings().get("admin_passcode", "579110")
+                        requests.post(
+                            "https://api.meloscribe.dev/api/admin/newsletter/broadcast",
+                            json={"song_name": song_title},
+                            headers={"x-admin-passcode": str(admin_passcode), "Content-Type": "application/json"},
+                            timeout=20.0
+                        )
+                    except Exception as bc_err:
+                        print(f"[Newsletter Auto-broadcast] Warning: {bc_err}")
     except Exception as e:
         print(f"[Git push / VM Sync] Error: {e}")
 
@@ -2354,11 +2388,48 @@ def get_recycling_auto_crop(song: str = "", jitter: bool = True):
 def get_recycling_hook_info(song: str):
     """
     Returns known hook/teaser boundaries for a song from song_hooks or fallback sources,
-    allowing the frontend to clearly display and prevent duplicate hook selection.
+    as well as all previously used recycling clips, allowing the frontend to clearly display
+    what has already been reused and prevent duplicate selections.
     """
-    clean_song = song.strip()
+    clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', song).strip()
     db_path = Path(__file__).resolve().parent / "analytics.db"
-    if db_path.exists():
+    hooks_json_path = Path(__file__).resolve().parent / "song_hooks.json"
+    recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
+    
+    hook_result = {
+        "has_hook": False,
+        "song": clean_song,
+        "hook_start": None,
+        "hook_end": None,
+        "duration": None,
+        "source": None
+    }
+
+    # 1. Check song_hooks.json
+    if hooks_json_path.exists():
+        try:
+            with open(hooks_json_path, "r", encoding="utf-8") as f:
+                hooks_data = json.load(f)
+            # Case-insensitive lookup
+            for k, v in hooks_data.items():
+                if k.lower() == clean_song.lower():
+                    hs = v.get("hook_start")
+                    he = v.get("hook_end")
+                    if hs is not None and he is not None and float(he) > float(hs):
+                        hook_result = {
+                            "has_hook": True,
+                            "song": clean_song,
+                            "hook_start": float(hs),
+                            "hook_end": float(he),
+                            "duration": round(float(he) - float(hs), 2),
+                            "source": v.get("source", "song_hooks_json")
+                        }
+                        break
+        except Exception as e:
+            logger.warning(f"Error reading song_hooks.json: {e}")
+
+    # 2. Check song_hooks in DB if not found
+    if not hook_result["has_hook"] and db_path.exists():
         try:
             with sqlite3.connect(db_path) as conn:
                 conn.execute("""
@@ -2376,53 +2447,136 @@ def get_recycling_hook_info(song: str):
                     (clean_song,)
                 ).fetchone()
                 if row and row[0] is not None and row[1] is not None:
-                    return {
+                    hook_result = {
                         "has_hook": True,
                         "song": clean_song,
                         "hook_start": float(row[0]),
                         "hook_end": float(row[1]),
                         "duration": round(float(row[1]) - float(row[0]), 2),
-                        "source": row[2]
+                        "source": row[2] or "song_hooks_db"
                     }
-                # Check batch_ingest_queue fallback
-                q_row = conn.execute(
-                    "SELECT hook_start, hook_end FROM batch_ingest_queue WHERE LOWER(song_name) = LOWER(?) AND hook_start IS NOT NULL AND hook_end IS NOT NULL",
-                    (clean_song,)
-                ).fetchone()
-                if q_row and float(q_row[1]) > float(q_row[0]):
-                    return {
-                        "has_hook": True,
-                        "song": clean_song,
-                        "hook_start": float(q_row[0]),
-                        "hook_end": float(q_row[1]),
-                        "duration": round(float(q_row[1]) - float(q_row[0]), 2),
-                        "source": "batch_ingest_queue"
+                    # Sync into song_hooks.json
+                    try:
+                        h_dict = {}
+                        if hooks_json_path.exists():
+                            with open(hooks_json_path, "r", encoding="utf-8") as f:
+                                h_dict = json.load(f)
+                        h_dict[clean_song] = {
+                            "hook_start": float(row[0]),
+                            "hook_end": float(row[1]),
+                            "duration": round(float(row[1]) - float(row[0]), 2),
+                            "source": row[2] or "song_hooks_db"
+                        }
+                        with open(hooks_json_path, "w", encoding="utf-8") as f:
+                            json.dump(h_dict, f, indent=2)
+                    except Exception:
+                        pass
+                else:
+                    # Check batch_ingest_queue fallback
+                    q_row = conn.execute(
+                        "SELECT hook_start, hook_end FROM batch_ingest_queue WHERE LOWER(song_name) = LOWER(?) AND hook_start IS NOT NULL AND hook_end IS NOT NULL",
+                        (clean_song,)
+                    ).fetchone()
+                    if q_row and float(q_row[1]) > float(q_row[0]):
+                        hook_result = {
+                            "has_hook": True,
+                            "song": clean_song,
+                            "hook_start": float(q_row[0]),
+                            "hook_end": float(q_row[1]),
+                            "duration": round(float(q_row[1]) - float(q_row[0]), 2),
+                            "source": "batch_ingest_queue"
+                        }
+        except Exception as e:
+            logger.warning(f"Error checking song_hooks in DB: {e}")
+
+    # 3. Check settings.json fallback
+    if not hook_result["has_hook"]:
+        s = load_settings()
+        if s.get("song", "").strip().lower() == clean_song.lower():
+            hs = s.get("hook_start")
+            he = s.get("hook_end")
+            if hs is not None and he is not None and float(he) > float(hs):
+                hook_result = {
+                    "has_hook": True,
+                    "song": clean_song,
+                    "hook_start": float(hs),
+                    "hook_end": float(he),
+                    "duration": round(float(he) - float(hs), 2),
+                    "source": "settings"
+                }
+
+    # 4. Collect previously used recycling clips for this song
+    used_clips_by_name = {}
+    if db_path.exists():
+        try:
+            with sqlite3.connect(db_path) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS recycling_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        song_name TEXT NOT NULL,
+                        start_time REAL NOT NULL,
+                        end_time REAL NOT NULL,
+                        segment_type TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'candidate',
+                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                rows = conn.execute("""
+                    SELECT id, song_name, start_time, end_time, segment_type, status, created_at
+                    FROM recycling_history
+                    WHERE (LOWER(song_name) = LOWER(?) OR LOWER(song_name) LIKE LOWER(?))
+                      AND status IN ('staged', 'published')
+                    ORDER BY id ASC
+                """, (clean_song, f"{clean_song} Recycled%")).fetchall()
+
+                for r in rows:
+                    st, et = round(float(r[2]), 2), round(float(r[3]), 2)
+                    cname = r[1].strip()
+                    used_clips_by_name[cname.lower()] = {
+                        "id": r[0],
+                        "clip_name": cname,
+                        "start_time": st,
+                        "end_time": et,
+                        "duration": round(et - st, 2),
+                        "segment_type": r[4],
+                        "status": r[5],
+                        "created_at": str(r[6]) if r[6] else None,
+                        "source": "database"
                     }
         except Exception as e:
-            logger.warning(f"Error checking song_hooks: {e}")
-            
-    # Check settings.json fallback
-    s = load_settings()
-    if s.get("song", "").strip().lower() == clean_song.lower():
-        hs = s.get("hook_start")
-        he = s.get("hook_end")
-        if hs is not None and he is not None and float(he) > float(hs):
-            return {
-                "has_hook": True,
-                "song": clean_song,
-                "hook_start": float(hs),
-                "hook_end": float(he),
-                "duration": round(float(he) - float(hs), 2),
-                "source": "settings"
-            }
-            
-    return {
-        "has_hook": False,
-        "song": clean_song,
-        "hook_start": None,
-        "hook_end": None,
-        "duration": None
-    }
+            logger.warning(f"Error fetching used recycling clips from DB: {e}")
+
+    # Also check local metadata file in Recycling dir if any
+    meta_path = recycling_dir / f"{clean_song}_Recycled_Metadata.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta_list = json.load(f)
+            for m in meta_list:
+                cname = m.get("title", f"{clean_song} Recycled {m.get('num', '')}").strip()
+                if cname.lower() not in used_clips_by_name:
+                    st = round(float(m.get("start_time", 0)), 2)
+                    et = round(float(m.get("end_time", 0)), 2)
+                    used_clips_by_name[cname.lower()] = {
+                        "id": None,
+                        "clip_name": cname,
+                        "start_time": st,
+                        "end_time": et,
+                        "duration": round(et - st, 2),
+                        "segment_type": m.get("archetype", "climax"),
+                        "status": "rendered",
+                        "created_at": None,
+                        "source": "metadata_file"
+                    }
+        except Exception as e:
+            logger.warning(f"Error reading {meta_path}: {e}")
+
+    used_clips = list(used_clips_by_name.values())
+    used_clips.sort(key=lambda x: x["start_time"])
+
+    hook_result["used_clips"] = used_clips
+    hook_result["used_count"] = len(used_clips)
+    return hook_result
 
 class ContentBrainRequest(BaseModel):
     format_type: str = "normal"
@@ -2671,29 +2825,6 @@ def render_recycling_video(req: RecyclingRenderRequest):
     except Exception:
         pass
 
-    # Record in recycling_history
-    db_path = Path(__file__).resolve().parent / "analytics.db"
-    try:
-        with sqlite3.connect(db_path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS recycling_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    song_name TEXT NOT NULL,
-                    start_time REAL NOT NULL,
-                    end_time REAL NOT NULL,
-                    segment_type TEXT NOT NULL,
-                    status TEXT NOT NULL DEFAULT 'candidate',
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                INSERT INTO recycling_history (song_name, start_time, end_time, segment_type, status)
-                VALUES (?, ?, ?, ?, 'staged')
-            """, (req.song, req.start_time, req.end_time, req.segment_type))
-            conn.commit()
-    except Exception as e:
-        print(f"[Recycling History DB Error] {e}")
-
     # Determine recycling filename / title:
     clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', req.song).strip()
     if getattr(req, "version_num", None):
@@ -2711,6 +2842,29 @@ def render_recycling_video(req: RecyclingRenderRequest):
                 max_num = max(max_num, 1)
         next_num = max_num + 1
         video_title = f"{clean_song} Recycled {next_num}"
+
+    # Record in recycling_history with exact video title so it can be tracked
+    db_path = Path(__file__).resolve().parent / "analytics.db"
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recycling_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    song_name TEXT NOT NULL,
+                    start_time REAL NOT NULL,
+                    end_time REAL NOT NULL,
+                    segment_type TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'candidate',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO recycling_history (song_name, start_time, end_time, segment_type, status)
+                VALUES (?, ?, ?, ?, 'staged')
+            """, (video_title, req.start_time, req.end_time, req.segment_type))
+            conn.commit()
+    except Exception as e:
+        print(f"[Recycling History DB Error] {e}")
 
     rec_theme = req.theme if hasattr(req, "theme") and req.theme else None
     if not rec_theme:
@@ -2754,8 +2908,11 @@ def render_recycling_video(req: RecyclingRenderRequest):
 @router.post("/api/recycling/stage")
 def stage_recycling_video(req: RecyclingStageRequest):
     """Stages the rendered recycled video to the Oracle Server VM."""
-    if not req.platforms:
-        raise HTTPException(status_code=400, detail="No target platforms selected.")
+    # Strict policy: Pinterest is NEVER used for content recycling
+    filtered_platforms = [p for p in req.platforms if p.lower() != 'pinterest']
+    if not filtered_platforms:
+        raise HTTPException(status_code=400, detail="No eligible platforms selected (Pinterest is strictly excluded from recycling).")
+    req.platforms = filtered_platforms
         
     recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
     rec_vid = recycling_dir / f"{req.song}.mp4"
@@ -2765,6 +2922,7 @@ def stage_recycling_video(req: RecyclingStageRequest):
         raise HTTPException(status_code=404, detail=f"Recycled video for '{req.song}' not found in {recycling_dir}. Please render it first.")
 
     # Record recycling event in database
+    clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', req.song).strip()
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         with sqlite3.connect(db_path) as conn:
@@ -2783,8 +2941,11 @@ def stage_recycling_video(req: RecyclingStageRequest):
                 "INSERT INTO recycling_events (song_name, platforms) VALUES (?, ?)",
                 (req.song, ",".join(req.platforms))
             )
-            # Update recycling_history to published
-            cur.execute("UPDATE recycling_history SET status='published' WHERE song_name=? AND status='staged'", (req.song,))
+            # Update recycling_history to published for this song
+            cur.execute(
+                "UPDATE recycling_history SET status='published' WHERE (LOWER(song_name)=LOWER(?) OR LOWER(song_name) LIKE LOWER(?)) AND status='staged'",
+                (clean_song, f"{clean_song} Recycled%")
+            )
             conn.commit()
     except Exception as e:
         print(f"[Recycling] DB record error: {e}")

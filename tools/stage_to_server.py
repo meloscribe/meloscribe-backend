@@ -26,16 +26,35 @@ SERVER_USER = "ubuntu"
 SERVER_DIR = "/home/ubuntu/meloscribe"
 
 def run_ssh_command(cmd_str):
-    escaped_cmd = cmd_str.replace('"', '\\"')
-    ssh_cmd_str = f'ssh -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o IdentitiesOnly=yes {SERVER_USER}@{SERVER_IP} "{escaped_cmd}"'
-    res = subprocess.run(ssh_cmd_str, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    ssh_cmd = [
+        "ssh",
+        "-i", SSH_KEY,
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=10",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "IdentitiesOnly=yes",
+        f"{SERVER_USER}@{SERVER_IP}",
+        cmd_str
+    ]
+    res = subprocess.run(ssh_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         print(f"SSH Command failed: {cmd_str}\nError: {res.stderr}")
     return res
 
 def run_scp_command(local_path, remote_path):
-    scp_cmd_str = f'scp -i "{SSH_KEY}" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -o IdentitiesOnly=yes "{local_path}" {SERVER_USER}@{SERVER_IP}:"{remote_path}"'
-    res = subprocess.run(scp_cmd_str, shell=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    scp_cmd = [
+        "scp",
+        "-i", SSH_KEY,
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "ConnectTimeout=10",
+        "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=3",
+        "-o", "IdentitiesOnly=yes",
+        str(local_path),
+        f"{SERVER_USER}@{SERVER_IP}:{remote_path}"
+    ]
+    res = subprocess.run(scp_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if res.returncode != 0:
         print(f"SCP Upload failed: {local_path} -> {remote_path}\nError: {res.stderr}")
     return res
@@ -108,6 +127,10 @@ def main():
                 print(f"[StageToServer] Toggle '{toggle_key}' is OFF in live settings — skipping platform: {p}")
         platforms = active_platforms
     else:
+        # Strict exclusion: Pinterest is NEVER used for content recycling
+        if "pinterest" in platforms:
+            print("[StageToServer] Note: Pinterest is strictly excluded from recycling. Removing pinterest.")
+            platforms = [p for p in platforms if p != "pinterest"]
         print(f"[StageToServer] Content Recycling Mode: Using explicitly selected platforms ({', '.join(platforms)})")
             
     if not platforms:
@@ -279,12 +302,12 @@ def main():
 
     if is_recycling:
         song_dir = f"{SERVER_DIR}/staging/{staging_song}"
-        mkdir_cmd = f"mkdir -p \"{song_dir}/TikToks\" \"{song_dir}/Covers\""
+        mkdir_cmd = f"mkdir -p '{song_dir}/TikToks' '{song_dir}/Covers'"
     else:
         song_dir = f"{SERVER_DIR}/staging/{song}"
-        tiktoks_path = f'"{song_dir}/TikToks"'
-        covers_path = f'"{song_dir}/Covers"'
-        packages_path = f'"{song_dir}/packages"'
+        tiktoks_path = f"'{song_dir}/TikToks'"
+        covers_path = f"'{song_dir}/Covers'"
+        packages_path = f"'{song_dir}/packages'"
         mkdir_cmd = f"mkdir -p {tiktoks_path} {covers_path} {packages_path}"
     run_ssh_command(mkdir_cmd)
     
@@ -353,7 +376,7 @@ def main():
     if total_tasks > 0:
         remote_sizes = {}
         target_song_dir = staging_song if is_recycling else song
-        check_cmd = f"find {SERVER_DIR}/staging/{target_song_dir}/TikToks {SERVER_DIR}/staging/{target_song_dir}/Covers -type f -printf '%s %p\\n' 2>/dev/null"
+        check_cmd = f"find '{SERVER_DIR}/staging/{target_song_dir}/TikToks' '{SERVER_DIR}/staging/{target_song_dir}/Covers' -type f -printf '%s %p\\n' 2>/dev/null"
         stat_res = run_ssh_command(check_cmd)
         if stat_res.returncode == 0 and stat_res.stdout:
             for line in stat_res.stdout.strip().splitlines():

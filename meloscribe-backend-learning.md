@@ -2,6 +2,13 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-12: Content Recycling Pipeline Alignment, Pinterest Exclusion & Persistent Hook/Used Clips Tracking
+- **Pinterest Strict Exclusion**:
+  - Filtered out Pinterest from `routes_workflow.py` (`stage_recycling_video`), `stage_to_server.py` (`is_recycling` mode), and `upload_bot.py` (`run_pinterest`), ensuring recycled video cuts are strictly prohibited from Pinterest uploads to protect catalog pin trust and pin domain health.
+- **Persistent Hook & Used Clips Architecture**:
+  - Added `song_hooks.json` in `tools/meloscribe/backend/` and wired bi-directional synchronization with `song_hooks` in `analytics.db`.
+  - Upgraded `/api/recycling/hook-info` to query and return both catalog teaser boundaries and all previously used recycling clips (`used_clips`) for the requested song with wildcard normalization.
+
 ### 2026-11-08: Gmail "Promotions" (Werbung) Tab Avoidance & Newsletter Deliverability Strategy (`routes_public.py`)
 - **Root Cause Analysis for Emails Diverted to Gmail "Promotions" Tab**:
   1. **One-Click Unsubscribe Protocol Header:** `send_newsletter_email()` sent `List-Unsubscribe` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click` in the SMTP payload. Gmail uses this RFC 8058 header as a definitive classifier for bulk marketing mail. Google does NOT require this header for small-volume senders (<5,000/day).

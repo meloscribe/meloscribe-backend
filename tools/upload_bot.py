@@ -1316,6 +1316,10 @@ def refresh_pinterest_token():
         return False
 
 def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None):
+    if "recycled" in song_name.lower():
+        print(f"[Pinterest Bot] Song '{song_name}' is a recycled clip. Pinterest is strictly excluded from recycling. Skipping.")
+        return True
+
     tools_dir = os.path.dirname(os.path.abspath(__file__))
     sys.path.insert(0, tools_dir)
     sys.path.insert(0, os.path.join(tools_dir, "meloscribe", "backend"))
@@ -2394,10 +2398,23 @@ if __name__ == "__main__":
         else:
             yt_title = f"{base_song} - {args.author}{' Easy' if is_easy else ''}{' (Best Part)' if is_teaser else ''} | Piano Cover"
 
+        # Build direct sheet music link & comment text
+        slug = re.sub(r'[^a-z0-9]+', '-', base_song.lower()).strip('-')
+        version_suffix = "&version=easy" if is_easy else ""
+        song_link = f"https://meloscribesheets.com/sheets?song={slug}{version_suffix}"
+        default_yt_comment = (
+            "Hope you enjoyed playing along or listening! 🎹✨\n\n"
+            f"🎼 Sheet Music & MIDI for this piece:\n👉 {song_link}\n\n"
+            "Have a song you'd love to learn? You can suggest your favorite songs for free on the website (or just leave a comment below) — I read every request!\n\n"
+            "Happy practicing! 🎶"
+        )
+        yt_comment_tpl = settings.get("comment_template_youtube")
+        yt_comment = yt_comment_tpl.replace("{song_link}", song_link) if yt_comment_tpl else default_yt_comment
+
         tags = ["piano", "tutorial", "synthesia", "cover", base_song, args.author, "music", "piano cover"]
         yt_url = post_video(video_path, yt_title, desc, tags,
                    publish_at_dt=dt_obj, privacy="public", format=format_mode,
-                   thumbnail_path=thumbnail_path)
+                   thumbnail_path=thumbnail_path, comment_text=yt_comment)
         if not yt_url:
             sys.exit(1)
     elif args.mode == "instagram":
