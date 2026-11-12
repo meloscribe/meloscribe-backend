@@ -1354,13 +1354,13 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                             from web_push import send_web_push
                             curr_up = (currency or "EUR").upper()
                             if curr_up == "USD":
-                                fmt_amt = f"${amount_total:.2f}"
+                                fmt_amt = f"+${amount_total:.2f}"
                             elif curr_up == "GBP":
-                                fmt_amt = f"£{amount_total:.2f}"
+                                fmt_amt = f"+£{amount_total:.2f}"
                             elif curr_up == "EUR":
-                                fmt_amt = f"{amount_total:.2f} €"
+                                fmt_amt = f"+{amount_total:.2f} €"
                             else:
-                                fmt_amt = f"{amount_total:.2f} {curr_up}"
+                                fmt_amt = f"+{amount_total:.2f} {curr_up}"
                             background_tasks.add_task(
                                 send_web_push,
                                 notif_type="sale",
@@ -2210,8 +2210,8 @@ def notify_confirm(token: str, background_tasks: BackgroundTasks):
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="subscriber",
-                    title="New Subscriber",
-                    body=song_name or "Free Sheet Unlocked",
+                    title=song_name or "Free Sheet Unlocked",
+                    body="New Subscriber",
                     song_name=song_name or "",
                     url="/?tab=sales",
                     meta={"email": email, "locale": locale}
@@ -2581,14 +2581,14 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                 c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, existing[0]))
                 conn.commit()
                 conn.close()
-                if new_votes in (5, 10, 25):
+                if new_votes in (10, 25, 50, 100):
                     try:
                         from web_push import send_web_push
                         background_tasks.add_task(
                             send_web_push,
                             notif_type="suggestion",
-                            title=f"Wishlist • {new_votes} Votes",
-                            body=f"{existing[1]} • {existing[2]}" if existing[2] else existing[1],
+                            title=existing[1],
+                            body=f"{existing[2]} • {new_votes} Votes" if existing[2] else f"{new_votes} Votes",
                             song_name=existing[1],
                             url="/?tab=growth",
                             actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
@@ -2607,8 +2607,8 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="suggestion",
-                    title="Wishlist • New Request",
-                    body=f"{sug.title.strip()} • {sug.artist.strip()}" if sug.artist.strip() else sug.title.strip(),
+                    title=sug.title.strip(),
+                    body=sug.artist.strip() if sug.artist.strip() else "New Request",
                     song_name=sug.title.strip(),
                     url="/?tab=growth",
                     actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
@@ -2646,14 +2646,14 @@ def upvote_suggestion(sug_id: str, request: Request, background_tasks: Backgroun
             c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, sug_id))
             conn.commit()
             conn.close()
-            if new_votes in (5, 10, 25):
+            if new_votes in (10, 25, 50, 100):
                 try:
                     from web_push import send_web_push
                     background_tasks.add_task(
                         send_web_push,
                         notif_type="suggestion",
-                        title=f"Wishlist • {new_votes} Votes",
-                        body=f"{s_title} • {s_artist}" if s_artist else s_title,
+                        title=s_title,
+                        body=f"{s_artist} • {new_votes} Votes" if s_artist else f"{new_votes} Votes",
                         song_name=s_title,
                         url="/?tab=growth",
                         actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],

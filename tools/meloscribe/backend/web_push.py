@@ -723,23 +723,26 @@ def send_web_push(
             formatted_amount = f"{numeric_amt:.2f} €"
         else:
             formatted_amount = f"{numeric_amt:.2f} {curr_up}"
-        push_title = formatted_amount
+        push_title = f"+{formatted_amount}"
         push_body = clean_song or "Sheet Order"
         push_url = "/?tab=sales"
-        vibrate = [40]
+        vibrate = [90, 60, 160]
         effective_actions = actions or []
     elif effective_type == "subscriber":
-        push_title = "New Subscriber"
-        push_body = clean_song or "Free Sheet Unlocked"
+        push_title = clean_song or "Free Sheet Unlocked"
+        push_body = "New Subscriber"
         push_url = "/?tab=sales"
-        vibrate = []
+        vibrate = [35]
         effective_actions = actions or []
     else:
         votes_n = int(meta_payload.get("votes") or 1)
         artist_str = str(meta_payload.get("artist") or "").strip()
         req_song = clean_song or title
-        push_title = f"Wishlist • {votes_n} Votes" if votes_n > 1 else "Wishlist • New Request"
-        push_body = f"{req_song} • {artist_str}" if artist_str else req_song
+        push_title = req_song or "Song Request"
+        if votes_n > 1:
+            push_body = f"{artist_str} • {votes_n} Votes" if artist_str else f"{votes_n} Votes"
+        else:
+            push_body = artist_str if artist_str else "New Request"
         push_url = "/?tab=growth"
         vibrate = []
         effective_actions = actions if actions is not None else [{"action": "add_todo", "title": "+ Add to To-Do"}]
@@ -1097,13 +1100,13 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
 
         curr_up = curr.upper()
         if curr_up == "USD":
-            amt_label = f"${amt:.2f}"
+            amt_label = f"+${amt:.2f}"
         elif curr_up == "GBP":
-            amt_label = f"£{amt:.2f}"
+            amt_label = f"+£{amt:.2f}"
         elif curr_up == "EUR":
-            amt_label = f"{amt:.2f} €"
+            amt_label = f"+{amt:.2f} €"
         else:
-            amt_label = f"{amt:.2f} {curr_up}"
+            amt_label = f"+{amt:.2f} {curr_up}"
         title = amt_label
         body = song or "Sheet Order"
         amount_str = f"{amt:.2f}"
@@ -1117,8 +1120,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row and "locale" in row.keys() else "en") or "en"
         song = (row["song_name"] if row and "song_name" in row.keys() and row["song_name"] else "River Flows in You")
 
-        title = "New Subscriber"
-        body = song or "Free Sheet Unlocked"
+        title = song or "Free Sheet Unlocked"
+        body = "New Subscriber"
         amount_str = ""
         curr = "EUR"
         meta = {"email": email, "locale": locale}
@@ -1132,8 +1135,11 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         artist = (row["artist"] if row else "Hans Zimmer") or "Hans Zimmer"
         votes = (row["votes"] if row else 12) or 12
 
-        title = f"Wishlist • {votes} Votes" if votes > 1 else "Wishlist • New Request"
-        body = f"{song} • {artist}" if artist else song
+        title = song
+        if votes > 1:
+            body = f"{artist} • {votes} Votes" if artist else f"{votes} Votes"
+        else:
+            body = artist if artist else "New Request"
         amount_str = ""
         curr = "EUR"
         meta = {"artist": artist, "votes": votes, "title": song}
