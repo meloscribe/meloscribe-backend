@@ -306,6 +306,11 @@ def render_monochrome_badge() -> bytes:
     badge.save(buf, format="PNG")
     return buf.getvalue()
 
+def _draw_centered_text(draw: ImageDraw.ImageDraw, cx: int, y: int, text: str, font: ImageFont.FreeTypeFont, fill: tuple) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    tw = bbox[2] - bbox[0]
+    draw.text((cx - tw // 2, y), text, font=font, fill=fill)
+
 def render_glass_card(
     notif_id: int,
     notif_type: str,
@@ -316,19 +321,201 @@ def render_glass_card(
     meta: Optional[Dict[str, Any]] = None
 ) -> bytes:
     """
-    Renders a high-res 1200x600 px (2:1) dark glassmorphic banner for Android lockscreen SystemUI.
-    Blurs song cover background by 30px, darkens by 65%, and overlays a frosted glass card with glowing rim.
+    Renders a distinct 1200x600 px (2:1) notification banner for Android SystemUI:
+      - Paid Sale: Stripe-style ultra-minimalist dark ledger card with emerald stripe & giant hero amount.
+      - Subscriber / Free Claim: Ice-Cyan asymmetric lead unlock card with circular M-monogram ring.
+      - Suggestion: Neon Pink/Violet vote-counter ticket card.
     """
     meta = meta or {}
     W, H = 1200, 600
 
-    # 1. Base Canvas / Background Cover Search
-    bg_img = None
+    # Determine effective visual identity: a 0.00 amount order renders as subscriber/free unlock, never as a paid Stripe sale
+    numeric_amt = 0.0
+    if amount:
+        try:
+            numeric_amt = float(str(amount).replace(",", ".").strip())
+        except Exception:
+            numeric_amt = 0.0
+
+    visual_type = notif_type
+    if notif_type == "sale" and numeric_amt <= 0.0:
+        visual_type = "subscriber"
+
     cov_bytes = load_cover_image_bytes(song_name)
     raw_cov_img = None
     if cov_bytes:
         try:
             raw_cov_img = Image.open(io.BytesIO(cov_bytes)).convert("RGB")
+        except Exception as e:
+            print(f"[Pillow Card] Error processing cover: {e}")
+
+    # ------------------------------------------------------------------
+    # VARIANT 1: PAID SALE — Minimalist Stripe-Style Dopamine Card
+    # ------------------------------------------------------------------
+    if visual_type == "sale":
+        bg_img = Image.new("RGBA", (W, H), (6, 9, 17, 255))
+        card_x0, card_y0, card_x1, card_y1 = 68, 48, 1132, 552
+
+        # Soft emerald radial corner glow
+        bloom = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        bdraw = ImageDraw.Draw(bloom)
+        bdraw.ellipse([card_x0 - 80, card_y0 - 40, card_x0 + 360, card_y1 + 40], fill=(16, 185, 129, 32))
+        bloom = bloom.filter(ImageFilter.GaussianBlur(radius=60))
+        bg_img = Image.alpha_composite(bg_img, bloom)
+
+        card_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        cdraw = ImageDraw.Draw(card_layer)
+        cdraw.rounded_rectangle(
+            [card_x0, card_y0, card_x1, card_y1],
+            radius=28,
+            fill=(11, 16, 28, 245),
+            outline=(16, 185, 129, 135),
+            width=2
+        )
+        # Clean vertical Emerald Payout bar on the left inside the card
+        cdraw.rounded_rectangle(
+            [card_x0 + 28, card_y0 + 36, card_x0 + 36, card_y1 - 36],
+            radius=4,
+            fill=(16, 185, 129, 255)
+        )
+        bg_img = Image.alpha_composite(bg_img, card_layer)
+        draw = ImageDraw.Draw(bg_img)
+
+        font_micro = get_system_font(21, bold=True)
+        font_hero = get_system_font(94, bold=True)
+        font_song = get_system_font(34, bold=True)
+        font_meta = get_system_font(23, bold=False)
+
+        tx = card_x0 + 68
+        # Status dot + STRIPE micro header
+        draw.ellipse([tx, card_y0 + 62, tx + 14, card_y0 + 76], fill=(16, 185, 129, 255))
+        draw.text((tx + 24, card_y0 + 56), "STRIPE  •  PAID ORDER", font=font_micro, fill=(52, 211, 153, 255))
+
+        # Huge clean hero payout number
+        curr = str(meta.get("currency", "EUR") or "EUR").upper()
+        symbol = "€" if curr == "EUR" else ("$" if curr == "USD" else f" {curr}")
+        amt_text = f"+{numeric_amt:.2f}{symbol}" if curr in ("EUR", "USD") else f"+{numeric_amt:.2f} {curr}"
+        draw.text((tx, card_y0 + 126), amt_text, font=font_hero, fill=(255, 255, 255, 255))
+
+        # Song title (minimalist)
+        song_disp = clean_cover_song_name(song_name) if song_name else title
+        if len(song_disp) > 30:
+            song_disp = song_disp[:28] + "..."
+        draw.text((tx, card_y0 + 266), song_disp, font=font_song, fill=(226, 232, 240, 255))
+
+        # Quiet footer: email + locale
+        meta_parts = []
+        if meta.get("email"):
+            meta_parts.append(str(meta["email"]))
+        if meta.get("locale"):
+            meta_parts.append(str(meta["locale"]).upper())
+        meta_line = "  •  ".join(meta_parts) if meta_parts else subtitle
+        if len(meta_line) > 46:
+            meta_line = meta_line[:43] + "..."
+        draw.text((tx, card_y1 - 86), meta_line, font=font_meta, fill=(100, 116, 139, 255))
+
+        # Crisp square cover art on the right with generous breathing room
+        if raw_cov_img:
+            try:
+                thumb_w = 240
+                cw, ch = raw_cov_img.size
+                side = min(cw, ch)
+                sq = raw_cov_img.crop(((cw - side) // 2, (ch - side) // 2, (cw + side) // 2, (ch + side) // 2))
+                thumb = sq.convert("RGBA").resize((thumb_w, thumb_w), Image.Resampling.LANCZOS)
+                mask = Image.new("L", (thumb_w, thumb_w), 0)
+                ImageDraw.Draw(mask).rounded_rectangle([0, 0, thumb_w, thumb_w], radius=24, fill=255)
+                thumb_x = card_x1 - thumb_w - 52
+                thumb_y = (H - thumb_w) // 2
+                bg_img.paste(thumb, (thumb_x, thumb_y), mask)
+                draw.rounded_rectangle(
+                    [thumb_x, thumb_y, thumb_x + thumb_w, thumb_y + thumb_w],
+                    radius=24,
+                    outline=(255, 255, 255, 55),
+                    width=1
+                )
+            except Exception:
+                pass
+
+        out_buf = io.BytesIO()
+        bg_img.save(out_buf, format="PNG")
+        return out_buf.getvalue()
+
+    # ------------------------------------------------------------------
+    # VARIANT 2: SUBSCRIBER / FREE UNLOCK — Ice-Cyan Circular Identity Card
+    # ------------------------------------------------------------------
+    if visual_type == "subscriber":
+        bg_img = Image.new("RGBA", (W, H), (4, 12, 23, 255))
+        draw_bg = ImageDraw.Draw(bg_img)
+        for y in range(H):
+            t = y / H
+            draw_bg.line([(0, y), (W, y)], fill=(int(4 + t * 5), int(12 + t * 18), int(23 + t * 28), 255))
+
+        card_x0, card_y0, card_x1, card_y1 = 76, 68, 1124, 532
+        bloom = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(bloom).ellipse([120, 120, 440, 480], fill=(0, 245, 255, 45))
+        bloom = bloom.filter(ImageFilter.GaussianBlur(radius=55))
+        bg_img = Image.alpha_composite(bg_img, bloom)
+
+        card_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        cdraw = ImageDraw.Draw(card_layer)
+        cdraw.rounded_rectangle(
+            [card_x0, card_y0, card_x1, card_y1],
+            radius=32,
+            fill=(8, 22, 38, 235),
+            outline=(0, 245, 255, 165),
+            width=2
+        )
+        # Top Cyan Specular Line
+        cdraw.line([card_x0 + 48, card_y0 + 1, card_x1 - 48, card_y0 + 1], fill=(0, 245, 255, 230), width=3)
+        bg_img = Image.alpha_composite(bg_img, card_layer)
+        draw = ImageDraw.Draw(bg_img)
+
+        # Circular Monogram Avatar on the LEFT (completely distinct silhouette from Sale)
+        cx, cy, cr = card_x0 + 132, H // 2, 74
+        draw.ellipse([cx - cr, cy - cr, cx + cr, cy + cr], fill=(0, 245, 255, 24), outline=(0, 245, 255, 210), width=3)
+        try:
+            badge_img = Image.open(io.BytesIO(render_monochrome_badge())).convert("RGBA").resize((74, 74), Image.Resampling.LANCZOS)
+            bg_img.paste(badge_img, (cx - 37, cy - 37), badge_img)
+        except Exception:
+            _draw_centered_text(draw, cx, cy - 24, "M", get_system_font(44, bold=True), (255, 255, 255, 255))
+
+        tx = card_x0 + 250
+        font_pill = get_system_font(20, bold=True)
+        font_email = get_system_font(40, bold=True)
+        font_song = get_system_font(28, bold=False)
+        font_loc = get_system_font(21, bold=True)
+
+        pill_txt = "FREE SHEET UNLOCK  •  NEW LEAD"
+        bbox = draw.textbbox((0, 0), pill_txt, font=font_pill)
+        pw = (bbox[2] - bbox[0]) + 34
+        draw.rounded_rectangle([tx, card_y0 + 78, tx + pw, card_y0 + 116], radius=19, fill=(0, 245, 255, 36), outline=(56, 189, 248, 200), width=1)
+        draw.text((tx + 17, card_y0 + 86), pill_txt, font=font_pill, fill=(125, 211, 252, 255))
+
+        email_disp = str(meta.get("email") or title or "New Subscriber")
+        if len(email_disp) > 29:
+            email_disp = email_disp[:26] + "..."
+        draw.text((tx, card_y0 + 162), email_disp, font=font_email, fill=(255, 255, 255, 255))
+
+        unlocked_song = clean_cover_song_name(song_name) if song_name else subtitle
+        sub_line = f"Unlocked: {unlocked_song}" if unlocked_song else "Double Opt-In Confirmed"
+        if len(sub_line) > 40:
+            sub_line = sub_line[:37] + "..."
+        draw.text((tx, card_y0 + 234), sub_line, font=font_song, fill=(186, 230, 253, 255))
+
+        loc_str = str(meta.get("locale") or "en").upper()
+        draw.rounded_rectangle([tx, card_y1 - 102, tx + 132, card_y1 - 62], radius=12, fill=(255, 255, 255, 18), outline=(56, 189, 248, 120), width=1)
+        draw.text((tx + 18, card_y1 - 94), f"LANG: {loc_str}", font=font_loc, fill=(148, 163, 184, 255))
+
+        out_buf = io.BytesIO()
+        bg_img.save(out_buf, format="PNG")
+        return out_buf.getvalue()
+
+    # ------------------------------------------------------------------
+    # VARIANT 3: COMMUNITY SUGGESTION — Neon Pink / Violet Vote Ticket
+    # ------------------------------------------------------------------
+    bg_img = None
+    if raw_cov_img:
+        try:
             cov_w, cov_h = raw_cov_img.size
             target_ratio = W / H
             current_ratio = cov_w / cov_h
@@ -341,149 +528,61 @@ def render_glass_card(
                 offset = (cov_h - new_h) // 2
                 cropped = raw_cov_img.crop((0, offset, cov_w, offset + new_h))
             resized = cropped.resize((W, H), Image.Resampling.LANCZOS)
-            blurred = resized.filter(ImageFilter.GaussianBlur(radius=30))
-            darkened = blurred.point(lambda p: int(p * 0.35))
-            bg_img = darkened.convert("RGBA")
-        except Exception as e:
-            print(f"[Pillow Card] Error processing cover: {e}")
+            bg_img = resized.filter(ImageFilter.GaussianBlur(radius=32)).point(lambda p: int(p * 0.28)).convert("RGBA")
+        except Exception:
+            bg_img = None
 
     if not bg_img:
-        bg_img = Image.new("RGBA", (W, H), (6, 8, 15, 255))
-        draw_bg = ImageDraw.Draw(bg_img)
-        for y in range(H):
-            ratio = y / H
-            r = int(6 + ratio * 9)
-            g = int(8 + ratio * 15)
-            b = int(15 + ratio * 27)
-            draw_bg.line([(0, y), (W, y)], fill=(r, g, b, 255))
+        bg_img = Image.new("RGBA", (W, H), (11, 5, 20, 255))
 
-    # 2. Card dimensions & Colors
-    card_x0, card_y0 = 70, 50
-    card_x1, card_y1 = 1130, 550
-    radius = 32
+    bloom = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(bloom)
+    bdraw.ellipse([80, 60, 480, 500], fill=(255, 45, 146, 52))
+    bdraw.ellipse([740, 120, 1140, 540], fill=(168, 85, 247, 45))
+    bloom = bloom.filter(ImageFilter.GaussianBlur(radius=60))
+    bg_img = Image.alpha_composite(bg_img, bloom)
 
-    if notif_type == "sale":
-        accent_rgb = (16, 185, 129)       # Emerald #10b981
-        secondary_rgb = (0, 245, 255)     # Cyan #00f5ff
-        currency = meta.get("currency", "EUR")
-        pill_label = f"+ {amount} {currency}" if amount else "NEW ORDER"
-    elif notif_type == "subscriber":
-        accent_rgb = (0, 245, 255)        # Electric Cyan #00f5ff
-        secondary_rgb = (168, 85, 247)    # Purple
-        pill_label = "NEW SUBSCRIBER"
-    else:
-        accent_rgb = (255, 45, 146)       # Neon Pink #ff2d92
-        secondary_rgb = (168, 85, 247)    # Purple #a855f7
-        votes_count = meta.get("votes", 1)
-        pill_label = f"SONG REQUEST • {votes_count} VOTES"
-
-    # 3. Ambient Corner Bloom inside Card
-    bloom_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    bloom_draw = ImageDraw.Draw(bloom_layer)
-    bloom_draw.ellipse([card_x0 - 60, card_y0 - 60, card_x0 + 340, card_y0 + 340], fill=(*accent_rgb, 42))
-    bloom_draw.ellipse([card_x1 - 320, card_y1 - 320, card_x1 + 60, card_y1 + 60], fill=(*secondary_rgb, 30))
-    bloom_layer = bloom_layer.filter(ImageFilter.GaussianBlur(radius=50))
-    bg_img = Image.alpha_composite(bg_img, bloom_layer)
-
-    # 4. Frosted Glass Overlay Card
-    glass_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    glass_draw = ImageDraw.Draw(glass_layer)
-    glass_draw.rounded_rectangle(
+    card_x0, card_y0, card_x1, card_y1 = 68, 52, 1132, 548
+    card_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    cdraw = ImageDraw.Draw(card_layer)
+    cdraw.rounded_rectangle(
         [card_x0, card_y0, card_x1, card_y1],
-        radius=radius,
-        fill=(12, 16, 30, 210),
-        outline=(*accent_rgb, 190),
+        radius=30,
+        fill=(18, 10, 30, 224),
+        outline=(255, 45, 146, 200),
         width=2
     )
-    # Specular Top Highlight
-    glass_draw.line(
-        [card_x0 + radius + 10, card_y0 + 1, card_x1 - radius - 10, card_y0 + 1],
-        fill=(255, 255, 255, 140),
-        width=1
-    )
-    bg_img = Image.alpha_composite(bg_img, glass_layer)
-
-    # 5. Content & Typography
+    bg_img = Image.alpha_composite(bg_img, card_layer)
     draw = ImageDraw.Draw(bg_img)
-    font_pill = get_system_font(25, bold=True)
+
+    # Prominent Neon Pink Vote Counter Box on the LEFT
+    votes_val = int(meta.get("votes") or 1)
+    vx0, vy0, vx1, vy1 = card_x0 + 48, card_y0 + 115, card_x0 + 236, card_y0 + 345
+    draw.rounded_rectangle([vx0, vy0, vx1, vy1], radius=26, fill=(255, 45, 146, 36), outline=(255, 45, 146, 235), width=2)
+    vcx = (vx0 + vx1) // 2
+    _draw_centered_text(draw, vcx, vy0 + 42, str(votes_val), get_system_font(78, bold=True), (255, 255, 255, 255))
+    _draw_centered_text(draw, vcx, vy1 - 54, "VOTE" if votes_val == 1 else "VOTES", get_system_font(21, bold=True), (244, 114, 182, 255))
+
+    tx = vx1 + 46
+    font_pill = get_system_font(20, bold=True)
     font_title = get_system_font(44, bold=True)
-    font_sub = get_system_font(26, bold=False)
-    font_brand = get_system_font(22, bold=True)
+    font_artist = get_system_font(28, bold=False)
+    font_hint = get_system_font(21, bold=False)
 
-    # A) Glowing Pill Badge
-    pill_x0 = card_x0 + 50
-    pill_y0 = card_y0 + 45
-    bbox = draw.textbbox((0, 0), pill_label, font=font_pill)
-    pw = (bbox[2] - bbox[0]) + 42
-    ph = 44
-    draw.rounded_rectangle(
-        [pill_x0, pill_y0, pill_x0 + pw, pill_y0 + ph],
-        radius=22,
-        fill=(*accent_rgb, 55),
-        outline=(*accent_rgb, 230),
-        width=2
-    )
-    draw.text((pill_x0 + 21, pill_y0 + 8), pill_label, font=font_pill, fill=(255, 255, 255, 255))
+    draw.rounded_rectangle([tx, vy0 + 4, tx + 292, vy0 + 42], radius=19, fill=(168, 85, 247, 45), outline=(192, 132, 252, 200), width=1)
+    draw.text((tx + 18, vy0 + 12), "COMMUNITY REQUEST", font=font_pill, fill=(249, 168, 212, 255))
 
-    # B) Song Title / Primary Heading
-    content_x = card_x0 + 50
-    title_y = pill_y0 + ph + 34
-    clean_display_title = clean_cover_song_name(song_name) if song_name else title
-    if len(clean_display_title) > 34:
-        clean_display_title = clean_display_title[:32] + "..."
-    draw.text((content_x, title_y), clean_display_title, font=font_title, fill=(248, 250, 252, 255))
+    req_title = clean_cover_song_name(song_name) if song_name else title
+    if len(req_title) > 28:
+        req_title = req_title[:25] + "..."
+    draw.text((tx, vy0 + 74), req_title, font=font_title, fill=(255, 255, 255, 255))
 
-    # C) Subtitle / Event Text
-    sub_y = title_y + 64
-    display_sub = subtitle if len(subtitle) <= 52 else subtitle[:49] + "..."
-    draw.text((content_x, sub_y), display_sub, font=font_sub, fill=(148, 163, 184, 255))
+    artist_str = f"by {meta['artist']}" if meta.get("artist") else subtitle
+    if len(artist_str) > 38:
+        artist_str = artist_str[:35] + "..."
+    draw.text((tx, vy0 + 140), artist_str, font=font_artist, fill=(203, 213, 225, 255))
 
-    # D) Metadata Row (Country / Payment / Email)
-    meta_y = sub_y + 44
-    meta_parts = []
-    if meta.get("email"):
-        meta_parts.append(meta["email"])
-    if meta.get("locale"):
-        meta_parts.append(f"[{meta['locale'].upper()}]")
-    if meta.get("payment_method"):
-        meta_parts.append(meta["payment_method"])
-    elif meta.get("buyer_name"):
-        meta_parts.append(meta["buyer_name"])
-    if meta_parts:
-        meta_str = " • ".join(meta_parts)
-        if len(meta_str) > 58:
-            meta_str = meta_str[:55] + "..."
-        draw.text((content_x, meta_y), meta_str, font=font_sub, fill=(100, 116, 139, 255))
-
-    # E) Bottom-Right Branding
-    brand_text = "meloscribe pulse"
-    bbox_b = draw.textbbox((0, 0), brand_text, font=font_brand)
-    bw = bbox_b[2] - bbox_b[0]
-    draw.text((card_x1 - bw - 50, card_y1 - 52), brand_text, font=font_brand, fill=(148, 163, 184, 180))
-
-    # F) Cover Thumbnail Preview inside Card
-    if raw_cov_img:
-        try:
-            thumb_w = 170
-            # Square crop center
-            cw, ch = raw_cov_img.size
-            side = min(cw, ch)
-            sq = raw_cov_img.crop(((cw - side) // 2, (ch - side) // 2, (cw + side) // 2, (ch + side) // 2))
-            thumb = sq.convert("RGBA").resize((thumb_w, thumb_w), Image.Resampling.LANCZOS)
-            mask = Image.new("L", (thumb_w, thumb_w), 0)
-            mdraw = ImageDraw.Draw(mask)
-            mdraw.rounded_rectangle([0, 0, thumb_w, thumb_w], radius=22, fill=255)
-            thumb_x = card_x1 - thumb_w - 50
-            thumb_y = card_y0 + 50
-            bg_img.paste(thumb, (thumb_x, thumb_y), mask)
-            draw.rounded_rectangle(
-                [thumb_x, thumb_y, thumb_x + thumb_w, thumb_y + thumb_w],
-                radius=22,
-                outline=(255, 255, 255, 80),
-                width=1
-            )
-        except Exception:
-            pass
+    draw.text((tx, card_y1 - 82), "Tap notification action to add directly to To-Do", font=font_hint, fill=(148, 163, 184, 215))
 
     out_buf = io.BytesIO()
     bg_img.save(out_buf, format="PNG")
@@ -527,6 +626,8 @@ def send_web_push(
 ):
     """
     Broadcasts a real-time Web Push notification to all subscribed devices and records it in SQLite.
+    Applies distinct minimalist Stripe-style copy for paid sales, Ice-Cyan copy for subscribers/free unlocks,
+    and Neon-Pink vote copy for community requests.
     Prunes expired subscriptions (HTTP 404 / 410 Gone) automatically.
     """
     init_push_db()
@@ -536,43 +637,76 @@ def send_web_push(
     if currency and "currency" not in meta_payload:
         meta_payload["currency"] = currency
 
+    numeric_amt = 0.0
+    if amount:
+        try:
+            numeric_amt = float(str(amount).replace(",", ".").strip())
+        except Exception:
+            numeric_amt = 0.0
+
+    effective_type = notif_type
+    if notif_type == "sale" and numeric_amt <= 0.0:
+        effective_type = "subscriber"
+
     resolved_cover = resolve_cover_url(song_name)
+    badge_url = "https://api.meloscribe.dev/api/push/badge.png"
+
+    # Normalize push title, body, icon, and deep-link tab by event identity so they never look identical
+    email_str = str(meta_payload.get("email") or "").strip()
+    loc_str = str(meta_payload.get("locale") or "en").upper()
+    clean_song = clean_cover_song_name(song_name) or song_name
+
+    if effective_type == "sale":
+        curr_up = (currency or "EUR").upper()
+        sym = "€" if curr_up == "EUR" else ("$" if curr_up == "USD" else f" {curr_up}")
+        amt_fmt = f"+{numeric_amt:.2f}{sym}" if curr_up in ("EUR", "USD") else f"+{numeric_amt:.2f} {curr_up}"
+        push_title = f"{amt_fmt}  •  {clean_song or 'Sheet Order'}"
+        push_body = f"{email_str} ({loc_str})" if email_str else "Paid order via Stripe"
+        push_icon = resolved_cover
+        push_url = "/?tab=sales"
+        vibrate = [90, 45, 90, 45, 180]
+    elif effective_type == "subscriber":
+        push_title = f"Subscriber: {email_str or 'New Lead'}"
+        push_body = f"Free unlock: {clean_song}" if clean_song else f"Double opt-in confirmed ({loc_str})"
+        push_icon = "https://pulse.meloscribesheets.com/icon-192.png"
+        push_url = "/?tab=sales"
+        vibrate = [60, 40, 60]
+    else:
+        votes_n = int(meta_payload.get("votes") or 1)
+        artist_str = str(meta_payload.get("artist") or "").strip()
+        push_title = f"Request ({votes_n} Votes): {clean_song or title}"
+        push_body = f"by {artist_str} • Tap to add to To-Do" if artist_str else "Tap to add to creator To-Do"
+        push_icon = "https://pulse.meloscribesheets.com/icon-192.png"
+        push_url = "/?tab=growth"
+        vibrate = [50, 50, 120]
+
     notif_id = record_pulse_notification(
-        notif_type=notif_type,
-        title=title,
-        subtitle=body,
-        amount=amount,
+        notif_type=effective_type,
+        title=push_title,
+        subtitle=push_body,
+        amount=f"{numeric_amt:.2f}" if effective_type == "sale" else "",
         song_name=song_name,
         cover_url=resolved_cover,
         meta=meta_payload
     )
 
     card_image_url = f"https://api.meloscribe.dev/api/push/card/{notif_id}.png"
-    badge_url = "https://api.meloscribe.dev/api/push/badge.png"
-
-    if notif_type == "sale":
-        vibrate = [100, 50, 100, 50, 200]
-    elif notif_type == "subscriber":
-        vibrate = [80, 40, 80]
-    else:
-        vibrate = [60, 60, 60]
-
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
 
     payload = {
-        "title": title,
-        "body": body,
-        "icon": resolved_cover,
+        "title": push_title,
+        "body": push_body,
+        "icon": push_icon,
         "image": card_image_url,
         "badge": badge_url,
         "vibrate": vibrate,
         "actions": actions or [],
         "data": {
             "notif_id": notif_id,
-            "type": notif_type,
-            "url": url,
-            "amount": amount,
+            "type": effective_type,
+            "url": url or push_url,
+            "amount": f"{numeric_amt:.2f}" if effective_type == "sale" else "",
             "currency": currency,
             "song_name": song_name,
             "song_title": song_title_full,
@@ -662,6 +796,13 @@ class SuggestionManageRequest(BaseModel):
 class QueueRescheduleRequest(BaseModel):
     schedule_time: str
 
+class TodoManageRequest(BaseModel):
+    action: str  # add, complete, delete, reopen
+    todo_id: Optional[int] = None
+    title: Optional[str] = None
+    song_name: Optional[str] = None
+    priority: Optional[str] = "normal"
+
 @router.get("/api/push/vapid-public-key")
 def get_vapid_public_key():
     """Return VAPID Public Key for PWA PushManager subscription (Public endpoint)."""
@@ -718,7 +859,7 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         c.execute("""
             SELECT song_name, amount, currency, email, locale, buyer_name
             FROM purchases
-            WHERE transaction_id NOT LIKE 'cs_test_%' AND email != '2beers.sm@gmail.com' AND status = 'active'
+            WHERE transaction_id NOT LIKE 'cs_test_%' AND email != '2beers.sm@gmail.com' AND status = 'active' AND amount > 0
             ORDER BY created_at DESC LIMIT 1
         """)
         row = c.fetchone()
@@ -729,11 +870,14 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row else "de") or "de"
         buyer_name = (row["buyer_name"] if row else "Piano Lover") or "Piano Lover"
 
-        title = f"💰 New Sale: {amt:.2f} {curr} — {song}"
-        body = f"{email} ({locale.upper()}) • Tap to view order"
+        sym = "€" if curr.upper() == "EUR" else ("$" if curr.upper() == "USD" else f" {curr.upper()}")
+        amt_label = f"+{amt:.2f}{sym}" if curr.upper() in ("EUR", "USD") else f"+{amt:.2f} {curr.upper()}"
+        title = f"{amt_label}  •  {song}"
+        body = f"{email} ({locale.upper()})"
         amount_str = f"{amt:.2f}"
         meta = {"email": email, "locale": locale, "buyer_name": buyer_name, "currency": curr, "payment_method": "Stripe"}
         actions = []
+        preview_extra = {"email": email, "locale": locale, "votes": 0}
     elif notif_type == "subscriber":
         c.execute("SELECT email, locale, song_name FROM notify_subscribers WHERE status = 'active' ORDER BY COALESCE(confirmed_at, created_at) DESC LIMIT 1")
         row = c.fetchone()
@@ -741,25 +885,28 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row and "locale" in row.keys() else "en") or "en"
         song = (row["song_name"] if row and "song_name" in row.keys() and row["song_name"] else "River Flows in You")
 
-        title = f"📩 New Subscriber: {song}"
-        body = f"{email} unlocked free sheet music"
+        title = f"Subscriber: {email}"
+        body = f"Free unlock: {song}"
         amount_str = ""
         curr = "EUR"
         meta = {"email": email, "locale": locale}
         actions = []
+        preview_extra = {"email": email, "locale": locale, "votes": 0}
     else:
-        c.execute("SELECT title, artist, votes FROM suggestions WHERE status != 'completed' OR status IS NULL ORDER BY votes DESC LIMIT 1")
+        c.execute("SELECT id, title, artist, votes FROM suggestions WHERE status != 'completed' OR status IS NULL ORDER BY votes DESC LIMIT 1")
         row = c.fetchone()
+        sug_id = (row["id"] if row else None)
         song = (row["title"] if row else "Interstellar (Main Theme)") or "Interstellar (Main Theme)"
         artist = (row["artist"] if row else "Hans Zimmer") or "Hans Zimmer"
         votes = (row["votes"] if row else 12) or 12
 
-        title = f"💡 Song Request: {song}"
-        body = f"by {artist} • {votes} Votes"
+        title = f"Request ({votes} Votes): {song}"
+        body = f"by {artist} • Tap to add to To-Do"
         amount_str = ""
         curr = "EUR"
         meta = {"artist": artist, "votes": votes, "title": song}
-        actions = [{"action": "add_todo", "title": "➕ Add to To-Do"}]
+        actions = [{"action": "add_todo", "title": "+ Add to To-Do"}]
+        preview_extra = {"email": "", "locale": "en", "votes": votes, "artist": artist, "sug_id": sug_id}
 
     conn.close()
 
@@ -784,7 +931,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
             "body": body,
             "song_name": song,
             "amount": amount_str,
-            "currency": curr
+            "currency": curr,
+            **preview_extra
         }
     }
 
@@ -911,6 +1059,94 @@ def manage_suggestion_action(req: SuggestionManageRequest, request: Request):
     conn.close()
     raise HTTPException(status_code=400, detail=f"Unsupported action: {req.action}")
 
+def _extract_clean_todo_song(raw_name: str) -> str:
+    cleaned = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", raw_name or "", flags=re.IGNORECASE).strip()
+    return cleaned.split(" - ")[0].strip()
+
+def _ensure_todos_table(conn: sqlite3.Connection, c: sqlite3.Cursor) -> None:
+    c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    _ = c.fetchall()
+    conn.commit()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS todos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            song_name TEXT,
+            added_date TEXT,
+            status TEXT DEFAULT 'pending'
+        )
+    """)
+    conn.commit()
+
+@router.post("/api/admin/pulse/todos/manage")
+def manage_pulse_todos(req: TodoManageRequest, request: Request):
+    """Add, complete, reopen, or delete creator To-Do items and sync wishlist completion."""
+    verify_pulse_admin(request)
+    conn = get_db_connection()
+    c = conn.cursor()
+    _ensure_todos_table(conn, c)
+
+    action = (req.action or "").lower().strip()
+    if action == "add":
+        raw_title = (req.title or req.song_name or "").strip()
+        if not raw_title:
+            conn.close()
+            raise HTTPException(status_code=400, detail="To-Do title is required.")
+        is_high = (req.priority or "normal").lower().strip() == "high"
+        stored_name = f"[PRIORITY] {raw_title}" if is_high and not raw_title.startswith("[PRIORITY]") else raw_title
+        existing = c.execute(
+            "SELECT id FROM todos WHERE status = 'pending' AND LOWER(song_name) = LOWER(?)",
+            (stored_name,)
+        ).fetchone()
+        if not existing:
+            c.execute(
+                "INSERT INTO todos (song_name, added_date, status) VALUES (?, ?, 'pending')",
+                (stored_name, datetime.datetime.utcnow().isoformat())
+            )
+            conn.commit()
+            todo_id = c.lastrowid
+        else:
+            todo_id = existing["id"]
+        conn.close()
+        return {"status": "success", "action": "add", "todo_id": todo_id, "song_name": stored_name}
+
+    elif action == "complete":
+        if not req.todo_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="todo_id required.")
+        row = c.execute("SELECT song_name FROM todos WHERE id = ?", (req.todo_id,)).fetchone()
+        c.execute("UPDATE todos SET status = 'completed' WHERE id = ?", (req.todo_id,))
+        if row and row["song_name"] and "[Wishlist" in row["song_name"]:
+            clean_title = re.sub(r"^\[(PRIORITY|FORMAT-SHIFT|RE-PURPOSE|Wishlist[^\]]*)\]\s*", "", row["song_name"], flags=re.IGNORECASE).strip()
+            song_base = clean_title.split(" - ")[0].strip()
+            c.execute(
+                "UPDATE suggestions SET status = 'completed' WHERE LOWER(title) = LOWER(?) OR LOWER(title) = LOWER(?)",
+                (clean_title, song_base)
+            )
+        conn.commit()
+        conn.close()
+        return {"status": "success", "action": "complete", "todo_id": req.todo_id}
+
+    elif action == "reopen":
+        if not req.todo_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="todo_id required.")
+        c.execute("UPDATE todos SET status = 'pending' WHERE id = ?", (req.todo_id,))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "action": "reopen", "todo_id": req.todo_id}
+
+    elif action == "delete":
+        if not req.todo_id:
+            conn.close()
+            raise HTTPException(status_code=400, detail="todo_id required.")
+        c.execute("DELETE FROM todos WHERE id = ?", (req.todo_id,))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "action": "delete", "todo_id": req.todo_id}
+
+    conn.close()
+    raise HTTPException(status_code=400, detail=f"Unsupported todo action: {req.action}")
+
 def _get_queue_db_path() -> Optional[Path]:
     for p in [Path("/home/ubuntu/meloscribe/queue.db"), CURRENT_DIR.parent.parent.parent / "queue.db"]:
         if p.exists():
@@ -919,7 +1155,7 @@ def _get_queue_db_path() -> Optional[Path]:
 
 @router.get("/api/admin/queue")
 def get_admin_queue(request: Request):
-    """Fetch Oracle VM upload queue items directly on Linux or via SSH on Windows."""
+    """Fetch Oracle VM upload queue items across pending, failed, disabled, and completed states."""
     verify_pulse_admin(request)
     q_path = _get_queue_db_path()
     if q_path:
@@ -928,10 +1164,18 @@ def get_admin_queue(request: Request):
         q_conn.row_factory = sqlite3.Row
         qc = q_conn.cursor()
         qc.execute("""
-            SELECT id, song, mode, profile, schedule_time, status
+            SELECT id, song, mode, profile, schedule_time, status, error, attempts
             FROM upload_queue
-            ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, datetime(schedule_time) ASC
-            LIMIT 60
+            ORDER BY
+              CASE
+                WHEN status = 'pending' THEN 0
+                WHEN status = 'failed' THEN 1
+                WHEN status = 'disabled' THEN 2
+                ELSE 3
+              END,
+              CASE WHEN status = 'completed' THEN datetime(schedule_time) END DESC,
+              datetime(schedule_time) ASC
+            LIMIT 100
         """)
         items = [dict(r) for r in qc.fetchall()]
         q_conn.close()
@@ -942,7 +1186,7 @@ def get_admin_queue(request: Request):
         if not os.path.exists(key_path):
             key_path = r"C:\Dev\ssh-key-2026-05-07.key"
         if os.path.exists(key_path):
-            py_query = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; cursor=conn.cursor(); cursor.execute('SELECT id, song, mode, profile, schedule_time, status FROM upload_queue ORDER BY CASE WHEN status = \"pending\" THEN 0 ELSE 1 END, datetime(schedule_time) ASC LIMIT 60'); print(json.dumps([dict(r) for r in cursor.fetchall()]))"
+            py_query = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; cursor=conn.cursor(); cursor.execute('SELECT id, song, mode, profile, schedule_time, status, error, attempts FROM upload_queue ORDER BY CASE WHEN status = \"pending\" THEN 0 WHEN status = \"failed\" THEN 1 WHEN status = \"disabled\" THEN 2 ELSE 3 END, datetime(schedule_time) ASC LIMIT 100'); print(json.dumps([dict(r) for r in cursor.fetchall()]))"
             cmd = ["ssh", "-i", key_path, "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", "-o", "IdentitiesOnly=yes", "ubuntu@152.70.23.171", f"python3 -c \"{py_query}\""]
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=10, creationflags=CREATION_FLAGS)
@@ -952,6 +1196,27 @@ def get_admin_queue(request: Request):
                 print(f"[Pulse Queue] SSH fallback error: {e}")
 
     return {"queue": []}
+
+@router.post("/api/admin/queue/retry/{task_id}")
+def retry_admin_queue_task(task_id: int, request: Request):
+    """Reset a failed or cancelled upload task back to 'pending' so oci-uploader picks it up."""
+    verify_pulse_admin(request)
+    q_path = _get_queue_db_path()
+    if q_path:
+        q_conn = sqlite3.connect(str(q_path), timeout=15.0)
+        q_conn.execute("PRAGMA journal_mode=WAL;")
+        qc = q_conn.cursor()
+        qc.execute("""
+            UPDATE upload_queue
+            SET status = 'pending', error = NULL, attempts = 0
+            WHERE id = ? AND status IN ('failed', 'cancelled', 'disabled')
+        """, (task_id,))
+        q_conn.commit()
+        qc.execute("SELECT status FROM upload_queue WHERE id = ?", (task_id,))
+        row = qc.fetchone()
+        q_conn.close()
+        return {"status": "success", "new_status": row[0] if row else "unknown", "task_id": task_id}
+    raise HTTPException(status_code=404, detail="Queue database not found on this host.")
 
 @router.post("/api/admin/queue/{task_id}/toggle-status")
 def toggle_admin_queue_status(task_id: int, request: Request):
@@ -1113,50 +1378,161 @@ def get_pulse_summary(request: Request):
     activity_items = []
 
     c.execute(f"""
-        SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, locale
+        SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, locale, rating
         FROM purchases
         WHERE {sales_filter}
         ORDER BY created_at DESC LIMIT 40
     """)
     for p in c.fetchall():
         song = p["song_name"] or "Unknown Song"
+        amt_val = float(p["amount"] or 0.0)
+        curr_val = (p["currency"] or "EUR").upper()
+        loc_val = (p["locale"] or "en").lower()
+        if amt_val > 0.0:
+            activity_items.append({
+                "id": f"sale_{p['id']}",
+                "type": "sale",
+                "title": f"+{amt_val:.2f} {curr_val}",
+                "subtitle": song,
+                "song_name": song,
+                "amount": f"{amt_val:.2f}",
+                "currency": curr_val,
+                "email": p["email"],
+                "buyer_name": p["buyer_name"] or "",
+                "locale": loc_val,
+                "cover_url": resolve_cover_url(song),
+                "timestamp": p["created_at"],
+                "is_read": 1
+            })
+        else:
+            activity_items.append({
+                "id": f"free_{p['id']}",
+                "type": "subscriber",
+                "title": p["email"] or "Free Unlock",
+                "subtitle": f"Unlocked free sheet: {song}",
+                "song_name": song,
+                "amount": "",
+                "currency": curr_val,
+                "email": p["email"] or "",
+                "buyer_name": p["buyer_name"] or "",
+                "locale": loc_val,
+                "cover_url": resolve_cover_url(song),
+                "timestamp": p["created_at"],
+                "is_read": 1
+            })
+
+    # Customer Checkout Ratings (from purchases.rating + optional checkout_ratings table)
+    checkout_ratings: List[Dict[str, Any]] = []
+    c.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    existing_tables = {r["name"] for r in c.fetchall()}
+    conn.commit()
+
+    if "checkout_ratings" in existing_tables:
+        try:
+            c.execute("SELECT id, song_name, rating, comment, email, locale, created_at FROM checkout_ratings ORDER BY created_at DESC LIMIT 30")
+            for cr in c.fetchall():
+                checkout_ratings.append({
+                    "id": f"cr_{cr['id']}",
+                    "song_name": cr["song_name"] or "Order",
+                    "rating": str(cr["rating"] or "up"),
+                    "comment": cr["comment"] or "",
+                    "email": cr["email"] or "",
+                    "locale": (cr["locale"] or "en").lower(),
+                    "timestamp": cr["created_at"]
+                })
+        except Exception as cr_err:
+            print(f"[Pulse Summary] checkout_ratings read error: {cr_err}")
+
+    c.execute(f"""
+        SELECT id, song_name, rating, email, locale, created_at
+        FROM purchases
+        WHERE {sales_filter} AND rating IN ('up', 'down')
+        ORDER BY created_at DESC LIMIT 30
+    """)
+    for rp in c.fetchall():
+        rating_entry = {
+            "id": f"pr_{rp['id']}",
+            "song_name": rp["song_name"] or "Order",
+            "rating": str(rp["rating"]),
+            "comment": "",
+            "email": rp["email"] or "",
+            "locale": (rp["locale"] or "en").lower(),
+            "timestamp": rp["created_at"]
+        }
+        checkout_ratings.append(rating_entry)
         activity_items.append({
-            "id": f"sale_{p['id']}",
-            "type": "sale",
-            "title": f"💰 Sale: +{p['amount']:.2f} {p['currency']}",
-            "subtitle": song,
-            "song_name": song,
-            "amount": f"{p['amount']:.2f}",
-            "currency": p["currency"] or "EUR",
-            "email": p["email"],
-            "buyer_name": p["buyer_name"] or "",
-            "locale": (p["locale"] or "en").lower(),
-            "cover_url": resolve_cover_url(song),
-            "timestamp": p["created_at"],
+            "id": f"rating_{rp['id']}",
+            "type": "rating",
+            "title": f"Rated {'Positive' if rp['rating'] == 'up' else 'Negative'}: {rp['song_name'] or 'Order'}",
+            "subtitle": rp["email"] or "",
+            "song_name": rp["song_name"] or "",
+            "rating": str(rp["rating"]),
+            "amount": "",
+            "currency": "",
+            "email": rp["email"] or "",
+            "buyer_name": "",
+            "locale": (rp["locale"] or "en").lower(),
+            "cover_url": resolve_cover_url(rp["song_name"] or ""),
+            "timestamp": rp["created_at"],
             "is_read": 1
         })
 
     c.execute("""
-        SELECT id, email, created_at, confirmed_at
+        SELECT id, email, song_name, locale, status, created_at, confirmed_at
         FROM notify_subscribers
-        WHERE status = 'active'
-        ORDER BY COALESCE(confirmed_at, created_at) DESC LIMIT 30
+        ORDER BY id DESC LIMIT 50
     """)
-    for s in c.fetchall():
-        activity_items.append({
-            "id": f"sub_{s['id']}",
-            "type": "subscriber",
-            "title": "📩 New Subscriber",
-            "subtitle": "Double Opt-In Confirmed",
-            "song_name": "",
-            "amount": "",
-            "currency": "",
+    sub_rows = c.fetchall()
+    subscribers_list: List[Dict[str, Any]] = []
+    for s in sub_rows:
+        s_song = (s["song_name"] if "song_name" in s.keys() else "") or ""
+        s_locale = (s["locale"] if "locale" in s.keys() else "en") or "en"
+        subscribers_list.append({
+            "id": s["id"],
             "email": s["email"],
-            "buyer_name": "",
-            "locale": "en",
-            "cover_url": "https://api.meloscribe.dev/api/push/badge.png",
-            "timestamp": s["confirmed_at"] or s["created_at"],
-            "is_read": 1
+            "song_name": s_song,
+            "locale": s_locale.lower(),
+            "status": str(s["status"] or "pending"),
+            "created_at": s["created_at"],
+            "confirmed_at": s["confirmed_at"]
+        })
+        if s["status"] == "active" and len(activity_items) < 120:
+            activity_items.append({
+                "id": f"sub_{s['id']}",
+                "type": "subscriber",
+                "title": s["email"],
+                "subtitle": f"Unlocked free sheet: {s_song}" if s_song else "Double Opt-In Confirmed",
+                "song_name": s_song,
+                "amount": "",
+                "currency": "",
+                "email": s["email"],
+                "buyer_name": "",
+                "locale": s_locale.lower(),
+                "cover_url": resolve_cover_url(s_song) if s_song else "https://api.meloscribe.dev/api/push/badge.png",
+                "timestamp": s["confirmed_at"] or s["created_at"],
+                "is_read": 1
+            })
+
+    # Creator To-Dos List
+    _ensure_todos_table(conn, c)
+    c.execute("""
+        SELECT id, song_name, status, added_date
+        FROM todos
+        ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END, id DESC
+        LIMIT 100
+    """)
+    todos_list: List[Dict[str, Any]] = []
+    for td in c.fetchall():
+        raw_td = td["song_name"] or ""
+        is_prio = "[PRIORITY]" in raw_td
+        clean_td = re.sub(r"^\[PRIORITY\]\s*", "", raw_td).strip()
+        todos_list.append({
+            "id": td["id"],
+            "title": clean_td,
+            "song_name": raw_td,
+            "priority": "high" if is_prio else "normal",
+            "status": str(td["status"] or "pending"),
+            "created_at": td["added_date"] or ""
         })
 
     c.execute("""
@@ -1169,7 +1545,7 @@ def get_pulse_summary(request: Request):
             "id": f"sug_{sug['id']}",
             "sug_id": sug["id"],
             "type": "suggestion",
-            "title": f"💡 Song Request ({sug['votes']} Votes)",
+            "title": f"Request ({sug['votes']} Votes): {sug['title']}",
             "subtitle": f"{sug['title']} — {sug['artist']}",
             "song_name": sug["title"],
             "artist": sug["artist"],
@@ -1193,16 +1569,24 @@ def get_pulse_summary(request: Request):
                 meta = json.loads(pn["meta_json"])
             except Exception:
                 pass
+        pn_amt = pn["amount"] or ""
+        pn_type = pn["type"]
+        if pn_type == "sale":
+            try:
+                if float(pn_amt or 0) <= 0:
+                    pn_type = "subscriber"
+            except Exception:
+                pass
         activity_items.append({
             "id": f"notif_{pn['id']}",
             "notif_id": pn["id"],
-            "type": pn["type"],
+            "type": pn_type,
             "title": pn["title"],
             "subtitle": pn["subtitle"] or "",
             "song_name": pn["song_name"] or "",
             "artist": meta.get("artist", ""),
             "votes": meta.get("votes", 0),
-            "amount": pn["amount"] or "",
+            "amount": pn_amt,
             "currency": meta.get("currency", "EUR"),
             "email": meta.get("email", ""),
             "buyer_name": meta.get("buyer_name", ""),
@@ -1256,7 +1640,7 @@ def get_pulse_summary(request: Request):
         })
     top_songs.sort(key=lambda x: x["velocity"], reverse=True)
 
-    # 5. Upcoming Upload Queue
+    # 5. Upcoming Upload Queue (pending + failed + completed preview)
     upcoming_queue = []
     q_path = _get_queue_db_path()
     if q_path:
@@ -1265,11 +1649,39 @@ def get_pulse_summary(request: Request):
             q_conn.execute("PRAGMA journal_mode=WAL;")
             q_conn.row_factory = sqlite3.Row
             qc = q_conn.cursor()
-            qc.execute("SELECT id, song, mode, profile, schedule_time, status FROM upload_queue WHERE status = 'pending' ORDER BY datetime(schedule_time) ASC LIMIT 25")
+            qc.execute("""
+                SELECT id, song, mode, profile, schedule_time, status, error, attempts
+                FROM upload_queue
+                ORDER BY
+                  CASE WHEN status = 'pending' THEN 0 WHEN status = 'failed' THEN 1 ELSE 2 END,
+                  datetime(schedule_time) ASC
+                LIMIT 60
+            """)
             upcoming_queue = [dict(r) for r in qc.fetchall()]
             q_conn.close()
         except Exception as q_err:
             print(f"[Pulse Summary] Queue read error: {q_err}")
+
+    # 6. VM Services health (non-blocking)
+    vm_services: Dict[str, str] = {
+        "meloscribe-backend": "unknown",
+        "oci-uploader": "unknown",
+        "oci-sniper": "unknown",
+    }
+    if platform.system() != "Windows":
+        try:
+            proc = subprocess.run(
+                ["systemctl", "is-active", "meloscribe-backend", "oci-uploader", "oci-sniper"],
+                capture_output=True,
+                text=True,
+                timeout=1.5,
+            )
+            lines = [ln.strip() for ln in proc.stdout.strip().splitlines() if ln.strip()]
+            for idx, svc in enumerate(("meloscribe-backend", "oci-uploader", "oci-sniper")):
+                if idx < len(lines):
+                    vm_services[svc] = lines[idx]
+        except Exception as svc_err:
+            print(f"[Pulse Summary] VM service check error: {svc_err}")
 
     conn.close()
 
@@ -1291,5 +1703,9 @@ def get_pulse_summary(request: Request):
         "activity_feed": activity_feed,
         "top_songs": top_songs[:15],
         "upcoming_queue": upcoming_queue,
+        "subscribers_list": subscribers_list,
+        "todos_list": todos_list,
+        "checkout_ratings": checkout_ratings[:30],
+        "vm_services": vm_services,
         "timestamp": datetime.datetime.utcnow().isoformat()
     }
