@@ -93,6 +93,8 @@ def warm_pulse_caches_async(force: bool = False) -> None:
 # -------------------------------------------------------------------
 # Database Initialization & Migration (WAL mode, timeout=30.0)
 # -------------------------------------------------------------------
+_PUSH_DB_INITIALIZED = False
+
 def get_db_connection():
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -100,6 +102,9 @@ def get_db_connection():
     return conn
 
 def init_push_db():
+    global _PUSH_DB_INITIALIZED
+    if _PUSH_DB_INITIALIZED:
+        return
     conn = get_db_connection()
     c = conn.cursor()
     # Check existing tables first, commit after SELECT before DDL
@@ -134,7 +139,25 @@ def init_push_db():
     )
     """)
     conn.commit()
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS native_push_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        song_name TEXT,
+        amount TEXT,
+        currency TEXT,
+        url TEXT,
+        actions_json TEXT,
+        meta_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
     conn.close()
+    _PUSH_DB_INITIALIZED = True
 
 # -------------------------------------------------------------------
 # VAPID Key Management (ECDSA P-256)
@@ -613,6 +636,41 @@ def record_pulse_notification(
     conn.close()
     return notif_id
 
+def record_native_push_event(
+    notif_type: str,
+    title: str,
+    body: str,
+    song_name: str = "",
+    amount: str = "",
+    currency: str = "EUR",
+    url: str = "/?tab=pulse",
+    actions: Optional[List[Dict[str, str]]] = None,
+    meta: Optional[Dict[str, Any]] = None
+) -> int:
+    """Record push event into native_push_queue for the Native Android APK background service."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO native_push_queue (type, title, body, song_name, amount, currency, url, actions_json, meta_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        notif_type,
+        title,
+        body,
+        song_name,
+        amount,
+        currency,
+        url,
+        json.dumps(actions or []),
+        json.dumps(meta or {})
+    ))
+    conn.commit()
+    ev_id = c.lastrowid
+    c.execute("DELETE FROM native_push_queue WHERE id NOT IN (SELECT id FROM native_push_queue ORDER BY id DESC LIMIT 200)")
+    conn.commit()
+    conn.close()
+    return ev_id
+
 def send_web_push(
     notif_type: str,
     title: str,
@@ -699,13 +757,33 @@ def send_web_push(
     else:
         notif_id = int(datetime.datetime.utcnow().timestamp() * 1000) % 1000000000
 
+    record_native_push_event(
+        notif_type=effective_type,
+        title=push_title,
+        body=push_body,
+        song_name=song_name,
+        amount=f"{numeric_amt:.2f}" if effective_type == "sale" else "",
+        currency=currency,
+        url=url or push_url,
+        actions=effective_actions,
+        meta=meta_payload
+    )
+
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
 
-    # Omit icon and image so Android renders only the monochrome badge + crisp 2-line Stripe typography
+    type_icon_map = {
+        "sale": "https://pulse.meloscribesheets.com/icon-sale.png",
+        "subscriber": "https://pulse.meloscribesheets.com/icon-subscriber.png",
+        "suggestion": "https://pulse.meloscribesheets.com/icon-suggestion.png"
+    }
+    push_icon = type_icon_map.get(effective_type, "https://pulse.meloscribesheets.com/icon-sale.png")
+
+    # Color-coded circular semantic badge + monochrome status bar badge + crisp 2-line Stripe typography
     payload = {
         "title": push_title,
         "body": push_body,
+        "icon": push_icon,
         "badge": badge_url,
         "vibrate": vibrate,
         "actions": effective_actions,
@@ -747,8 +825,12 @@ def send_web_push(
 
     for sub in subs:
         sub_id = sub["id"]
+        ep_str = str(sub["endpoint"] or "")
+        if ep_str.startswith("native://"):
+            sent_count += 1
+            continue
         sub_info = {
-            "endpoint": sub["endpoint"],
+            "endpoint": ep_str,
             "keys": {
                 "p256dh": sub["p256dh"],
                 "auth": sub["auth"]
@@ -835,7 +917,9 @@ def get_subscription_count(request: Request):
 
 def _summarize_user_agent(ua: str) -> Dict[str, str]:
     ua_l = (ua or "").lower()
-    if "brave" in ua_l:
+    if "meloscribenativeapk" in ua_l or "native-android" in ua_l:
+        browser = "Native APK"
+    elif "brave" in ua_l:
         browser = "Brave"
     elif "edg" in ua_l:
         browser = "Edge"
@@ -848,7 +932,7 @@ def _summarize_user_agent(ua: str) -> Dict[str, str]:
     else:
         browser = "Browser"
 
-    if "android" in ua_l:
+    if "android" in ua_l or "meloscribenativeapk" in ua_l:
         platform = "Android"
     elif "iphone" in ua_l or "ipad" in ua_l:
         platform = "iOS"
@@ -862,6 +946,62 @@ def _summarize_user_agent(ua: str) -> Dict[str, str]:
         platform = "Device"
 
     return {"browser": browser, "platform": platform, "device_label": f"{browser} • {platform}"}
+
+@router.get("/api/push/native-poll")
+def poll_native_push_events(request: Request, since_id: int = -1, endpoint: str = ""):
+    """Lightweight poll endpoint for the Native Android APK background notification service."""
+    verify_pulse_admin(request)
+    init_push_db()
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    is_sub = True
+    if endpoint:
+        c.execute("SELECT 1 FROM push_subscriptions WHERE endpoint = ? LIMIT 1", (endpoint,))
+        is_sub = c.fetchone() is not None
+
+    c.execute("SELECT COALESCE(MAX(id), 0) as max_id FROM native_push_queue")
+    latest_id = int(c.fetchone()["max_id"] or 0)
+
+    if not is_sub or since_id < 0:
+        conn.close()
+        return {"subscribed": is_sub, "latest_id": latest_id, "events": []}
+
+    c.execute("""
+        SELECT id, type, title, body, song_name, amount, currency, url, actions_json, meta_json, created_at
+        FROM native_push_queue
+        WHERE id > ?
+        ORDER BY id ASC
+        LIMIT 20
+    """, (since_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    events = []
+    for r in rows:
+        try:
+            actions = json.loads(r["actions_json"] or "[]")
+        except Exception:
+            actions = []
+        try:
+            meta = json.loads(r["meta_json"] or "{}")
+        except Exception:
+            meta = {}
+        events.append({
+            "id": r["id"],
+            "type": r["type"],
+            "title": r["title"],
+            "body": r["body"],
+            "song_name": r["song_name"] or "",
+            "amount": r["amount"] or "",
+            "currency": r["currency"] or "EUR",
+            "url": r["url"] or "/?tab=pulse",
+            "actions": actions,
+            "meta": meta,
+            "created_at": r["created_at"]
+        })
+
+    return {"subscribed": True, "latest_id": latest_id, "events": events}
 
 @router.get("/api/push/subscriptions")
 def list_push_subscriptions(request: Request):
@@ -1010,19 +1150,22 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
 
     conn.close()
 
-    background_tasks.add_task(
-        send_web_push,
-        notif_type=notif_type,
-        title=title,
-        body=body,
-        song_name=song,
-        amount=amount_str,
-        currency=curr,
-        url="/?tab=pulse",
-        actions=actions,
-        meta=meta,
-        record_to_feed=False
-    )
+    threading.Thread(
+        target=send_web_push,
+        kwargs={
+            "notif_type": notif_type,
+            "title": title,
+            "body": body,
+            "song_name": song,
+            "amount": amount_str,
+            "currency": curr,
+            "url": "/?tab=pulse",
+            "actions": actions,
+            "meta": meta,
+            "record_to_feed": False,
+        },
+        daemon=True,
+    ).start()
     return {
         "status": "success",
         "message": f"Test push '{notif_type}' dispatched.",
