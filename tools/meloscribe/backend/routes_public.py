@@ -1364,8 +1364,8 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                             background_tasks.add_task(
                                 send_web_push,
                                 notif_type="sale",
-                                title=f"{fmt_amt} • {song_title}",
-                                body="New Sale • Stripe",
+                                title=fmt_amt,
+                                body=song_title or "Sheet Order",
                                 song_name=song_title,
                                 amount=f"{amount_total:.2f}",
                                 currency=currency,
@@ -2210,8 +2210,8 @@ def notify_confirm(token: str, background_tasks: BackgroundTasks):
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="subscriber",
-                    title=f"New Subscriber • {song_name or 'meloscribe'}",
-                    body="Free Sheet Unlocked",
+                    title="New Subscriber",
+                    body=song_name or "Free Sheet Unlocked",
                     song_name=song_name or "",
                     url="/?tab=sales",
                     meta={"email": email, "locale": locale}
@@ -2587,8 +2587,8 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                         background_tasks.add_task(
                             send_web_push,
                             notif_type="suggestion",
-                            title=f"{new_votes} Votes • {existing[1]}",
-                            body=existing[2] or "Community Wishlist",
+                            title=f"{new_votes} Votes",
+                            body=f"{existing[1]} • {existing[2]}" if existing[2] else existing[1],
                             song_name=existing[1],
                             url="/?tab=growth",
                             actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
@@ -2607,8 +2607,8 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="suggestion",
-                    title=f"New Request • {sug.title.strip()}",
-                    body=sug.artist.strip() or "Community Wishlist",
+                    title="New Request",
+                    body=f"{sug.title.strip()} • {sug.artist.strip()}" if sug.artist.strip() else sug.title.strip(),
                     song_name=sug.title.strip(),
                     url="/?tab=growth",
                     actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
@@ -2652,8 +2652,8 @@ def upvote_suggestion(sug_id: str, request: Request, background_tasks: Backgroun
                     background_tasks.add_task(
                         send_web_push,
                         notif_type="suggestion",
-                        title=f"{new_votes} Votes • {s_title}",
-                        body=s_artist or "Community Wishlist",
+                        title=f"{new_votes} Votes",
+                        body=f"{s_title} • {s_artist}" if s_artist else s_title,
                         song_name=s_title,
                         url="/?tab=growth",
                         actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],

@@ -652,7 +652,7 @@ def send_web_push(
     resolved_cover = resolve_cover_url(song_name)
     badge_url = "https://api.meloscribe.dev/api/push/badge.png"
 
-    # Normalize ultra-clean Stripe-style minimalist push copy without icon/image clutter or email PII
+    # Normalize 1:1 Stripe-style ultra-minimalist copy: single bold primary metric/event + clean subject line
     clean_song = (clean_cover_song_name(song_name) or song_name or "").strip()
 
     if effective_type == "sale":
@@ -665,22 +665,23 @@ def send_web_push(
             formatted_amount = f"+{numeric_amt:.2f} €"
         else:
             formatted_amount = f"+{numeric_amt:.2f} {curr_up}"
-        push_title = f"{formatted_amount} • {clean_song or 'Sheet Order'}"
-        push_body = "New Sale • Stripe"
+        push_title = formatted_amount
+        push_body = clean_song or "Sheet Order"
         push_url = "/?tab=sales"
         vibrate = [90, 45, 90, 45, 180]
         effective_actions = actions or []
     elif effective_type == "subscriber":
-        push_title = f"New Subscriber • {clean_song or 'meloscribe'}"
-        push_body = "Free Sheet Unlocked"
+        push_title = "New Subscriber"
+        push_body = clean_song or "Free Sheet Unlocked"
         push_url = "/?tab=sales"
         vibrate = [60, 40, 60]
         effective_actions = actions or []
     else:
         votes_n = int(meta_payload.get("votes") or 1)
         artist_str = str(meta_payload.get("artist") or "").strip()
-        push_title = f"{votes_n} Votes • {clean_song or title}" if votes_n > 1 else f"New Request • {clean_song or title}"
-        push_body = artist_str if artist_str else "Community Wishlist"
+        req_song = clean_song or title
+        push_title = f"{votes_n} Votes" if votes_n > 1 else "New Request"
+        push_body = f"{req_song} • {artist_str}" if artist_str else req_song
         push_url = "/?tab=growth"
         vibrate = [50, 50, 120]
         effective_actions = actions if actions is not None else [{"action": "add_todo", "title": "+ Add to To-Do"}]
@@ -971,8 +972,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
             amt_label = f"+{amt:.2f} €"
         else:
             amt_label = f"+{amt:.2f} {curr_up}"
-        title = f"{amt_label} • {song}"
-        body = "New Sale • Stripe"
+        title = amt_label
+        body = song or "Sheet Order"
         amount_str = f"{amt:.2f}"
         meta = {"email": email, "locale": locale, "buyer_name": buyer_name, "currency": curr, "payment_method": "Stripe"}
         actions = []
@@ -984,8 +985,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row and "locale" in row.keys() else "en") or "en"
         song = (row["song_name"] if row and "song_name" in row.keys() and row["song_name"] else "River Flows in You")
 
-        title = f"New Subscriber • {song}"
-        body = "Free Sheet Unlocked"
+        title = "New Subscriber"
+        body = song or "Free Sheet Unlocked"
         amount_str = ""
         curr = "EUR"
         meta = {"email": email, "locale": locale}
@@ -999,8 +1000,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         artist = (row["artist"] if row else "Hans Zimmer") or "Hans Zimmer"
         votes = (row["votes"] if row else 12) or 12
 
-        title = f"{votes} Votes • {song}" if votes > 1 else f"New Request • {song}"
-        body = artist if artist else "Community Wishlist"
+        title = f"{votes} Votes" if votes > 1 else "New Request"
+        body = f"{song} • {artist}" if artist else song
         amount_str = ""
         curr = "EUR"
         meta = {"artist": artist, "votes": votes, "title": song}
