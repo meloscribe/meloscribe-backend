@@ -772,18 +772,10 @@ def send_web_push(
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
 
-    type_icon_map = {
-        "sale": "https://pulse.meloscribesheets.com/icon-sale.png",
-        "subscriber": "https://pulse.meloscribesheets.com/icon-subscriber.png",
-        "suggestion": "https://pulse.meloscribesheets.com/icon-suggestion.png"
-    }
-    push_icon = type_icon_map.get(effective_type, "https://pulse.meloscribesheets.com/icon-sale.png")
-
-    # Color-coded circular semantic badge + monochrome status bar badge + crisp 2-line Stripe typography
+    # Zero icon/image in payload: keeps right side of notifications completely empty (1:1 Stripe minimalism)
     payload = {
         "title": push_title,
         "body": push_body,
-        "icon": push_icon,
         "badge": badge_url,
         "vibrate": vibrate,
         "actions": effective_actions,
