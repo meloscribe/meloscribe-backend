@@ -268,8 +268,17 @@ def post_pin(song_name: str, author: str = "Dave Kerr", profile: str = "normal",
     """
     Creates a Pin for a song on Pinterest.
     Uploads the video if available; falls back to the clean cover image.
+    Strictly skips Teaser, Recycled, and Tutorial variants (full cover pins only).
     Automatically applies Pinterest SEO best practices for title and description.
     """
+    variant = resolve_pinterest_variant(song_name, profile, is_easy)
+    if "recycled" in (song_name or "").lower():
+        print(f"[Pinterest API] Skipped '{song_name}': recycled clips are strictly excluded from Pinterest.")
+        return True
+    if variant["is_teaser"] or variant["is_tutorial"] or (song_name or "").lower().endswith(" slow"):
+        print(f"[Pinterest API] Skipped '{song_name}' (profile={profile}): teaser and tutorial videos are strictly excluded from Pinterest.")
+        return True
+
     refresh_pinterest_token()
     
     if not TOKENS_PATH.exists():

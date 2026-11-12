@@ -179,7 +179,7 @@ def main():
         if not teaser_exists:
             return False
         for p in platforms:
-            if p == "kofi":
+            if p in ("kofi", "pinterest"):
                 continue
             p_pref = platform_map.get(p)
             if not p_pref:
@@ -196,6 +196,8 @@ def main():
             return True
         for p in platforms:
             if p == "kofi":
+                continue
+            if p == "pinterest" and profile == "tutorial":
                 continue
             p_pref = platform_map.get(p)
             if not p_pref:
@@ -503,10 +505,13 @@ def main():
             tut_v = settings.get(f"{p_pref}_upload_tutorial")
             upload_tutorial = bool(tut_v) if tut_v is not None else True
 
-
-
             hook_v = settings.get(f"{p_pref}_upload_hook")
             upload_hook = bool(hook_v) if hook_v is not None else True
+
+            if platform == "pinterest":
+                upload_hook = False
+                upload_tutorial = False
+                print("  -> Enforcing Pinterest policy: Teaser & Tutorial strictly excluded (Normal/Easy Full Covers only)")
 
             # 1. Teaser / Hook (if exists and enabled for this platform)
             if teaser_exists and "teaser" in dates:

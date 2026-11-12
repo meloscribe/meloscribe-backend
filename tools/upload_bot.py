@@ -1316,8 +1316,16 @@ def refresh_pinterest_token():
         return False
 
 def run_pinterest(song_name, profile="normal", author="Dave Kerr", board_id=None):
-    if "recycled" in song_name.lower():
+    song_l = (song_name or "").lower()
+    prof_l = (profile or "normal").lower()
+    if "recycled" in song_l:
         print(f"[Pinterest Bot] Song '{song_name}' is a recycled clip. Pinterest is strictly excluded from recycling. Skipping.")
+        return True
+    if song_l.endswith(" teaser") or " teaser " in song_l or prof_l in ("hook", "teaser"):
+        print(f"[Pinterest Bot] Song '{song_name}' (profile={profile}) is a teaser. Teasers are strictly excluded from Pinterest. Skipping.")
+        return True
+    if "tutorial" in prof_l or "tutorial" in song_l or song_l.endswith(" slow"):
+        print(f"[Pinterest Bot] Song '{song_name}' (profile={profile}) is a tutorial video. Tutorials are strictly excluded from Pinterest. Skipping.")
         return True
 
     tools_dir = os.path.dirname(os.path.abspath(__file__))

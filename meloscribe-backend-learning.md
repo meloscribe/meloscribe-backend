@@ -6,7 +6,10 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Root Cause**:
   1. `clean_song` stripped `" Teaser"` before resolving video filenames, and `candidates` checked `[f"{clean_song}.mp4", f"{song_name}.mp4"]`. Because `{clean_song}.mp4` (the full cover) already existed inside `/home/ubuntu/meloscribe/staging/{song}/TikToks/`, a `Teaser` queue task (e.g. Task 283 `Goodbye To A Lover Again Teaser`, Task 261 `Floating in Reverie Teaser`) matched and uploaded the **full cover MP4** (`171.8 MB` / `135.6 MB`) with the normal full-cover title; 3 days later the scheduled `normal` task (`284` / `262`) uploaded the identical full cover a second time.
   2. `pinterest_poster.py` completely ignored `profile="tutorial"`, failing to resolve `{clean_song} slow.mp4` (`352 MB`) and uploading `{clean_song}.mp4` a third time (e.g. Task 263 `Floating in Reverie`).
-- **Resolution**: Added `resolve_pinterest_variant()` and `resolve_pinterest_video_path()` in `pinterest_poster.py` (mirrored across `meloscribe-backend`, `meloscribe-app`, and VM) to strictly isolate video candidate lookups (`Teaser.mp4` vs `.mp4` vs `slow.mp4` vs `Easy.mp4` vs `Easy slow.mp4`) without ever falling back from teaser/tutorial to the full cover, and differentiated SEO titles/descriptions per variant.
+- **Resolution**:
+  1. Added `resolve_pinterest_variant()` and `resolve_pinterest_video_path()` in `pinterest_poster.py` with hard guards skipping any `teaser`, `recycled`, or `tutorial` (`slow`) task.
+  2. Updated `stage_to_server.py` (`is_hook_active()`, `is_combination_active()`, and queue registration loop) plus `upload_bot.py` (`run_pinterest()`) so Pinterest only ever schedules and uploads full covers (`Normal` and `Easy`).
+  3. Cancelled remaining pending Pinterest tutorial/teaser queue entries in production `queue.db` (Task 285).
 
 ### 2026-11-12: Web Push VAPID Engine, Router Ordering & Windows Wildcard Proxy Shadowing
 - **FastAPI Router Inclusion Order vs. Windows Wildcard Proxy (`main.py`, `routes_admin.py`)**:

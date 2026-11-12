@@ -649,33 +649,39 @@ def send_web_push(
         effective_type = "subscriber"
 
     resolved_cover = resolve_cover_url(song_name)
-    badge_url = "https://api.meloscribe.dev/api/push/badge.png"
+    badge_url = "https://pulse.meloscribesheets.com/badge-96.png"
 
-    # Normalize push title, body, icon, and deep-link tab by event identity so they never look identical
+    # Normalize compact, Stripe-style push title, single-line body, icon, and deep-link tab by event identity
     email_str = str(meta_payload.get("email") or "").strip()
     loc_str = str(meta_payload.get("locale") or "en").upper()
     clean_song = clean_cover_song_name(song_name) or song_name
+    has_song_cover = bool(clean_cover_song_name(song_name))
 
     if effective_type == "sale":
         curr_up = (currency or "EUR").upper()
         sym = "€" if curr_up == "EUR" else ("$" if curr_up == "USD" else f" {curr_up}")
         amt_fmt = f"+{numeric_amt:.2f}{sym}" if curr_up in ("EUR", "USD") else f"+{numeric_amt:.2f} {curr_up}"
         push_title = f"{amt_fmt}  •  {clean_song or 'Sheet Order'}"
-        push_body = f"{email_str} ({loc_str})" if email_str else "Paid order via Stripe"
+        push_body = f"{email_str} • Stripe ({loc_str})" if email_str else f"Paid order via Stripe ({loc_str})"
         push_icon = resolved_cover
         push_url = "/?tab=sales"
         vibrate = [90, 45, 90, 45, 180]
     elif effective_type == "subscriber":
-        push_title = f"Subscriber: {email_str or 'New Lead'}"
-        push_body = f"Free unlock: {clean_song}" if clean_song else f"Double opt-in confirmed ({loc_str})"
-        push_icon = "https://pulse.meloscribesheets.com/icon-192.png"
+        push_title = f"Free Unlock  •  {clean_song}" if clean_song else f"New Subscriber  •  {email_str or 'Lead'}"
+        if clean_song and email_str:
+            push_body = f"{email_str} • {loc_str}"
+        elif email_str:
+            push_body = f"Double opt-in confirmed • {loc_str}"
+        else:
+            push_body = f"Free sheet unlock • {loc_str}"
+        push_icon = resolved_cover if has_song_cover else "https://pulse.meloscribesheets.com/icon-192.png"
         push_url = "/?tab=sales"
         vibrate = [60, 40, 60]
     else:
         votes_n = int(meta_payload.get("votes") or 1)
         artist_str = str(meta_payload.get("artist") or "").strip()
-        push_title = f"Request ({votes_n} Votes): {clean_song or title}"
-        push_body = f"by {artist_str} • Tap to add to To-Do" if artist_str else "Tap to add to creator To-Do"
+        push_title = f"Request ({votes_n} Votes)  •  {clean_song or title}"
+        push_body = f"{artist_str} • Tap to add to To-Do" if artist_str else "Tap to add to creator To-Do"
         push_icon = "https://pulse.meloscribesheets.com/icon-192.png"
         push_url = "/?tab=growth"
         vibrate = [50, 50, 120]
@@ -690,15 +696,14 @@ def send_web_push(
         meta=meta_payload
     )
 
-    card_image_url = f"https://api.meloscribe.dev/api/push/card/{notif_id}.png"
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
 
+    # Keep Android notification compact and native (Stripe-style) without redundant BigPicture banner box
     payload = {
         "title": push_title,
         "body": push_body,
         "icon": push_icon,
-        "image": card_image_url,
         "badge": badge_url,
         "vibrate": vibrate,
         "actions": actions or [],
@@ -783,6 +788,11 @@ class SubscribeRequest(BaseModel):
     keys: Dict[str, str]
     user_agent: Optional[str] = ""
 
+class UnsubscribeRequest(BaseModel):
+    endpoint: Optional[str] = None
+    device_id: Optional[int] = None
+    all: bool = False
+
 class TestPushRequest(BaseModel):
     type: Optional[str] = "sale"
 
@@ -821,6 +831,61 @@ def get_subscription_count(request: Request):
     conn.close()
     return {"count": cnt}
 
+def _summarize_user_agent(ua: str) -> Dict[str, str]:
+    ua_l = (ua or "").lower()
+    if "brave" in ua_l:
+        browser = "Brave"
+    elif "edg" in ua_l:
+        browser = "Edge"
+    elif "firefox" in ua_l:
+        browser = "Firefox"
+    elif "safari" in ua_l and "chrome" not in ua_l and "crios" not in ua_l:
+        browser = "Safari"
+    elif "chrome" in ua_l or "crios" in ua_l:
+        browser = "Chrome"
+    else:
+        browser = "Browser"
+
+    if "android" in ua_l:
+        platform = "Android"
+    elif "iphone" in ua_l or "ipad" in ua_l:
+        platform = "iOS"
+    elif "windows" in ua_l:
+        platform = "Windows"
+    elif "macintosh" in ua_l or "mac os" in ua_l:
+        platform = "macOS"
+    elif "linux" in ua_l:
+        platform = "Linux"
+    else:
+        platform = "Device"
+
+    return {"browser": browser, "platform": platform, "device_label": f"{browser} • {platform}"}
+
+@router.get("/api/push/subscriptions")
+def list_push_subscriptions(request: Request):
+    """List registered Web Push devices without exposing cryptographic keys."""
+    verify_pulse_admin(request)
+    init_push_db()
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT id, endpoint, user_agent, created_at FROM push_subscriptions ORDER BY id DESC")
+    rows = c.fetchall()
+    conn.close()
+    devices = []
+    for row in rows:
+        meta = _summarize_user_agent(row["user_agent"] or "")
+        ep = row["endpoint"] or ""
+        devices.append({
+            "id": row["id"],
+            "endpoint": ep,
+            "endpoint_tail": ep[-18:] if len(ep) > 18 else ep,
+            "browser": meta["browser"],
+            "platform": meta["platform"],
+            "device_label": meta["device_label"],
+            "created_at": row["created_at"],
+        })
+    return {"devices": devices, "count": len(devices)}
+
 @router.post("/api/push/subscribe")
 def subscribe_push(req: SubscribeRequest, request: Request):
     """Upsert browser Web Push subscription into SQLite."""
@@ -844,6 +909,32 @@ def subscribe_push(req: SubscribeRequest, request: Request):
     conn.commit()
     conn.close()
     return {"status": "subscribed", "endpoint": req.endpoint}
+
+@router.post("/api/push/unsubscribe")
+def unsubscribe_push(req: UnsubscribeRequest, request: Request):
+    """Remove a push subscription by endpoint, device_id, or clear all subscriptions."""
+    verify_pulse_admin(request)
+    init_push_db()
+    conn = get_db_connection()
+    c = conn.cursor()
+    removed = 0
+    if req.all:
+        c.execute("DELETE FROM push_subscriptions")
+        removed = c.rowcount
+    elif req.device_id is not None:
+        c.execute("DELETE FROM push_subscriptions WHERE id = ?", (req.device_id,))
+        removed = c.rowcount
+    elif req.endpoint:
+        c.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (req.endpoint,))
+        removed = c.rowcount
+    else:
+        conn.close()
+        raise HTTPException(status_code=400, detail="Provide endpoint, device_id, or all=true")
+    conn.commit()
+    c.execute("SELECT COUNT(*) as cnt FROM push_subscriptions")
+    cnt = c.fetchone()["cnt"] or 0
+    conn.close()
+    return {"status": "unsubscribed", "removed": removed, "count": cnt}
 
 @router.post("/api/push/test")
 def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: BackgroundTasks):
@@ -873,7 +964,7 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         sym = "€" if curr.upper() == "EUR" else ("$" if curr.upper() == "USD" else f" {curr.upper()}")
         amt_label = f"+{amt:.2f}{sym}" if curr.upper() in ("EUR", "USD") else f"+{amt:.2f} {curr.upper()}"
         title = f"{amt_label}  •  {song}"
-        body = f"{email} ({locale.upper()})"
+        body = f"{email} • Stripe ({locale.upper()})"
         amount_str = f"{amt:.2f}"
         meta = {"email": email, "locale": locale, "buyer_name": buyer_name, "currency": curr, "payment_method": "Stripe"}
         actions = []
@@ -885,8 +976,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row and "locale" in row.keys() else "en") or "en"
         song = (row["song_name"] if row and "song_name" in row.keys() and row["song_name"] else "River Flows in You")
 
-        title = f"Subscriber: {email}"
-        body = f"Free unlock: {song}"
+        title = f"Free Unlock  •  {song}"
+        body = f"{email} • {locale.upper()}"
         amount_str = ""
         curr = "EUR"
         meta = {"email": email, "locale": locale}
@@ -900,8 +991,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         artist = (row["artist"] if row else "Hans Zimmer") or "Hans Zimmer"
         votes = (row["votes"] if row else 12) or 12
 
-        title = f"Request ({votes} Votes): {song}"
-        body = f"by {artist} • Tap to add to To-Do"
+        title = f"Request ({votes} Votes)  •  {song}"
+        body = f"{artist} • Tap to add to To-Do"
         amount_str = ""
         curr = "EUR"
         meta = {"artist": artist, "votes": votes, "title": song}
