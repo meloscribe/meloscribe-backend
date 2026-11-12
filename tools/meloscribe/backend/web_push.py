@@ -723,7 +723,7 @@ def send_web_push(
             formatted_amount = f"{numeric_amt:.2f} €"
         else:
             formatted_amount = f"{numeric_amt:.2f} {curr_up}"
-        push_title = f"+{formatted_amount}"
+        push_title = formatted_amount
         push_body = clean_song or "Sheet Order"
         push_url = "/?tab=sales"
         vibrate = [90, 60, 160]
@@ -1100,13 +1100,13 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
 
         curr_up = curr.upper()
         if curr_up == "USD":
-            amt_label = f"+${amt:.2f}"
+            amt_label = f"${amt:.2f}"
         elif curr_up == "GBP":
-            amt_label = f"+£{amt:.2f}"
+            amt_label = f"£{amt:.2f}"
         elif curr_up == "EUR":
-            amt_label = f"+{amt:.2f} €"
+            amt_label = f"{amt:.2f} €"
         else:
-            amt_label = f"+{amt:.2f} {curr_up}"
+            amt_label = f"{amt:.2f} {curr_up}"
         title = amt_label
         body = song or "Sheet Order"
         amount_str = f"{amt:.2f}"

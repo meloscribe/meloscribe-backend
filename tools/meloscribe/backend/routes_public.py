@@ -1354,13 +1354,13 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                             from web_push import send_web_push
                             curr_up = (currency or "EUR").upper()
                             if curr_up == "USD":
-                                fmt_amt = f"+${amount_total:.2f}"
+                                fmt_amt = f"${amount_total:.2f}"
                             elif curr_up == "GBP":
-                                fmt_amt = f"+£{amount_total:.2f}"
+                                fmt_amt = f"£{amount_total:.2f}"
                             elif curr_up == "EUR":
-                                fmt_amt = f"+{amount_total:.2f} €"
+                                fmt_amt = f"{amount_total:.2f} €"
                             else:
-                                fmt_amt = f"+{amount_total:.2f} {curr_up}"
+                                fmt_amt = f"{amount_total:.2f} {curr_up}"
                             background_tasks.add_task(
                                 send_web_push,
                                 notif_type="sale",

@@ -2,16 +2,16 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
-### 2026-11-12: Stripe-Minimalist Web Push Payloads, OS-Level Priority Separation & APK v1.3.0 (`web_push.py`, `routes_public.py`)
+### 2026-11-12: Stripe-Minimalist Web Push Payloads, OS-Level Priority Separation & APK v1.3.1 (`web_push.py`, `routes_public.py`)
 - **Ultra-Clean Stripe-Style Lockscreen Notifications & Vote-Noise Reduction (`web_push.py`, `routes_public.py`)**:
-  - *Issue:* Including `icon`/`image` or `setLargeIcon`/`MessagingStyle` caused double-icon rendering on Android 12+ Pixel SystemUI and pulled low-priority requests into the top shade section; triggering push alerts at `votes == 5` also created low-signal lockscreen noise.
+  - *Issue:* Including `icon`/`image` or `setLargeIcon`/`MessagingStyle` caused double-icon rendering on Android 12+ Pixel SystemUI and pulled low-priority requests into the top shade section; triggering push alerts at `votes == 5` also created low-signal lockscreen noise, while all-caps `subText` badges and `+` currency prefixes added unnecessary visual clutter.
   - *Resolution:*
-    1. Updated `send_web_push()` and callers in `routes_public.py` to emit clean two-line copy:
-       - **Sale:** `title = f"+{formatted_amount}"` (`+$6.00`, `+£6.00`, `+6.00 €`), `body = f"{song_name}"`
+    1. Updated `send_web_push()` and callers in `routes_public.py` to emit clean two-line copy without `+`:
+       - **Sale:** `title = formatted_amount` (`$6.00`, `£6.00`, `6.00 €`), `body = f"{song_name}"`
        - **Subscriber:** `title = f"{song_name}"`, `body = "New Subscriber"`
        - **Suggestion:** `title = f"{song_name}"`, `body = f"{artist} • {votes} Votes"` (if `votes > 1` else `f"{artist}"`)
     2. Reduced wishlist upvote push noise in `routes_public.py` so notifications only fire on brand-new suggestions (`POST /api/public/suggestions`) and major vote milestones (`new_votes in (10, 25, 50, 100)`).
-    3. Updated Native Android APK (`app.meloscribe.pulse` v1.3.0 `versionCode=5`) with `_v3` channels (`meloscribe_sales_v3` `IMPORTANCE_HIGH` + `PRIORITY_MAX` + `R.raw.sale_chime` + `[0, 90, 60, 160]` + `ic_stat_sale` `$` `#10B981` + `subText="SALE"`; `meloscribe_leads_v3` `IMPORTANCE_DEFAULT` + silent + `[0, 35]` + `ic_stat_sub` `#00F5FF` + `subText="SUBSCRIBER"`; `meloscribe_requests_v3` `IMPORTANCE_LOW` + silent + zero vibration + `ic_stat_meloscribe` `#A855F7` + `subText="WISHLIST"`), distinct group keys (`meloscribe_group_sales`, `meloscribe_group_leads`, `meloscribe_group_wishlist`), and zero `setLargeIcon`/`MessagingStyle` calls.
+    3. Updated Native Android APK (`app.meloscribe.pulse` v1.3.1 `versionCode=6`) with `_v3` channels (`meloscribe_sales_v3` `IMPORTANCE_HIGH` + `PRIORITY_MAX` + `R.raw.sale_chime` + `[0, 90, 60, 160]` + `ic_stat_sale` `$` `#10B981`; `meloscribe_leads_v3` `IMPORTANCE_DEFAULT` + silent + `[0, 35]` + `ic_stat_sub` `#00F5FF`; `meloscribe_requests_v3` `IMPORTANCE_LOW` + silent + zero vibration + `ic_stat_meloscribe` `#A855F7`), distinct group keys (`meloscribe_group_sales`, `meloscribe_group_leads`, `meloscribe_group_wishlist`), zero all-caps `subText`, and zero `setLargeIcon`/`MessagingStyle` calls.
     4. Added `record_to_feed: bool = True` to `send_web_push()` and passed `record_to_feed=False` from `trigger_test_push()` (`/api/push/test`), keeping `pulse_notifications` clean on test triggers.
     5. Switched `get_pulse_summary()` `checkout_conversion_rate_30d` from global `ca_data["summary"]["conversion_rate"]` to `tier1_segmentation["tier1"]["conversion_rate"]` so `emerging` (Asian/LATAM) and `unknown` abandoned checkouts no longer depress Pulse Checkout Conversion.
 
