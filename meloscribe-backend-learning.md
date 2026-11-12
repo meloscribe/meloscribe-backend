@@ -2,14 +2,15 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
-### 2026-11-12: Stripe-Minimalist Web Push Payloads, Test-Push Feed Isolation & Tier-1 Pulse Conversion
+### 2026-11-12: Stripe-Minimalist Web Push Payloads, Zero Reward-Prediction-Error Separation & APK v1.2.0 (`web_push.py`, `routes_public.py`)
 - **Ultra-Clean Stripe-Style Lockscreen Notifications (`web_push.py`, `routes_public.py`)**:
-  - *Issue:* Including `icon` (song thumbnail) and buyer email / locale tags `(EN)` in push notification payloads added visual clutter on Android SystemUI lockscreen notifications, and calling `send_web_push()` from `/api/push/test` unconditionally inserted test rows into `pulse_notifications`, making test triggers show up in the Pulse Activity Feed.
+  - *Issue:* Including `icon` (song thumbnail), buyer email / locale tags `(EN)`, and a leading `+` sign on paid amounts (`+$6.00`) cluttered notifications, while similar vibration/banner weights across sales, subscribers, and wishlist suggestions caused reward-prediction errors. Calling `send_web_push()` from `/api/push/test` also previously wrote rows to `pulse_notifications`.
   - *Resolution:*
-    1. Updated `send_web_push()` and all callers in `routes_public.py` (`sale`, `subscriber`, `suggestion` / upvote milestones) to emit 1:1 Stripe-style two-line copy (`+$6.00` / `Goodbye To A Lover Again`, `New Subscriber` / `God Rest Ye Merry`, `9 Votes` / `Aria Math • C418`), stripping `New Sale • Stripe`, emails, locale tags, emojis, and omitting `icon`/`image` so the right side of every notification stays completely blank.
-    2. Added `native_push_queue` table and `GET /api/push/native-poll` in `web_push.py` to power the parallel Native Android APK (`app.meloscribe.pulse` v1.1.0) with true zero-domain native Android notifications (`meloscribe • Jetzt`), adaptive `#06080f` icon, monochrome `@drawable/ic_stat_meloscribe`, and custom crystal `sale_chime.wav` / `sub_chime.wav` / `sug_chime.wav` audio channels.
-    2. Added `record_to_feed: bool = True` to `send_web_push()` and passed `record_to_feed=False` from `trigger_test_push()` (`/api/push/test`), preventing test notifications from polluting `pulse_notifications` or the Pulse Activity Feed.
-    3. Switched `get_pulse_summary()` `checkout_conversion_rate_30d` from global `ca_data["summary"]["conversion_rate"]` to `tier1_segmentation["tier1"]["conversion_rate"]` so `emerging` (Asian/LATAM) and `unknown` abandoned checkouts no longer depress Pulse Checkout Conversion.
+    1. Updated `send_web_push()` and callers in `routes_public.py` (`sale`, `subscriber`, `suggestion` / upvote milestones) to format clean two-line copy with NO `+` sign before currency (`$6.00`, `£6.00`, `6.00 €`), `New Subscriber` / `Free Sheet Unlocked`, and `Wishlist • N Votes` / `Wishlist • New Request`, omitting `icon` and `image` completely.
+    2. Separated vibration and notification priority cleanly: only `sale` triggers audible/haptic chime (`[40]` ms), while `subscriber` and `suggestion` remain completely silent (`vibrate=[]`, PWA `silent: true`, Android `IMPORTANCE_LOW`) and stack per category.
+    3. Added `native_push_queue` table and `GET /api/push/native-poll` in `web_push.py` to power the parallel Native Android APK (`app.meloscribe.pulse` v1.2.0 `versionCode=3`) with zero-domain native Android notifications (`meloscribe • Jetzt`), un-zoomed `#06080f` adaptive icon, 3 category-distinct status icons (`ic_stat_meloscribe`, `ic_stat_sub`, `ic_stat_sug`), subtle matte marimba `sale_chime.wav` for sales only, and GitHub Release binary distribution.
+    4. Added `record_to_feed: bool = True` to `send_web_push()` and passed `record_to_feed=False` from `trigger_test_push()` (`/api/push/test`), keeping `pulse_notifications` clean on test triggers.
+    5. Switched `get_pulse_summary()` `checkout_conversion_rate_30d` from global `ca_data["summary"]["conversion_rate"]` to `tier1_segmentation["tier1"]["conversion_rate"]` so `emerging` (Asian/LATAM) and `unknown` abandoned checkouts no longer depress Pulse Checkout Conversion.
 
 ### 2026-11-12: Pinterest Duplicate Full-Cover Pin Bug (`pinterest_poster.py`)
 - **Root Cause**:

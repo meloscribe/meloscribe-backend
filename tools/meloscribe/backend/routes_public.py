@@ -1354,13 +1354,13 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                             from web_push import send_web_push
                             curr_up = (currency or "EUR").upper()
                             if curr_up == "USD":
-                                fmt_amt = f"+${amount_total:.2f}"
+                                fmt_amt = f"${amount_total:.2f}"
                             elif curr_up == "GBP":
-                                fmt_amt = f"+£{amount_total:.2f}"
+                                fmt_amt = f"£{amount_total:.2f}"
                             elif curr_up == "EUR":
-                                fmt_amt = f"+{amount_total:.2f} €"
+                                fmt_amt = f"{amount_total:.2f} €"
                             else:
-                                fmt_amt = f"+{amount_total:.2f} {curr_up}"
+                                fmt_amt = f"{amount_total:.2f} {curr_up}"
                             background_tasks.add_task(
                                 send_web_push,
                                 notif_type="sale",
@@ -2587,7 +2587,7 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                         background_tasks.add_task(
                             send_web_push,
                             notif_type="suggestion",
-                            title=f"{new_votes} Votes",
+                            title=f"Wishlist • {new_votes} Votes",
                             body=f"{existing[1]} • {existing[2]}" if existing[2] else existing[1],
                             song_name=existing[1],
                             url="/?tab=growth",
@@ -2607,7 +2607,7 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="suggestion",
-                    title="New Request",
+                    title="Wishlist • New Request",
                     body=f"{sug.title.strip()} • {sug.artist.strip()}" if sug.artist.strip() else sug.title.strip(),
                     song_name=sug.title.strip(),
                     url="/?tab=growth",
@@ -2652,7 +2652,7 @@ def upvote_suggestion(sug_id: str, request: Request, background_tasks: Backgroun
                     background_tasks.add_task(
                         send_web_push,
                         notif_type="suggestion",
-                        title=f"{new_votes} Votes",
+                        title=f"Wishlist • {new_votes} Votes",
                         body=f"{s_title} • {s_artist}" if s_artist else s_title,
                         song_name=s_title,
                         url="/?tab=growth",
