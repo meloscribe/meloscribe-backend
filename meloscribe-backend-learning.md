@@ -2,6 +2,14 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-12: Stripe-Minimalist Web Push Payloads, Test-Push Feed Isolation & Tier-1 Pulse Conversion
+- **Ultra-Clean Stripe-Style Lockscreen Notifications (`web_push.py`, `routes_public.py`)**:
+  - *Issue:* Including `icon` (song thumbnail) and buyer email / locale tags `(EN)` in push notification payloads added visual clutter on Android SystemUI lockscreen notifications, and calling `send_web_push()` from `/api/push/test` unconditionally inserted test rows into `pulse_notifications`, making test triggers show up in the Pulse Activity Feed.
+  - *Resolution:*
+    1. Updated `send_web_push()` and all callers in `routes_public.py` (`sale`, `subscriber`, `suggestion` / upvote milestones) to emit ultra-clean Stripe-style 2-line copy (`+$6.00 • Song` / `New Sale • Stripe`, `New Subscriber • Song` / `Free Sheet Unlocked`, `{votes} Votes • Song` / `{artist}`), keeping only the monochrome `badge` (`https://api.meloscribe.dev/api/push/badge.png`) without `icon` or `image` keys.
+    2. Added `record_to_feed: bool = True` to `send_web_push()` and passed `record_to_feed=False` from `trigger_test_push()` (`/api/push/test`), preventing test notifications from polluting `pulse_notifications` or the Pulse Activity Feed.
+    3. Switched `get_pulse_summary()` `checkout_conversion_rate_30d` from global `ca_data["summary"]["conversion_rate"]` to `tier1_segmentation["tier1"]["conversion_rate"]` so `emerging` (Asian/LATAM) and `unknown` abandoned checkouts no longer depress Pulse Checkout Conversion.
+
 ### 2026-11-12: Pinterest Duplicate Full-Cover Pin Bug (`pinterest_poster.py`)
 - **Root Cause**:
   1. `clean_song` stripped `" Teaser"` before resolving video filenames, and `candidates` checked `[f"{clean_song}.mp4", f"{song_name}.mp4"]`. Because `{clean_song}.mp4` (the full cover) already existed inside `/home/ubuntu/meloscribe/staging/{song}/TikToks/`, a `Teaser` queue task (e.g. Task 283 `Goodbye To A Lover Again Teaser`, Task 261 `Floating in Reverie Teaser`) matched and uploaded the **full cover MP4** (`171.8 MB` / `135.6 MB`) with the normal full-cover title; 3 days later the scheduled `normal` task (`284` / `262`) uploaded the identical full cover a second time.

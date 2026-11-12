@@ -1352,15 +1352,24 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     if not session_id.startswith("cs_test_") and email != "2beers.sm@gmail.com":
                         try:
                             from web_push import send_web_push
+                            curr_up = (currency or "EUR").upper()
+                            if curr_up == "USD":
+                                fmt_amt = f"+${amount_total:.2f}"
+                            elif curr_up == "GBP":
+                                fmt_amt = f"+£{amount_total:.2f}"
+                            elif curr_up == "EUR":
+                                fmt_amt = f"+{amount_total:.2f} €"
+                            else:
+                                fmt_amt = f"+{amount_total:.2f} {curr_up}"
                             background_tasks.add_task(
                                 send_web_push,
                                 notif_type="sale",
-                                title=f"💰 New Sale: {amount_total:.2f} {currency} — {song_title}",
-                                body=f"{email} ({locale.upper()}) • Tap to view order",
+                                title=f"{fmt_amt} • {song_title}",
+                                body="New Sale • Stripe",
                                 song_name=song_title,
                                 amount=f"{amount_total:.2f}",
                                 currency=currency,
-                                url="/?tab=pulse",
+                                url="/?tab=sales",
                                 meta={"email": email, "locale": locale, "buyer_name": buyer_name, "currency": currency, "payment_method": "Stripe"}
                             )
                         except Exception as push_err:
@@ -2201,10 +2210,10 @@ def notify_confirm(token: str, background_tasks: BackgroundTasks):
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="subscriber",
-                    title=f"📩 New Subscriber: {song_name or 'meloscribe'}",
-                    body=f"{email} unlocked free sheet music",
+                    title=f"New Subscriber • {song_name or 'meloscribe'}",
+                    body="Free Sheet Unlocked",
                     song_name=song_name or "",
-                    url="/?tab=pulse",
+                    url="/?tab=sales",
                     meta={"email": email, "locale": locale}
                 )
             except Exception as push_err:
@@ -2578,11 +2587,11 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                         background_tasks.add_task(
                             send_web_push,
                             notif_type="suggestion",
-                            title=f"💡 Song Request: {existing[1]}",
-                            body=f"by {existing[2]} • {new_votes} Votes",
+                            title=f"{new_votes} Votes • {existing[1]}",
+                            body=existing[2] or "Community Wishlist",
                             song_name=existing[1],
-                            url="/?tab=pulse",
-                            actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                            url="/?tab=growth",
+                            actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
                             meta={"artist": existing[2], "votes": new_votes, "title": existing[1]}
                         )
                     except Exception as push_err:
@@ -2598,11 +2607,11 @@ def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: Ba
                 background_tasks.add_task(
                     send_web_push,
                     notif_type="suggestion",
-                    title=f"💡 Song Request: {sug.title.strip()}",
-                    body=f"by {sug.artist.strip()} • 1 Votes",
+                    title=f"New Request • {sug.title.strip()}",
+                    body=sug.artist.strip() or "Community Wishlist",
                     song_name=sug.title.strip(),
-                    url="/?tab=pulse",
-                    actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                    url="/?tab=growth",
+                    actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
                     meta={"artist": sug.artist.strip(), "votes": 1, "title": sug.title.strip()}
                 )
             except Exception as push_err:
@@ -2643,11 +2652,11 @@ def upvote_suggestion(sug_id: str, request: Request, background_tasks: Backgroun
                     background_tasks.add_task(
                         send_web_push,
                         notif_type="suggestion",
-                        title=f"💡 Song Request: {s_title}",
-                        body=f"by {s_artist} • {new_votes} Votes",
+                        title=f"{new_votes} Votes • {s_title}",
+                        body=s_artist or "Community Wishlist",
                         song_name=s_title,
-                        url="/?tab=pulse",
-                        actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                        url="/?tab=growth",
+                        actions=[{"action": "add_todo", "title": "+ Add to To-Do"}],
                         meta={"artist": s_artist, "votes": new_votes, "title": s_title}
                     )
                 except Exception as push_err:

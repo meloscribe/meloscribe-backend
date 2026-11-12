@@ -622,7 +622,8 @@ def send_web_push(
     currency: str = "EUR",
     url: str = "/?tab=pulse",
     actions: Optional[List[Dict[str, str]]] = None,
-    meta: Optional[Dict[str, Any]] = None
+    meta: Optional[Dict[str, Any]] = None,
+    record_to_feed: bool = True
 ):
     """
     Broadcasts a real-time Web Push notification to all subscribed devices and records it in SQLite.
@@ -649,64 +650,64 @@ def send_web_push(
         effective_type = "subscriber"
 
     resolved_cover = resolve_cover_url(song_name)
-    badge_url = "https://pulse.meloscribesheets.com/badge-96.png"
+    badge_url = "https://api.meloscribe.dev/api/push/badge.png"
 
-    # Normalize compact, Stripe-style push title, single-line body, icon, and deep-link tab by event identity
-    email_str = str(meta_payload.get("email") or "").strip()
-    loc_str = str(meta_payload.get("locale") or "en").upper()
-    clean_song = clean_cover_song_name(song_name) or song_name
-    has_song_cover = bool(clean_cover_song_name(song_name))
+    # Normalize ultra-clean Stripe-style minimalist push copy without icon/image clutter or email PII
+    clean_song = (clean_cover_song_name(song_name) or song_name or "").strip()
 
     if effective_type == "sale":
         curr_up = (currency or "EUR").upper()
-        sym = "€" if curr_up == "EUR" else ("$" if curr_up == "USD" else f" {curr_up}")
-        amt_fmt = f"+{numeric_amt:.2f}{sym}" if curr_up in ("EUR", "USD") else f"+{numeric_amt:.2f} {curr_up}"
-        push_title = f"{amt_fmt}  •  {clean_song or 'Sheet Order'}"
-        push_body = f"{email_str} • Stripe ({loc_str})" if email_str else f"Paid order via Stripe ({loc_str})"
-        push_icon = resolved_cover
+        if curr_up == "USD":
+            formatted_amount = f"+${numeric_amt:.2f}"
+        elif curr_up == "GBP":
+            formatted_amount = f"+£{numeric_amt:.2f}"
+        elif curr_up == "EUR":
+            formatted_amount = f"+{numeric_amt:.2f} €"
+        else:
+            formatted_amount = f"+{numeric_amt:.2f} {curr_up}"
+        push_title = f"{formatted_amount} • {clean_song or 'Sheet Order'}"
+        push_body = "New Sale • Stripe"
         push_url = "/?tab=sales"
         vibrate = [90, 45, 90, 45, 180]
+        effective_actions = actions or []
     elif effective_type == "subscriber":
-        push_title = f"Free Unlock  •  {clean_song}" if clean_song else f"New Subscriber  •  {email_str or 'Lead'}"
-        if clean_song and email_str:
-            push_body = f"{email_str} • {loc_str}"
-        elif email_str:
-            push_body = f"Double opt-in confirmed • {loc_str}"
-        else:
-            push_body = f"Free sheet unlock • {loc_str}"
-        push_icon = resolved_cover if has_song_cover else "https://pulse.meloscribesheets.com/icon-192.png"
+        push_title = f"New Subscriber • {clean_song or 'meloscribe'}"
+        push_body = "Free Sheet Unlocked"
         push_url = "/?tab=sales"
         vibrate = [60, 40, 60]
+        effective_actions = actions or []
     else:
         votes_n = int(meta_payload.get("votes") or 1)
         artist_str = str(meta_payload.get("artist") or "").strip()
-        push_title = f"Request ({votes_n} Votes)  •  {clean_song or title}"
-        push_body = f"{artist_str} • Tap to add to To-Do" if artist_str else "Tap to add to creator To-Do"
-        push_icon = "https://pulse.meloscribesheets.com/icon-192.png"
+        push_title = f"{votes_n} Votes • {clean_song or title}" if votes_n > 1 else f"New Request • {clean_song or title}"
+        push_body = artist_str if artist_str else "Community Wishlist"
         push_url = "/?tab=growth"
         vibrate = [50, 50, 120]
+        effective_actions = actions if actions is not None else [{"action": "add_todo", "title": "+ Add to To-Do"}]
 
-    notif_id = record_pulse_notification(
-        notif_type=effective_type,
-        title=push_title,
-        subtitle=push_body,
-        amount=f"{numeric_amt:.2f}" if effective_type == "sale" else "",
-        song_name=song_name,
-        cover_url=resolved_cover,
-        meta=meta_payload
-    )
+    if record_to_feed:
+        notif_id = record_pulse_notification(
+            notif_type=effective_type,
+            title=push_title,
+            subtitle=push_body,
+            amount=f"{numeric_amt:.2f}" if effective_type == "sale" else "",
+            song_name=song_name,
+            cover_url=resolved_cover,
+            meta=meta_payload
+        )
+    else:
+        notif_id = int(datetime.datetime.utcnow().timestamp() * 1000) % 1000000000
 
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
 
-    # Keep Android notification compact and native (Stripe-style) without redundant BigPicture banner box
+    # Omit icon and image so Android renders only the monochrome badge + crisp 2-line Stripe typography
     payload = {
         "title": push_title,
         "body": push_body,
-        "icon": push_icon,
         "badge": badge_url,
         "vibrate": vibrate,
-        "actions": actions or [],
+        "actions": effective_actions,
         "data": {
             "notif_id": notif_id,
             "type": effective_type,
@@ -961,10 +962,17 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row else "de") or "de"
         buyer_name = (row["buyer_name"] if row else "Piano Lover") or "Piano Lover"
 
-        sym = "€" if curr.upper() == "EUR" else ("$" if curr.upper() == "USD" else f" {curr.upper()}")
-        amt_label = f"+{amt:.2f}{sym}" if curr.upper() in ("EUR", "USD") else f"+{amt:.2f} {curr.upper()}"
-        title = f"{amt_label}  •  {song}"
-        body = f"{email} • Stripe ({locale.upper()})"
+        curr_up = curr.upper()
+        if curr_up == "USD":
+            amt_label = f"+${amt:.2f}"
+        elif curr_up == "GBP":
+            amt_label = f"+£{amt:.2f}"
+        elif curr_up == "EUR":
+            amt_label = f"+{amt:.2f} €"
+        else:
+            amt_label = f"+{amt:.2f} {curr_up}"
+        title = f"{amt_label} • {song}"
+        body = "New Sale • Stripe"
         amount_str = f"{amt:.2f}"
         meta = {"email": email, "locale": locale, "buyer_name": buyer_name, "currency": curr, "payment_method": "Stripe"}
         actions = []
@@ -976,8 +984,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         locale = (row["locale"] if row and "locale" in row.keys() else "en") or "en"
         song = (row["song_name"] if row and "song_name" in row.keys() and row["song_name"] else "River Flows in You")
 
-        title = f"Free Unlock  •  {song}"
-        body = f"{email} • {locale.upper()}"
+        title = f"New Subscriber • {song}"
+        body = "Free Sheet Unlocked"
         amount_str = ""
         curr = "EUR"
         meta = {"email": email, "locale": locale}
@@ -991,8 +999,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         artist = (row["artist"] if row else "Hans Zimmer") or "Hans Zimmer"
         votes = (row["votes"] if row else 12) or 12
 
-        title = f"Request ({votes} Votes)  •  {song}"
-        body = f"{artist} • Tap to add to To-Do"
+        title = f"{votes} Votes • {song}" if votes > 1 else f"New Request • {song}"
+        body = artist if artist else "Community Wishlist"
         amount_str = ""
         curr = "EUR"
         meta = {"artist": artist, "votes": votes, "title": song}
@@ -1011,7 +1019,8 @@ def trigger_test_push(req: TestPushRequest, request: Request, background_tasks: 
         currency=curr,
         url="/?tab=pulse",
         actions=actions,
-        meta=meta
+        meta=meta,
+        record_to_feed=False
     )
     return {
         "status": "success",
@@ -1425,7 +1434,12 @@ def get_pulse_summary(request: Request):
     ca_data = _CHECKOUT_CACHE.get("data")
 
     if ca_data and ca_data.get("summary"):
-        checkout_conv_rate = float(ca_data["summary"].get("conversion_rate", 0.0))
+        # Use Tier-1 segmentation conversion rate so emerging/Asian browsing traffic does not skew Pulse KPI
+        tier1_seg = ca_data["summary"].get("tier1_segmentation", {}).get("tier1", {})
+        if tier1_seg and int(tier1_seg.get("initiated", 0)) > 0:
+            checkout_conv_rate = float(tier1_seg.get("conversion_rate", 0.0))
+        else:
+            checkout_conv_rate = float(ca_data["summary"].get("conversion_rate", 0.0))
     else:
         c.execute("SELECT SUM(profile_views) as web_views FROM channel_insights WHERE platform = 'website' AND date >= date('now', '-30 days')")
         web_row = c.fetchone()
