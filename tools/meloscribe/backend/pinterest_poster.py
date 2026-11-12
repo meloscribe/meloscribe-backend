@@ -20,6 +20,7 @@ import urllib.parse
 import base64
 import requests
 from pathlib import Path
+from typing import Optional
 
 # Path to Pinterest credentials
 TOKENS_PATH = Path(__file__).resolve().parent / "pinterest_tokens.json"
@@ -159,6 +160,110 @@ def upload_video_media(video_path: str, access_token: str) -> str:
     print(f"[Pinterest API] Timeout after {max_wait_seconds}s waiting for video processing.")
     return None
 
+def resolve_pinterest_variant(song_name: str, profile: str = "normal", is_easy: bool = False) -> dict:
+    """Resolve canonical base song name and variant flags from song_name and queue profile."""
+    profile_lower = (profile or "normal").lower()
+    song_lower = (song_name or "").lower()
+    easy_flag = bool(is_easy or song_lower.endswith(" easy") or "easy" in profile_lower)
+    teaser_flag = bool(song_lower.endswith(" teaser") or " teaser " in song_lower or profile_lower == "hook")
+    tutorial_flag = bool("tutorial" in profile_lower)
+
+    clean_song = song_name
+    if clean_song.lower().endswith(" recycled"):
+        clean_song = clean_song[:-9].strip()
+    if clean_song.lower().endswith(" teaser"):
+        clean_song = clean_song[:-7].strip()
+    if clean_song.lower().endswith(" easy"):
+        clean_song = clean_song[:-5].strip()
+
+    return {
+        "clean_song": clean_song,
+        "is_easy": easy_flag,
+        "is_teaser": teaser_flag,
+        "is_tutorial": tutorial_flag,
+    }
+
+
+def resolve_pinterest_video_path(song_name: str, profile: str = "normal", is_easy: bool = False) -> Optional[str]:
+    """Resolve exact variant MP4 path so teaser/tutorial/easy tasks never fall back to the normal full cover."""
+    meta = resolve_pinterest_variant(song_name, profile, is_easy)
+    clean_song = meta["clean_song"]
+    easy_flag = meta["is_easy"]
+    teaser_flag = meta["is_teaser"]
+    tutorial_flag = meta["is_tutorial"]
+
+    search_dirs = []
+    import platform
+    if platform.system() == "Linux":
+        staging_base = "/home/ubuntu/meloscribe/staging"
+        search_dirs.extend([
+            os.path.join(staging_base, clean_song, "TikToks"),
+            os.path.join(staging_base, song_name, "TikToks"),
+        ])
+
+    try:
+        from settings import load_settings
+        cfg = load_settings()
+        cfg_dir = cfg.get("tiktok_dir")
+        if cfg_dir and cfg_dir not in search_dirs:
+            search_dirs.append(cfg_dir)
+    except Exception:
+        pass
+
+    if r"C:\Dev\meloscribe\TikToks" not in search_dirs:
+        search_dirs.append(r"C:\Dev\meloscribe\TikToks")
+
+    candidates = []
+    if easy_flag and tutorial_flag:
+        candidates.extend([
+            f"{clean_song} Easy slow.mp4",
+            f"{clean_song} easy slow.mp4",
+            f"{song_name} slow.mp4",
+        ])
+    elif easy_flag and teaser_flag:
+        candidates.extend([
+            f"{clean_song} Easy Teaser.mp4",
+            f"{clean_song} easy teaser.mp4",
+            f"{song_name}.mp4",
+        ])
+    elif easy_flag:
+        candidates.extend([
+            f"{clean_song} Easy.mp4",
+            f"{clean_song} easy.mp4",
+            f"{song_name}.mp4",
+        ])
+    elif teaser_flag:
+        candidates.extend([
+            f"{song_name}.mp4",
+            f"{clean_song} Teaser.mp4",
+            f"{clean_song} teaser.mp4",
+        ])
+    elif tutorial_flag:
+        candidates.extend([
+            f"{song_name} slow.mp4",
+            f"{clean_song} slow.mp4",
+            f"{song_name} Slow.mp4",
+            f"{clean_song} Slow.mp4",
+        ])
+    else:
+        candidates.extend([f"{song_name}.mp4", f"{clean_song}.mp4"])
+
+    for sdir in search_dirs:
+        if not os.path.exists(sdir):
+            continue
+        for cand in candidates:
+            p = os.path.join(sdir, cand)
+            if os.path.exists(p):
+                return p
+        # Case-insensitive priority scan restricted strictly to this variant's candidates
+        dir_map = {fname.lower(): os.path.join(sdir, fname) for fname in os.listdir(sdir)}
+        for cand in candidates:
+            matched = dir_map.get(cand.lower())
+            if matched:
+                return matched
+    return None
+
+
 def post_pin(song_name: str, author: str = "Dave Kerr", profile: str = "normal", is_easy: bool = False, board_id: str = None, video_path: str = None) -> bool:
     """
     Creates a Pin for a song on Pinterest.
@@ -179,17 +284,11 @@ def post_pin(song_name: str, author: str = "Dave Kerr", profile: str = "normal",
         print("[Pinterest API] Error: No access token found in tokens file.")
         return False
         
-    # Check if song is marked easy
-    if song_name.lower().endswith(" easy"):
-        is_easy = True
-        
-    clean_song = song_name
-    if clean_song.lower().endswith(" recycled"):
-        clean_song = clean_song[:-9].strip()
-    if clean_song.lower().endswith(" easy"):
-        clean_song = clean_song[:-5].strip()
-    elif clean_song.lower().endswith(" teaser"):
-        clean_song = clean_song[:-7].strip()
+    variant = resolve_pinterest_variant(song_name, profile, is_easy)
+    clean_song = variant["clean_song"]
+    is_easy = variant["is_easy"]
+    is_teaser = variant["is_teaser"]
+    is_tutorial = variant["is_tutorial"]
         
     # 1. Resolve Board ID
     if not board_id:
@@ -198,68 +297,36 @@ def post_pin(song_name: str, author: str = "Dave Kerr", profile: str = "normal",
         else:
             board_id = tokens.get("pinterest_board_intermediate") or "1084101010242508268"
             
-    # 2. Resolve Video Path if not provided
+    # 2. Resolve Video Path strictly matching variant
     if not video_path:
-        search_dirs = []
-        import platform
-        if platform.system() == "Linux":
-            staging_base = "/home/ubuntu/meloscribe/staging"
-            search_dirs.extend([
-                os.path.join(staging_base, clean_song, "TikToks"),
-                os.path.join(staging_base, song_name, "TikToks")
-            ])
-            
-        try:
-            from settings import load_settings
-            cfg = load_settings()
-            cfg_dir = cfg.get("tiktok_dir")
-            if cfg_dir and cfg_dir not in search_dirs:
-                search_dirs.append(cfg_dir)
-        except Exception:
-            pass
-            
-        if r"C:\Dev\meloscribe\TikToks" not in search_dirs:
-            search_dirs.append(r"C:\Dev\meloscribe\TikToks")
-            
-        candidates = []
-        if is_easy:
-            candidates.extend([f"{clean_song} Easy.mp4", f"{clean_song} easy.mp4"])
-        else:
-            candidates.extend([f"{clean_song}.mp4", f"{song_name}.mp4"])
-            
-        for sdir in search_dirs:
-            if not os.path.exists(sdir):
-                continue
-            for cand in candidates:
-                p = os.path.join(sdir, cand)
-                if os.path.exists(p):
-                    video_path = p
-                    break
-            if video_path:
-                break
-                
-            # Case-insensitive scan
-            target_cand = (f"{clean_song} easy.mp4" if is_easy else f"{clean_song}.mp4").lower()
-            for fname in os.listdir(sdir):
-                if fname.lower() == target_cand:
-                    video_path = os.path.join(sdir, fname)
-                    break
-            if video_path:
-                break
+        video_path = resolve_pinterest_video_path(song_name, profile, is_easy)
 
     # 3. Clean Cover URL
     encoded_name = urllib.parse.quote(clean_song)
     cover_url = f"https://meloscribesheets.com/covers/{encoded_name}_clean.jpg"
     
-    # 4. Construct High-Ranking Pinterest SEO Title (Max 100 chars)
-    if is_easy:
+    # 4. Construct High-Ranking Pinterest SEO Title (Max 100 chars, distinct per variant)
+    if is_easy and is_tutorial:
+        title = f"🎹 {clean_song} - Easy Slow Piano Tutorial & Sheet Music | {author}"
+        short_label = "Easy Slow Piano Tutorial"
+    elif is_easy and is_teaser:
+        title = f"🎹 {clean_song} (Best Part) - Easy Piano Cover & Sheets | {author}"
+        short_label = "Easy Piano Cover"
+    elif is_easy:
         title = f"🎹 {clean_song} - Easy Piano Sheet Music & Tutorial | {author}"
+        short_label = "Easy Piano Sheets"
+    elif is_teaser:
+        title = f"🎹 {clean_song} (Best Part) - Piano Cover & Sheet Music | {author}"
+        short_label = "Best Part Piano Cover"
+    elif is_tutorial:
+        title = f"🎹 {clean_song} - Slow Piano Tutorial & Sheet Music | {author}"
+        short_label = "Slow Piano Tutorial"
     else:
         title = f"🎹 {clean_song} - Piano Sheet Music & Tutorial | {author}"
+        short_label = "Piano Sheet Music"
         
     if len(title) > 100:
-        label = "Easy Piano Sheets" if is_easy else "Piano Sheet Music"
-        title = f"🎹 {clean_song} - {label} | {author}"
+        title = f"🎹 {clean_song} - {short_label} | {author}"
     if len(title) > 100:
         title = title[:97] + "..."
         
@@ -269,11 +336,26 @@ def post_pin(song_name: str, author: str = "Dave Kerr", profile: str = "normal",
     version_suffix = "&version=easy" if is_easy else ""
     song_link = f"https://meloscribesheets.com/?song={slug}{version_suffix}"
     
-    # 6. Construct High-Ranking Pinterest SEO Description (Max 500 chars)
+    # 6. Construct High-Ranking Pinterest SEO Description (Max 500 chars, distinct per variant)
     clean_tag = re.sub(r'[^a-zA-Z0-9]', '', clean_song).lower()
     author_tag = re.sub(r'[^a-zA-Z0-9]', '', author).lower()
     
-    if is_easy:
+    if is_tutorial:
+        level_note = "Slowed-down practice tutorial for learning step by step." if not is_easy else "Easy slowed-down practice tutorial for beginners."
+        board_note = "Check out our Easy Piano boards for more beginner tutorials." if is_easy else "Follow for more slow piano tutorials & sheet music."
+        desc = (
+            f"Practice '{clean_song}' by {author} step by step on piano! 🎹\n\n"
+            f"✨ {level_note} Click the Pin for PDF Sheet Music, MIDI & practice files!\n\n"
+            f"{board_note}\n\n"
+            f"#piano #pianotutorial #learnpiano #sheetmusic #{clean_tag} #{author_tag} #slowpiano #pianopractice #synthesia"
+        )
+    elif is_teaser:
+        desc = (
+            f"Best part of '{clean_song}' by {author} on piano! 🎹\n\n"
+            f"✨ Love this melody? Click the Pin to get the full Sheet Music (PDF), MIDI & slow tutorial!\n\n"
+            f"#piano #pianocover #aestheticpiano #sheetmusic #{clean_tag} #{author_tag} #pianomusic #melody #pianoreels"
+        )
+    elif is_easy:
         desc = (
             f"Learn how to play '{clean_song}' by {author} on piano! 🎹\n\n"
             f"✨ Click the Pin to get the Sheet Music (PDF), MIDI & practice tutorial!\n\n"
@@ -360,6 +442,6 @@ if __name__ == "__main__":
     parser.add_argument("--video_path", default=None, help="Explicit video file path")
     args = parser.parse_args()
     
-    is_easy = "easy" in args.song.lower() or args.profile == "easy"
+    is_easy = "easy" in args.song.lower() or "easy" in args.profile.lower()
     success = post_pin(args.song, args.author, args.profile, is_easy=is_easy, board_id=args.board_id, video_path=args.video_path)
     sys.exit(0 if success else 1)
