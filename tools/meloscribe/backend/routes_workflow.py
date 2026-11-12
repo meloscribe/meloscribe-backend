@@ -31,6 +31,10 @@ from shared import (
     TOOLS_DIR
 )
 from settings import save_settings
+import logging
+
+logger = logging.getLogger("meloscribe.workflow")
+python = sys.executable
 
 router = APIRouter()
 
@@ -890,7 +894,7 @@ def batch_processor_worker():
                 keysight_dir = Path(settings.get("keysight_dir", r"C:\Dev\meloscribe\Keysight export"))
                 for suffix, folder_name in versions:
                     v_song = f"{song_name}{suffix}"
-                    is_easy = (suffix == " easy")
+                    is_easy = "easy" in suffix.lower()
                     for vtype, prefix in [("normal", ""), ("tutorial", " slow")]:
                         vid_in = str(keysight_dir / f"{v_song}{prefix}.mp4")
                         midi_path = f"C:\\Cakewalk Projects\\{folder_name}\\{v_song}{prefix}.mid"
@@ -1240,7 +1244,7 @@ def confirm_hook(req: ConfirmHookRequest):
                 "hook_end": float(h_end),
                 "duration": round(float(h_end) - float(h_start), 2),
                 "source": "master_tab",
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.datetime.now().isoformat()
             }
             with open(hooks_json_path, "w", encoding="utf-8") as f:
                 json.dump(hooks_data, f, indent=2)
@@ -1602,6 +1606,8 @@ async def batch_initialize(
         raise HTTPException(status_code=500, detail=f"Database or filesystem error: {str(e)}")
 
     conn.close()
+    return {"status": "success", "initialized": initialized_songs}
+
 class InitializeExistingRequest(BaseModel):
     songName: str
     author: str = "Traditional"
@@ -2055,10 +2061,19 @@ async def regenerate_preview(req: dict):
         except Exception:
             return 60.0
 
+    h_start = float(hook_start) if hook_start is not None else 0.0
+    h_end = float(hook_end) if hook_end is not None else 0.0
+    use_custom_hook = (h_end > h_start and (h_end - h_start) >= 5.0)
+
     duration = get_video_duration(source)
-    half_duration = max(10.0, duration / 2.0)
-    fade_start = half_duration - 3.0
-    text_fade_start = half_duration - 2.0
+    if use_custom_hook:
+        preview_duration = min(h_end - h_start, max(1.0, duration - h_start))
+        fade_start = max(1.0, preview_duration - 3.0)
+        text_fade_start = max(1.0, preview_duration - 2.0)
+    else:
+        preview_duration = max(10.0, duration / 2.0)
+        fade_start = preview_duration - 3.0
+        text_fade_start = preview_duration - 2.0
 
     width, height = get_video_dimensions(source)
     title_size = int(width * 0.05)
@@ -2112,9 +2127,12 @@ async def regenerate_preview(req: dict):
         f":alpha='if(lt(t,{text_fade_start}),0,min(1,(t-{text_fade_start})/0.5))'"
     )
     
-    cmd = [
-        "ffmpeg", "-y",
-        "-to", f"{half_duration:.2f}",
+    cmd = ["ffmpeg", "-y"]
+    if use_custom_hook:
+        cmd.extend(["-ss", f"{h_start:.2f}", "-to", f"{h_end:.2f}"])
+    else:
+        cmd.extend(["-to", f"{preview_duration:.2f}"])
+    cmd.extend([
         "-i", str(source),
         "-filter_complex", filter_complex,
         "-af", f"afade=type=out:start_time={fade_start}:duration=3.0",
@@ -2122,7 +2140,7 @@ async def regenerate_preview(req: dict):
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         str(dest_preview)
-    ]
+    ])
     creation_flags = 0x08000000 if sys.platform == "win32" else 0
     rc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
     
@@ -2167,12 +2185,22 @@ async def regenerate_preview(req: dict):
     if wav_path:
         try:
             dest_mp3.parent.mkdir(parents=True, exist_ok=True)
-            cmd_mp3 = [
-                "ffmpeg", "-y",
-                "-i", str(wav_path),
-                "-c:a", "libmp3lame", "-b:a", "128k",
-                str(dest_mp3)
-            ]
+            cmd_mp3 = ["ffmpeg", "-y"]
+            if use_custom_hook:
+                cmd_mp3.extend(["-ss", f"{h_start:.2f}", "-to", f"{h_end:.2f}"])
+                fade_out_start = max(0.0, (h_end - h_start) - 2.0)
+                cmd_mp3.extend([
+                    "-i", str(wav_path),
+                    "-af", f"afade=type=out:start_time={fade_out_start:.2f}:duration=2.0",
+                    "-c:a", "libmp3lame", "-b:a", "128k",
+                    str(dest_mp3)
+                ])
+            else:
+                cmd_mp3.extend([
+                    "-i", str(wav_path),
+                    "-c:a", "libmp3lame", "-b:a", "128k",
+                    str(dest_mp3)
+                ])
             rc_mp3 = subprocess.run(cmd_mp3, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
             if rc_mp3 == 0:
                 log_error(f"[Preview Regen] Success: Audio hover MP3 cropped to hook.")
@@ -2185,7 +2213,7 @@ async def regenerate_preview(req: dict):
     r2_account_id = settings.get("r2_account_id")
     r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id")
     r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key")
-    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets")
     uploaded = False
     if r2_account_id and r2_access_key and r2_secret_key:
         try:

@@ -71,10 +71,8 @@ PUBLIC_ROUTES = [
     "/api/pinterest/sync",
     "/callback",
     "/pinterest-callback",
-    "/api/oauth/code",
-    "/api/events",
+    "/api/events/outbound",
     "/public",
-    "/ws/logs"
 ]
 
 @app.middleware("http")
@@ -295,13 +293,13 @@ def periodic_background_sync():
 
         # 5. Competitor Sync
         try:
-            from routes_admin import sync_competitors
+            from routes_admin import _sync_competitors_core
             import asyncio
             try:
-                asyncio.run(sync_competitors())
+                asyncio.run(_sync_competitors_core())
                 log_error("[Background Sync] Competitor channels sync: SUCCESS")
             except RuntimeError:
-                coro = sync_competitors()
+                coro = _sync_competitors_core()
                 asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
                 log_error("[Background Sync] Competitor channels sync: SUCCESS (threadsafe)")
         except Exception as e:
@@ -371,9 +369,9 @@ _sync_errors = []
 def startup_event():
     initialize_server_api_key()
     
-    # Run local automatic backup (Windows local environment only)
+    # Run local automatic backup (Windows local environment only) in background
     if platform.system() == "Windows":
-        run_automatic_backup()
+        threading.Thread(target=run_automatic_backup, daemon=True).start()
     
     # DB setup/migration
     try:
@@ -417,9 +415,11 @@ def startup_event():
                 print(f"[ngrok] Failed to start: {e}")
         threading.Thread(target=run_ngrok, daemon=True).start()
 
-    # Startup metrics sync (background)
+    # Startup metrics sync (deferred by 10s to ensure zero UI startup contention)
     def run_tiktok_sync():
         try:
+            import time
+            time.sleep(10)
             sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_sync.py")
             if os.path.exists(sync_path):
                 import importlib.util
@@ -434,6 +434,8 @@ def startup_event():
 
     def run_instagram_sync():
         try:
+            import time
+            time.sleep(11)
             sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "ig_sync.py")
             if os.path.exists(sync_path):
                 import importlib.util
@@ -448,6 +450,8 @@ def startup_event():
 
     def run_youtube_sync():
         try:
+            import time
+            time.sleep(12)
             sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "yt_sync.py")
             if os.path.exists(sync_path):
                 import importlib.util
@@ -462,6 +466,8 @@ def startup_event():
 
     def run_demographics_sync():
         try:
+            import time
+            time.sleep(13)
             sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "demographics_sync.py")
             if os.path.exists(sync_path):
                 import importlib.util
@@ -476,6 +482,8 @@ def startup_event():
 
     def run_threads_refresh():
         try:
+            import time
+            time.sleep(14)
             tokens_path = TOOLS_DIR / "meloscribe" / "backend" / "threads_tokens.json"
             if not tokens_path.exists():
                 return
@@ -523,6 +531,13 @@ def clear_error_logs():
 
 @app.websocket("/ws/logs")
 async def websocket_endpoint(websocket: WebSocket):
+    # Enforce authentication on production server (Linux)
+    if platform.system() != "Windows":
+        key = websocket.query_params.get("key") or websocket.headers.get("X-Meloscribe-Key")
+        stored_key = get_server_api_key()
+        if not stored_key or key != stored_key:
+            await websocket.close(code=1008)
+            return
     await manager.connect(websocket)
     try:
         while True:
@@ -546,9 +561,11 @@ if os.path.exists(public_dir):
 
 if __name__ == "__main__":
     import uvicorn
+    # Use 127.0.0.1 on Windows to prevent exposing internal endpoints on local networks
+    host = "127.0.0.1" if platform.system() == "Windows" else "0.0.0.0"
     uvicorn.run(
         app,
-        host="0.0.0.0",
+        host=host,
         port=8787,
         # Allow large file uploads (videos can be 500MB+)
         h11_max_incomplete_event_size=0,

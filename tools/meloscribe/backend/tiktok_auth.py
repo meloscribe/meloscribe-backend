@@ -27,7 +27,7 @@ def _generate_pkce():
     return code_verifier, code_challenge
 
 # -------------------------------------------------------
-CLIENT_KEY    = "sbaw7fguduihq6she7"
+CLIENT_KEY    = "awe54p8mg3xasm1l"
 CLIENT_SECRET = ""
 LOCAL_PORT    = 8080
 REDIRECT_URI  = "https://api.meloscribe.dev/callback"
@@ -76,6 +76,9 @@ def _refresh_access_token(refresh_token: str) -> dict | None:
     }, headers={"Content-Type": "application/x-www-form-urlencoded"})
     if resp.status_code == 200:
         data = resp.json()
+        if "access_token" not in data:
+            print(f"[TikTok] Refresh failed (response missing access_token): {data}")
+            return None
         # Save immediately so the next call has fresh tokens
         tokens = _load_tokens() or {}
         tokens.update({
@@ -192,6 +195,7 @@ def run_initial_auth(open_browser=True):
 
     global LAST_AUTH_URL
     LAST_AUTH_URL = auth_url
+    print(f"[TikTok] Auth URL: {auth_url}", flush=True)
     
     if open_browser:
         print(f"[TikTok] Opening browser for authorization...")
@@ -205,8 +209,14 @@ def run_initial_auth(open_browser=True):
         if "code" in captured:
             break
         try:
+            auth_headers = {}
+            if _settings.get("server_api_key"):
+                auth_headers["X-Meloscribe-Key"] = _settings.get("server_api_key")
+            if _settings.get("admin_passcode"):
+                auth_headers["x-admin-passcode"] = str(_settings.get("admin_passcode"))
             poll_resp = requests.get(
                 f"https://api.meloscribe.dev/api/oauth/code?state={state}",
+                headers=auth_headers,
                 timeout=3
             )
             if poll_resp.status_code == 200:

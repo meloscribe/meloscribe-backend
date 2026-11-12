@@ -1074,7 +1074,7 @@ def main():
     finally:
         # cleanup temp UUID files from temp_dir
         for temp_f in [
-            title_txt, author_txt, outro1_txt, outro2_txt,
+            title_txt, title1_txt, title2_txt, author_txt, outro1_txt, outro2_txt,
             sheets_txt, morph_txt, watermark_txt,
             mask_path, metronome_path
         ]:

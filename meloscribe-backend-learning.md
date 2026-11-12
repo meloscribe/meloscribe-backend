@@ -722,3 +722,29 @@ Living database of technical quirks, bugs, environment insights, and resolved is
   - Updating a song previously marked with `isArrangeMe: true` requires an explicit `else:` branch in `add_song_to_website()` to set `isArrangeMe = False` and `paymentsDisabled = False`, clearing `arrangemeUrl` and unblocking Stripe direct checkout on the website frontend.
 - **Customer Fulfillment ZIP Packages on Cloudflare R2**:
   - Direct downloads via `routes_public.py` support both individual files (`.pdf`, `.mid`, `.mp4`) and a full `.zip` (`{Song} Full Package.zip`). For direct website arrangements, pre-building and uploading `{Song} Full Package.zip` to R2 guarantees complete customer fulfillment.
+
+---
+
+### 2026-11-12: Production Security Hardening & Zero-Tolerance Bug Elimination (Audit Remediation)
+
+- **Sandbox `demo_` / `demo_hash_` Download Leak Closed:**
+  - *Symptom:* `routes_public.py` granted free sheet music downloads, generated Cloudflare R2 presigned URLs, and bypassed the 3-device IP limit for any request starting with `demo_` or `demo_hash_`.
+  - *Fix:* Added `is_sandbox_or_local()`. On production Linux VM, unauthorized `demo_` / `demo_hash_` requests return 404/403.
+- **Unauthenticated Write & Log Access Protected:**
+  - *Symptom:* `POST /api/public/stats` and `GET /api/events/outbound/stats` lacked admin authentication. `GET /api/oauth/code` allowed third parties to poll and drain OAuth tokens.
+  - *Fix:* Injected `verify_admin(request)` into both endpoints. Removed `/api/oauth/code` from `PUBLIC_ROUTES`, requiring `X-Meloscribe-Key` or `x-admin-passcode`.
+- **Reflected XSS & NoneType Crash in OAuth Callback:**
+  - *Symptom:* Unescaped `state` in HTML (`oauth_callback`) and `code[:15]` crash when providers returned error parameters.
+  - *Fix:* Applied `html.escape(state)` and guarded `if not code:`.
+- **RCE & Traversal Prevention:**
+  - *Symptom:* `get_server_file` in `routes_admin.py` evaluated raw path strings and executed `cat '{remote_path}'` over SSH without shell escaping.
+  - *Fix:* Applied `verify_admin()`, validated `Path(filename).name == filename`, escaped SSH command via `shlex.quote()`, and bound Windows runner to `127.0.0.1`.
+- **8 Latent Runtime Crashes Eliminated:**
+  - `python` not defined in `routes_workflow.py`.
+  - `logger` not defined in `routes_workflow.py`.
+  - `datetime.now()` vs `datetime.datetime.now()` in `confirm_hook`.
+  - `PROJECT_ROOT` not defined in `arrangeme_bot.py`.
+  - `_sync_competitors_core()` extracted to prevent argument mismatch in `main.py`.
+  - `_send_confirmation_email()` argument count fixed in `routes_admin.py`.
+  - `is_easy = "easy" in suffix.lower()` string check in `batch_processor_worker`.
+  - Fixed `regenerate_preview` ignoring hook timestamps in FFmpeg cut and audio export.

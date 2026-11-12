@@ -2,6 +2,7 @@ import re
 import os
 import sys
 import json
+import shlex
 import subprocess
 import sqlite3
 import platform
@@ -1119,6 +1120,14 @@ if platform.system() == "Windows":
 
     @router.get("/api/server/file")
     def get_server_file(song: str, filename: str, request: Request, folder: str = ""):
+        verify_admin(request)
+        if Path(filename).name != filename:
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        if Path(song).name != song:
+            raise HTTPException(status_code=400, detail="Invalid song parameter")
+        if folder and Path(folder).name != folder:
+            raise HTTPException(status_code=400, detail="Invalid folder parameter")
+
         is_video = filename.lower().endswith(".mp4")
         
         # 1. Resolve local path
@@ -1200,7 +1209,7 @@ if platform.system() == "Windows":
             "-o", "ConnectTimeout=5", 
             "-o", "IdentitiesOnly=yes", 
             f"ubuntu@{server_ip}", 
-            f"cat '{remote_path}'"
+            f"cat {shlex.quote(remote_path)}"
         ]
         
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATION_FLAGS)
@@ -1362,7 +1371,7 @@ else:
             
             sub_email, sub_token, sub_song_name, sub_song_id, sub_locale = row
             from routes_public import _send_confirmation_email
-            _send_confirmation_email(sub_email, sub_token, sub_song_name or "Sheet Music", sub_song_id or "", sub_locale or "en")
+            _send_confirmation_email(sub_email, sub_token, sub_song_name or "Sheet Music", sub_locale or "en")
             return {"success": True, "email": sub_email, "message": "Confirmation email resent"}
         except HTTPException:
             raise
@@ -2250,57 +2259,61 @@ async def delete_competitor(channel_id: str, req: Request):
     conn.close()
     return JSONResponse(content={"success": True})
 
+async def _sync_competitors_core() -> int:
+    from yt_auth import get_authenticated_service
+    from googleapiclient.discovery import build
+    creds = get_authenticated_service()
+    youtube = build("youtube", "v3", credentials=creds)
+    
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    c.execute("SELECT channel_id, channel_name FROM competitors")
+    comps = c.fetchall()
+    today = datetime.date.today().isoformat()
+    total_synced = 0
+    
+    for comp in comps:
+        cid = comp["channel_id"]
+        try:
+            search_resp = youtube.search().list(
+                part="snippet", channelId=cid, order="date",
+                type="video", maxResults=10
+            ).execute()
+            
+            video_ids = [item["id"]["videoId"] for item in search_resp.get("items", [])]
+            if not video_ids:
+                continue
+                
+            stats_resp = youtube.videos().list(
+                part="statistics,snippet", id=",".join(video_ids)
+            ).execute()
+            
+            for item in stats_resp.get("items", []):
+                vid_id = item["id"]
+                title = item["snippet"]["title"]
+                published = item["snippet"]["publishedAt"][:10]
+                views = int(item["statistics"].get("viewCount", 0))
+                likes = int(item["statistics"].get("likeCount", 0))
+                
+                c.execute("""INSERT OR REPLACE INTO competitor_videos 
+                           (channel_id, video_id, title, views, likes, published_at, snapshot_date)
+                           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                          (cid, vid_id, title, views, likes, published, today))
+                total_synced += 1
+        except Exception as e:
+            print(f"[Competitor Sync] Failed for {comp['channel_name']}: {e}")
+    
+    conn.commit()
+    conn.close()
+    return total_synced
+
 @router.post("/api/competitors/sync")
 async def sync_competitors(req: Request):
     verify_admin(req)
     try:
-        from yt_auth import get_authenticated_service
-        from googleapiclient.discovery import build
-        creds = get_authenticated_service()
-        youtube = build("youtube", "v3", credentials=creds)
-        
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        c = conn.cursor()
-        
-        c.execute("SELECT channel_id, channel_name FROM competitors")
-        comps = c.fetchall()
-        today = datetime.date.today().isoformat()
-        total_synced = 0
-        
-        for comp in comps:
-            cid = comp["channel_id"]
-            try:
-                search_resp = youtube.search().list(
-                    part="snippet", channelId=cid, order="date",
-                    type="video", maxResults=10
-                ).execute()
-                
-                video_ids = [item["id"]["videoId"] for item in search_resp.get("items", [])]
-                if not video_ids:
-                    continue
-                    
-                stats_resp = youtube.videos().list(
-                    part="statistics,snippet", id=",".join(video_ids)
-                ).execute()
-                
-                for item in stats_resp.get("items", []):
-                    vid_id = item["id"]
-                    title = item["snippet"]["title"]
-                    published = item["snippet"]["publishedAt"][:10]
-                    views = int(item["statistics"].get("viewCount", 0))
-                    likes = int(item["statistics"].get("likeCount", 0))
-                    
-                    c.execute("""INSERT OR REPLACE INTO competitor_videos 
-                               (channel_id, video_id, title, views, likes, published_at, snapshot_date)
-                               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                              (cid, vid_id, title, views, likes, published, today))
-                    total_synced += 1
-            except Exception as e:
-                print(f"[Competitor Sync] Failed for {comp['channel_name']}: {e}")
-        
-        conn.commit()
-        conn.close()
+        total_synced = await _sync_competitors_core()
         return JSONResponse(content={"success": True, "synced": total_synced})
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)

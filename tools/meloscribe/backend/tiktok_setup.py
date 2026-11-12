@@ -47,7 +47,7 @@ except Exception as e:
 # -------------------------------------------------------
 NGROK_EXE      = Path(__file__).parent.parent.parent / "ngrok" / "ngrok.exe"
 NGROK_DOMAIN   = "wooing-encrust-ladle.ngrok-free.dev"   # Permanent static domain
-CLIENT_KEY     = "sbaw7fguduihq6she7"
+CLIENT_KEY     = "awe54p8mg3xasm1l"
 CLIENT_SECRET  = ""
 LOCAL_PORT     = 8080
 REDIRECT_URI   = "https://api.meloscribe.dev/callback"
@@ -186,8 +186,14 @@ def run_setup(force=False, open_browser=True, start_ngrok=False):
         if "code" in captured:
             break
         try:
+            auth_headers = {}
+            if _settings.get("server_api_key"):
+                auth_headers["X-Meloscribe-Key"] = _settings.get("server_api_key")
+            if _settings.get("admin_passcode"):
+                auth_headers["x-admin-passcode"] = str(_settings.get("admin_passcode"))
             poll_resp = requests.get(
                 f"https://api.meloscribe.dev/api/oauth/code?state={auth_state}",
+                headers=auth_headers,
                 timeout=3
             )
             if poll_resp.status_code == 200:

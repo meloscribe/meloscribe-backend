@@ -8,6 +8,7 @@ import requests
 import stripe
 import boto3
 import re
+import html
 import threading
 from typing import Optional
 from pathlib import Path
@@ -23,10 +24,36 @@ from shared import (
     is_rate_limited,
     get_stripe_api_key,
     load_settings,
+    verify_admin,
     CREATION_FLAGS
 )
 
 router = APIRouter()
+
+def is_sandbox_or_local() -> bool:
+    env = (load_settings().get("environment") or os.environ.get("ENVIRONMENT", "")).lower()
+    return env in ("sandbox", "dev", "development") or platform.system() == "Windows"
+
+def get_client_ip(request: Request) -> str:
+    """Extract and sanitize client IP address with proxy support."""
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        first_ip = xff.split(",")[0].strip()
+        if first_ip:
+            return first_ip
+            
+    x_real = request.headers.get("x-real-ip")
+    if x_real:
+        return x_real.strip()
+        
+    if request.client and request.client.host:
+        return request.client.host.strip()
+        
+    return "127.0.0.1"
 
 # In-memory store for tracking unique website visitors per day
 unique_visitors_today = set()
@@ -954,11 +981,8 @@ def get_geo_info_from_request(request: Request) -> tuple:
         return country, get_currency_from_country(country)
 
     # 2. Extract real client IP
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else None)
+    client_ip = get_client_ip(request)
     if client_ip:
-        if "," in client_ip:
-            client_ip = client_ip.split(",")[0].strip()
-        
         # Avoid local/internal IPs
         if client_ip in ("127.0.0.1", "localhost", "::1") or client_ip.startswith("192.168.") or client_ip.startswith("10."):
             return "DE", "eur"
@@ -995,9 +1019,7 @@ def get_currency_from_request(request: Request) -> str:
 # -------------------------------------------------------------------
 @router.post("/api/checkout/create-session")
 async def create_checkout_session(req: CheckoutRequest, request: Request):
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = get_client_ip(request)
     if is_rate_limited(client_ip, "create_checkout_session", 25, 600):
         return JSONResponse(status_code=429, content={"error": "Too many checkout requests. Please wait a few minutes."})
     try:
@@ -1377,7 +1399,9 @@ def get_hash_by_checkout(checkout_id: str):
         return {"download_hash": row[0]}
         
     if checkout_id.startswith("demo_"):
-        return {"download_hash": f"demo_hash_{checkout_id}"}
+        if is_sandbox_or_local():
+            return {"download_hash": f"demo_hash_{checkout_id}"}
+        raise HTTPException(status_code=404, detail="Checkout session not found")
         
     if checkout_id.startswith("cs_") or checkout_id.startswith("pi_"):
         try:
@@ -1571,9 +1595,7 @@ def get_hash_by_checkout(checkout_id: str):
 
 @router.get("/api/order/details")
 def get_order_details(hash: str, request: Request):
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = get_client_ip(request)
     if is_rate_limited(client_ip, "order_details", 60, 600):
         return JSONResponse(status_code=429, content={"error": "Too many requests. Please try again later."})
     conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -1582,7 +1604,7 @@ def get_order_details(hash: str, request: Request):
     row = c.fetchone()
     conn.close()
     
-    if not row and hash.startswith("demo_hash_"):
+    if not row and hash.startswith("demo_hash_") and is_sandbox_or_local():
         return {
             "song_name": "Sweetest Rain",
             "email": "demo_customer@example.com",
@@ -1609,9 +1631,7 @@ def get_order_details(hash: str, request: Request):
 
 @router.post("/api/order/rating")
 def submit_order_rating(req: OrderRatingRequest, request: Request):
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = get_client_ip(request)
     if is_rate_limited(client_ip, "order_rating", 30, 300):
         return JSONResponse(status_code=429, content={"error": "Too many requests. Please try again later."})
         
@@ -1642,9 +1662,7 @@ def submit_order_rating(req: OrderRatingRequest, request: Request):
 # -------------------------------------------------------------------
 @router.get("/api/download/request")
 def request_download(hash: str, type: str, request: Request):
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = get_client_ip(request)
     if is_rate_limited(client_ip, "request_download", 60, 600):
         return JSONResponse(status_code=429, content={"error": "Too many download requests. Please try again later."})
     if type not in ("pdf", "zip", "midi", "midi_slow", "video", "video_slow"):
@@ -1667,7 +1685,7 @@ def request_download(hash: str, type: str, request: Request):
         downloaded_types = row[2] or ""
         ip_addresses = row[3] or ""
         status = row[4] or ""
-    elif hash.startswith("demo_hash_"):
+    elif hash.startswith("demo_hash_") and is_sandbox_or_local():
         song_name = "Sweetest Rain"
         download_count = 0
         status = "completed"
@@ -1682,8 +1700,8 @@ def request_download(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
-    if row and not hash.startswith("demo_hash_"):
+    client_ip = get_client_ip(request)
+    if row and not (hash.startswith("demo_hash_") and is_sandbox_or_local()):
         ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
         if client_ip not in ip_list:
             if len(ip_list) >= 3:
@@ -1694,9 +1712,9 @@ def request_download(hash: str, type: str, request: Request):
             c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
             conn.commit()
             
-    if download_count >= 100:
+    if download_count >= 50:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 100 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
         
     new_count = download_count
     if row:
@@ -1719,7 +1737,7 @@ def request_download(hash: str, type: str, request: Request):
         r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
         r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
         r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-        r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+        r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
 
         if r2_account_id and r2_access_key and r2_secret_key:
             try:
@@ -1790,7 +1808,7 @@ def download_file(hash: str, type: str, request: Request):
         ip_addresses = row[3] or ""
         buyer_name = row[4] or ""
         status = row[5] or ""
-    elif hash.startswith("demo_hash_"):
+    elif hash.startswith("demo_hash_") and is_sandbox_or_local():
         song_name = "Sweetest Rain"
         email = "demo_customer@example.com"
         txn_id = "demo_12345"
@@ -1806,8 +1824,8 @@ def download_file(hash: str, type: str, request: Request):
         conn.close()
         return JSONResponse(content={"error": "This order has been deactivated / refunded"}, status_code=403)
         
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
-    if row and not hash.startswith("demo_hash_"):
+    client_ip = get_client_ip(request)
+    if row and not (hash.startswith("demo_hash_") and is_sandbox_or_local()):
         ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
         if client_ip not in ip_list:
             if len(ip_list) >= 3:
@@ -1822,7 +1840,7 @@ def download_file(hash: str, type: str, request: Request):
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
     r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
     r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download File] R2 credentials missing, using demo redirect fallback.")
@@ -1953,7 +1971,7 @@ def verify_download(checkout_id: str):
     song_name = None
     if row:
         song_name = row[0]
-    elif checkout_id.startswith("demo_"):
+    elif checkout_id.startswith("demo_") and is_sandbox_or_local():
         song_name = "Sweetest Rain"
         print(f"[Download Verify] Sandbox checkout '{checkout_id}' resolved to '{song_name}'")
         
@@ -1963,7 +1981,7 @@ def verify_download(checkout_id: str):
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
     r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
     r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
+    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-sheets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-sheets")
     
     if not r2_account_id or not r2_access_key or not r2_secret_key:
         print("[Download Verify] R2 credentials missing, using demo redirect fallback.")
@@ -2028,9 +2046,7 @@ async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
     email = req.email.strip().lower()
     
     # 1. Rate limit check (5 subscription requests per hour per IP)
-    client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or (request.client.host if request.client else "unknown")
-    if "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = get_client_ip(request)
     if is_rate_limited(client_ip, "notify_subscribe", 5, 3600):
         return JSONResponse(content={"error": "Too many subscription attempts. Please wait a while."}, status_code=429)
     
@@ -2431,7 +2447,7 @@ def create_suggestion(sug: NewSuggestion, request: Request):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
-        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        client_ip = get_client_ip(request)
         if is_rate_limited(client_ip, "create_suggestion", 5, 3600):
             return JSONResponse(content={"error": "Too many requests. Please wait before suggesting more songs."}, status_code=429)
             
@@ -2544,7 +2560,7 @@ def upvote_suggestion(sug_id: str, request: Request):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
-        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        client_ip = get_client_ip(request)
         if is_rate_limited(client_ip, f"vote_{sug_id}", 20, 600):
             return JSONResponse(content={"error": "Too many votes. Please wait a few minutes."}, status_code=429)
             
@@ -2573,7 +2589,7 @@ def downvote_suggestion(sug_id: str, request: Request):
         except Exception as e:
             return JSONResponse(content={"error": f"Proxy error: {e}"}, status_code=500)
     else:
-        client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+        client_ip = get_client_ip(request)
         if is_rate_limited(client_ip, f"vote_{sug_id}", 20, 600):
             return JSONResponse(content={"error": "Too many votes. Please wait a few minutes."}, status_code=429)
             
@@ -2764,7 +2780,7 @@ def get_public_stats(request: Request):
     else:
         # Increment website views (only for unique daily IP hits)
         try:
-            client_ip = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for") or request.headers.get("x-real-ip") or request.client.host
+            client_ip = get_client_ip(request)
             from datetime import date
             today_str = date.today().isoformat()
             
@@ -2825,7 +2841,8 @@ def get_public_stats(request: Request):
             return {"customers": 14, "followers": 75, "downloads": 14}
 
 @router.post("/api/public/stats")
-def update_public_stats(stats: StatsUpload):
+def update_public_stats(stats: StatsUpload, request: Request):
+    verify_admin(request)
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/stats", json=stats.dict(), headers=get_proxy_headers(), timeout=5.0)
@@ -3165,88 +3182,6 @@ def public_free_download_internal(song_id: str, type: str, request: Request):
         status_code=403
     )
 
-    song_title = target_song.get("title")
-    difficulty = target_song.get("difficulty", "Original")
-    if difficulty == "Easy":
-        song_name = f"{song_title} Easy"
-    else:
-        song_name = song_title
-
-    r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
-    r2_access_key = settings.get("r2_access_key") or settings.get("r2_access_key_id") or os.environ.get("R2_ACCESS_KEY_ID")
-    r2_secret_key = settings.get("r2_secret_key") or settings.get("r2_secret_access_key") or os.environ.get("R2_SECRET_ACCESS_KEY")
-    r2_bucket = settings.get("r2_bucket") or settings.get("r2_bucket_name", "meloscribe-assets") or os.environ.get("R2_BUCKET_NAME", "meloscribe-assets")
-
-    if not r2_account_id or not r2_access_key or not r2_secret_key:
-        if type == "pdf":
-            suffix = f"/{song_name}.pdf"
-        elif type == "midi":
-            suffix = f"/{song_name}.mid"
-        elif type == "midi_slow":
-            suffix = f"/{song_name} slow.mid"
-        elif type == "video":
-            suffix = f"/{song_name}.mp4"
-        elif type == "video_slow":
-            suffix = f"/{song_name} slow.mp4"
-        else:
-            suffix = " Full Package.zip"
-        return {"download_url": f"https://example.com/demo-packages/{song_name}{suffix}"}
-
-    try:
-        if type == "pdf":
-            file_key = f"{song_name}/{song_name}.pdf"
-        elif type == "midi":
-            file_key = f"{song_name}/{song_name}.mid"
-        elif type == "midi_slow":
-            file_key = f"{song_name}/{song_name} slow.mid"
-        elif type == "video":
-            file_key = f"{song_name}/{song_name}.mp4"
-        elif type == "video_slow":
-            file_key = f"{song_name}/{song_name} slow.mp4"
-        else:
-            file_key = f"{song_name} Full Package.zip"
-
-        s3 = boto3.client(
-            's3',
-            endpoint_url=f'https://{r2_account_id}.r2.cloudflarestorage.com',
-            aws_access_key_id=r2_access_key,
-            aws_secret_access_key=r2_secret_key,
-            region_name='auto',
-            config=boto3.session.Config(signature_version='s3v4')
-        )
-
-        # Dynamic fallback verification: make sure key exists in R2
-        try:
-            s3.head_object(Bucket=r2_bucket, Key=file_key)
-        except Exception:
-            ext = ".pdf" if type == "pdf" else (".mid" if "midi" in type else (".mp4" if "video" in type else ".zip"))
-            is_slow = "slow" in type
-            res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{song_name}/")
-            for obj in res_objs.get("Contents", []):
-                k = obj["Key"]
-                if k.endswith(ext):
-                    if is_slow and ("slow" in k.lower() or "tuto" in k.lower()):
-                        file_key = k
-                        break
-                    elif not is_slow and "slow" not in k.lower() and "preview" not in k.lower():
-                        file_key = k
-                        break
-
-        filename = file_key.split('/')[-1]
-        presigned_url = s3.generate_presigned_url(
-            ClientMethod='get_object',
-            Params={
-                'Bucket': r2_bucket,
-                'Key': file_key,
-                'ResponseContentDisposition': f'attachment; filename="{filename}"'
-            },
-            ExpiresIn=3600
-        )
-        return {"download_url": presigned_url}
-    except Exception as e:
-        print(f"Failed to generate free presigned url: {e}")
-        return JSONResponse(content={"error": f"Failed to generate download URL: {str(e)}"}, status_code=500)
-
 # -------------------------------------------------------------------
 # OAuth Auth Callback URL
 # -------------------------------------------------------------------
@@ -3256,6 +3191,33 @@ def oauth_callback(code: str = None, state: str = "fb", error: str = None, error
     Handle authorization callback codes (for Facebook Graph / Threads APIs).
     Renders a premium success HTML block with micro-animations.
     """
+    safe_state = html.escape(state) if state else "APP"
+    if error or not code:
+        err_msg = html.escape(error_description or error or "Authorization was canceled or failed.")
+        return HTMLResponse(content=f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Verbindung Fehlgeschlagen | Meloscribe</title>
+  <style>
+    body {{ font-family: sans-serif; background: #05050a; color: #fff; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }}
+    .card {{ background: rgba(255,255,255,0.05); border: 1px solid rgba(255,80,80,0.3); border-radius: 20px; padding: 40px; text-align: center; max-width: 400px; }}
+    h1 {{ color: #ff5555; margin-bottom: 12px; }}
+    p {{ color: rgba(255,255,255,0.7); line-height: 1.6; margin-bottom: 24px; }}
+    a {{ display: inline-block; padding: 10px 20px; background: #ff5555; color: #fff; text-decoration: none; border-radius: 8px; font-weight: bold; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Verbindung Abgebrochen</h1>
+    <p>{err_msg}</p>
+    <a href="javascript:window.close();">Fenster Schließen</a>
+  </div>
+</body>
+</html>
+        """, status_code=400)
+
     try:
         db_path = Path(__file__).resolve().parent / "analytics.db"
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -3274,7 +3236,8 @@ def oauth_callback(code: str = None, state: str = "fb", error: str = None, error
     except Exception as db_err:
         print(f"[OAuth Callback] Warning: Could not write auth code to DB: {db_err}")
     
-    print(f"[OAuth Callback] Successfully captured code for state '{state}': {code[:15]}...")
+    code_preview = code[:15] if code else ""
+    print(f"[OAuth Callback] Successfully captured code for state '{state}': {code_preview}...")
     
     # Forward the callback to localhost:8080 (e.g. for TikTok/Pinterest local auth)
     # so that background setup scripts can receive the code
@@ -3381,7 +3344,7 @@ def oauth_callback(code: str = None, state: str = "fb", error: str = None, error
       </svg>
     </div>
     <h1 class="title">Kanal Verbunden</h1>
-    <p class="desc">Dein Token für die Plattform <strong>{state.upper() if state else "APP"}</strong> wurde erfolgreich erfasst. Du kannst dieses Browserfenster jetzt schließen und die Meloscribe Desktop App nutzen.</p>
+    <p class="desc">Dein Token für die Plattform <strong>{safe_state.upper()}</strong> wurde erfolgreich erfasst. Du kannst dieses Browserfenster jetzt schließen und die Meloscribe Desktop App nutzen.</p>
     <a href="javascript:window.close();" class="close-btn">Fenster Schließen</a>
   </div>
 </body>
@@ -3390,11 +3353,12 @@ def oauth_callback(code: str = None, state: str = "fb", error: str = None, error
 
 
 @router.get("/api/oauth/code")
-def get_oauth_code(state: str):
+def get_oauth_code(state: str, request: Request):
     """
     Polled by desktop app to retrieve authorization code captured by public callback.
     Deletes the code upon retrieval (one-time use).
     """
+    verify_admin(request)
     try:
         db_path = Path(__file__).resolve().parent / "analytics.db"
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -3449,7 +3413,7 @@ def record_outbound_click(req: OutboundEventRequest, request: Request):
                 ip TEXT
             )
         """)
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = get_client_ip(request)
         target = req.get_target()
         source = req.get_source()
         c.execute(
@@ -3465,10 +3429,11 @@ def record_outbound_click(req: OutboundEventRequest, request: Request):
 
 @router.get("/api/events/outbound/stats")
 @router.get("/api/public/affiliate/stats")
-def get_affiliate_stats():
+def get_affiliate_stats(request: Request):
     """
     Aggregates affiliate outbound click metrics from analytics.db for the internal dashboard.
     """
+    verify_admin(request)
     try:
         db_file = Path(__file__).resolve().parent / "analytics.db"
         conn = sqlite3.connect(str(db_file), timeout=10.0)

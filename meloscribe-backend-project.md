@@ -292,6 +292,26 @@ git add . && git commit -m "..." && git push
   - Persistent File & DB Synchronization (`song_hooks.json`): Created and synchronized `tools/meloscribe/backend/song_hooks.json` for catalog release hook tracking (*River Flows in You*, *Golden Brown*, *Sweetest Rain*, *In This Shirt*, *Experience*, *Floating in Reverie*, *Goodbye To A Lover Again*) and automated dual-persistence in `confirm_hook`.
   - Reused Clips Aggregation API: Enhanced `/api/recycling/hook-info` to query, normalize, and return all previously used recycling clips (`used_clips`) for the selected song from `recycling_history` and local metadata files, feeding the desktop app timeline visualizer and collision guards.
 
+- [x] Production Security Hardening & Runtime Crash Remediation (2026-11-12):
+  - Closed `demo_` / `demo_hash_` Backdoor (`routes_public.py`): Guarded with `is_sandbox_or_local()`. Production Oracle VM now returns 404/403 for unauthorized demo hashes, protecting files and 3-device IP limits.
+  - Secured Follower & Affiliate Endpoints (`routes_public.py`, `main.py`): Added `verify_admin(request)` to `update_public_stats` and `get_affiliate_stats`. Tightened `PUBLIC_ROUTES` to exclude internal analytics.
+  - OAuth Callback Hardening & Reflected XSS Neutralization (`routes_public.py`, `tiktok_auth.py`, `tiktok_setup.py`, `main.py`): Sanitized `state` with `html.escape()`, guarded against `NoneType` subscript crash when providers redirect with errors, and secured `/api/oauth/code` polling with admin authentication.
+  - Remote Code Execution (RCE) & Path Traversal Fix (`routes_admin.py`): Protected `get_server_file` with `verify_admin()`, strict filename validation against directory traversal (`Path(filename).name == filename`), and quoted SSH commands with `shlex.quote()`. Bound Windows local runner to `127.0.0.1` instead of `0.0.0.0`.
+  - WebSocket Auth Enforcement (`main.py`): Enforced `X-Meloscribe-Key` / query token validation on Linux for `/ws/logs` to prevent public log sniffing.
+  - Client IP Sanitization & Rate-Limiting Protection (`routes_public.py`): Created unified `get_client_ip()` resolving `cf-connecting-ip` and leftmost `X-Forwarded-For` across 12 endpoints. Fixed download counter threshold to 50 downloads.
+  - Runtime Crash Eliminations:
+    - Fixed `NameError: name 'python' is not defined` in `render_recycling_video` and `stage_recycling_video` (`routes_workflow.py`).
+    - Fixed `NameError: name 'logger' is not defined` across 7 exception handlers (`routes_workflow.py`).
+    - Fixed `NameError: name 'PROJECT_ROOT' is not defined` in `arrangeme_bot.py`.
+    - Fixed `TypeError: sync_competitors() missing 1 required positional argument` in `main.py` by extracting `_sync_competitors_core()`.
+    - Fixed `TypeError: _send_confirmation_email()` 5 vs 4 positional arguments in `routes_admin.py`.
+    - Fixed `AttributeError: module 'datetime' has no attribute 'now'` in `confirm_hook` (`routes_workflow.py`).
+    - Fixed `is_easy = (suffix == " easy")` string comparison bug in `batch_processor_worker` (`routes_workflow.py`).
+    - Fixed missing return in `batch_initialize` (`routes_workflow.py`).
+    - Fixed `regenerate_preview` ignoring hook times in FFmpeg video cut and hover MP3 export (`routes_workflow.py`).
+    - Cleaned up unremoved temp files (`title1_txt`, `title2_txt`) in `video_generator.py`.
+    - Standardized default R2 bucket fallback to `meloscribe-sheets`.
+
 ## Active Blockers / Next Steps
 
 - Keine aktiven Blockaden. Das Payment-Gateway wurde auf Stripe Checkout (redirects via FastAPI-Sessions) migriert und für internationale Währungen abgesichert. Backups laufen automatisiert via systemd-Timer.
