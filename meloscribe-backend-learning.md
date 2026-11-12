@@ -2,6 +2,14 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-12: Web Push VAPID Engine, Router Ordering & Windows Wildcard Proxy Shadowing
+- **FastAPI Router Inclusion Order vs. Windows Wildcard Proxy (`main.py`, `routes_admin.py`)**:
+  - *Issue:* `routes_admin.py` registers a Windows-only wildcard route `/api/admin/{path:path}` (`proxy_admin_routes`) to forward local desktop requests to the Oracle Cloud VM. Because `admin_router` was included before `web_push_router` in `main.py`, `/api/admin/pulse-summary` and `/api/admin/queue` were intercepted on Windows before reaching `web_push_router`.
+  - *Resolution:* Included `web_push_router` immediately before `admin_router` in `main.py` so specific Pulse endpoints always resolve cleanly across both Windows development and Linux production.
+- **Pillow Lockscreen Glass Banner & Monochrome Android Badge (`web_push.py`)**:
+  - Android OS `SystemUI` renders native notifications without CSS `backdrop-filter`. Dynamically compositing 1200x600 RGBA cards server-side (30px Gaussian-blurred song artwork darkened by 65%, frosted inner card with specular highlight line, square-cropped cover thumbnail, and type-coded pill badge) achieves consistent dark glassmorphism on native lockscreens.
+  - Android requires pure white (`#FFFFFF`) pixels + alpha transparency for notification `badge` icons; full-color PNGs collapse into opaque white squares in the status bar.
+
 ### 2026-11-12: Content Recycling Pipeline Alignment, Pinterest Exclusion & Persistent Hook/Used Clips Tracking
 - **Pinterest Strict Exclusion**:
   - Filtered out Pinterest from `routes_workflow.py` (`stage_recycling_video`), `stage_to_server.py` (`is_recycling` mode), and `upload_bot.py` (`run_pinterest`), ensuring recycled video cuts are strictly prohibited from Pinterest uploads to protect catalog pin trust and pin domain health.

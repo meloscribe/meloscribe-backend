@@ -32,6 +32,7 @@ from routes_public import router as public_router
 from routes_admin import router as admin_router
 from routes_settings import router as settings_router, sync_credentials_route_internal
 from routes_workflow import router as workflow_router
+from web_push import router as web_push_router, init_push_db, get_or_create_vapid_keys
 
 # -------------------------------------------------------------------
 # FastAPI App Settings & Instance
@@ -46,7 +47,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://(.*\.)?meloscribe\.(com|dev)|https://(.*\.)?meloscribesheets\.com|http://localhost:\d+|http://127\.0\.0\.1:\d+",
+    allow_origin_regex=r"https://(.*\.)?meloscribe\.(com|dev)|https://(.*\.)?meloscribesheets\.com|http://localhost:\d+|http://127\.0\.0\.1:\d+|http://192\.168\.\d+\.\d+(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,6 +60,7 @@ PUBLIC_ROUTES = [
     "/api/checkout",
     "/api/download",
     "/api/order",
+    "/api/push",
     "/api/notify/subscribe",
     "/api/notify/confirm",
     "/api/notify/unsubscribe",
@@ -377,9 +379,11 @@ def startup_event():
     try:
         from db_setup import init_db
         init_db()
-        print("[Startup] Database initialized/migrated.")
+        init_push_db()
+        get_or_create_vapid_keys()
+        print("[Startup] Database & Web Push initialized/migrated.")
     except Exception as e:
-        print(f"[Startup] Database initialization failed: {e}")
+        print(f"[Startup] Database/Push initialization failed: {e}")
 
     # Reset stuck processing items in batch queue
     try:
@@ -549,6 +553,7 @@ async def websocket_endpoint(websocket: WebSocket):
 # Include Routers
 # -------------------------------------------------------------------
 app.include_router(public_router)
+app.include_router(web_push_router)
 app.include_router(admin_router)
 app.include_router(settings_router)
 app.include_router(workflow_router)

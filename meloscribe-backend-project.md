@@ -118,6 +118,17 @@ git add . && git commit -m "..." && git push
 | `/api/notify/confirm` | GET | Confirm subscription token, mark subscriber active |
 | `/api/notify/unsubscribe` | GET | Remove subscriber by token immediately |
 | `/api/notify/subscribers` | GET | Admin: list all active email subscribers |
+| `/api/push/vapid-public-key` | GET | Return ECDSA P-256 VAPID public key for PWA PushManager subscription |
+| `/api/push/subscribe` | POST | Admin: store/upsert Web Push subscription (`endpoint`, `p256dh`, `auth`) |
+| `/api/push/test` | POST | Admin: dispatch live test push notification (`sale`, `subscriber`, `suggestion`) |
+| `/api/push/mark-read` | POST | Admin: mark `pulse_notifications` read |
+| `/api/push/badge.png` | GET | Public: 96x96 monochrome white RGBA alpha mask for Android status bar |
+| `/api/push/card/{notif_id}.png` | GET | Public: dynamic 1200x600 Pillow dark glass banner for lockscreen notifications |
+| `/api/admin/pulse-summary` | GET | Admin: consolidated analytics summary (KPIs, 30d chart timeline, feed, top songs, queue) |
+| `/api/admin/suggestions/manage` | POST | Admin: 1-tap `add_todo`, `complete`, `delete` actions for PWA & SW notifications |
+| `/api/admin/queue` | GET | Admin: fetch `upload_queue` items (local SQLite on VM, SSH fallback on Windows) |
+| `/api/admin/queue/{task_id}/toggle-status` | POST | Admin: toggle queue task between `pending` and `disabled` |
+| `/api/admin/queue/{task_id}/reschedule` | POST | Admin: reschedule pending queue task timestamp (`YYYY-MM-DD HH:MM`) |
 
 ---
 
@@ -311,6 +322,13 @@ git add . && git commit -m "..." && git push
     - Fixed `regenerate_preview` ignoring hook times in FFmpeg video cut and hover MP3 export (`routes_workflow.py`).
     - Cleaned up unremoved temp files (`title1_txt`, `title2_txt`) in `video_generator.py`.
     - Standardized default R2 bucket fallback to `meloscribe-sheets`.
+
+- [x] Web Push Engine, Dynamic Pillow Glass Notification Cards & Pulse Summary API (2026-11-12):
+  - Created `web_push.py`: ECDSA P-256 VAPID auto-generation (`vapid_public_key`, `vapid_private_key`, `vapid_claims_email`), `push_subscriptions` & `pulse_notifications` SQLite tables in WAL mode, and W3C Web Push dispatcher via `pywebpush`.
+  - Implemented `GET /api/push/card/{notif_id}.png` (1200x600 Gaussian-blurred cover background + frosted dark glass card with color-coded glow) and `GET /api/push/badge.png` (96x96 white monochrome alpha mask from `monogram-transparent.png`).
+  - Added consolidated `GET /api/admin/pulse-summary`, `POST /api/admin/suggestions/manage`, and `/api/admin/queue*` routes, ordered `web_push_router` before `admin_router` in `main.py` to avoid Windows wildcard proxy shadowing.
+  - Wired non-blocking background Web Push dispatches in `routes_public.py` (`stripe_webhook`, `notify_confirm`, `create_suggestion`, `upvote_suggestion` at 5/10/25 vote milestones).
+  - Updated `shared.py` `verify_admin()` to accept either `x-admin-passcode` or `X-Meloscribe-Key` consistently.
 
 ## Active Blockers / Next Steps
 

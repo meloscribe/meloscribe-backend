@@ -1349,6 +1349,22 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     log_webhook(f"Triggering email delivery function for {email}...")
                     success = send_purchase_delivery_email(email, song_title, download_hash, locale)
                     log_webhook(f"Email delivery function completed. Result: {'SUCCESS' if success else 'FAILED'}")
+                    if not session_id.startswith("cs_test_") and email != "2beers.sm@gmail.com":
+                        try:
+                            from web_push import send_web_push
+                            background_tasks.add_task(
+                                send_web_push,
+                                notif_type="sale",
+                                title=f"💰 New Sale: {amount_total:.2f} {currency} — {song_title}",
+                                body=f"{email} ({locale.upper()}) • Tap to view order",
+                                song_name=song_title,
+                                amount=f"{amount_total:.2f}",
+                                currency=currency,
+                                url="/?tab=pulse",
+                                meta={"email": email, "locale": locale, "buyer_name": buyer_name, "currency": currency, "payment_method": "Stripe"}
+                            )
+                        except Exception as push_err:
+                            log_webhook(f"[WebPush] Failed to schedule sale push: {push_err}")
                     
         elif event_type == "charge.refunded":
             charge_id = data_object.get("id")
@@ -2124,11 +2140,11 @@ async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
     return {"status": "pending", "message": "Confirmation email sent. Please check your inbox."}
 
 @router.get("/api/notify/confirm")
-def notify_confirm(token: str):
+def notify_confirm(token: str, background_tasks: BackgroundTasks):
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
-        c.execute("SELECT email, song_name, song_id, locale FROM notify_subscribers WHERE token = ?", (token,))
+        c.execute("SELECT email, song_name, song_id, locale, status FROM notify_subscribers WHERE token = ?", (token,))
         sub_row = c.fetchone()
         
         if not sub_row:
@@ -2175,9 +2191,24 @@ def notify_confirm(token: str):
 </body>
 </html>""")
             
-        email, song_name, song_id, locale = sub_row[0], sub_row[1], sub_row[2], sub_row[3] or "en"
+        email, song_name, song_id, locale, prev_status = sub_row[0], sub_row[1], sub_row[2], sub_row[3] or "en", sub_row[4]
         c.execute("UPDATE notify_subscribers SET status = 'active', confirmed_at = CURRENT_TIMESTAMP WHERE token = ?", (token,))
         conn.commit()
+
+        if prev_status != "active":
+            try:
+                from web_push import send_web_push
+                background_tasks.add_task(
+                    send_web_push,
+                    notif_type="subscriber",
+                    title=f"📩 New Subscriber: {song_name or 'meloscribe'}",
+                    body=f"{email} unlocked free sheet music",
+                    song_name=song_name or "",
+                    url="/?tab=pulse",
+                    meta={"email": email, "locale": locale}
+                )
+            except Exception as push_err:
+                print(f"[WebPush] Subscriber push error: {push_err}")
         
         # If this DOI confirmation was triggered for a free song, create an active purchase
         if song_name:
@@ -2439,7 +2470,7 @@ def get_suggestions(status: str = None):
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/public/suggestions")
-def create_suggestion(sug: NewSuggestion, request: Request):
+def create_suggestion(sug: NewSuggestion, request: Request, background_tasks: BackgroundTasks):
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/suggestions", json=sug.dict(), headers=get_proxy_headers(), timeout=5.0)
@@ -2541,18 +2572,47 @@ def create_suggestion(sug: NewSuggestion, request: Request):
                 c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, existing[0]))
                 conn.commit()
                 conn.close()
+                if new_votes in (5, 10, 25):
+                    try:
+                        from web_push import send_web_push
+                        background_tasks.add_task(
+                            send_web_push,
+                            notif_type="suggestion",
+                            title=f"💡 Song Request: {existing[1]}",
+                            body=f"by {existing[2]} • {new_votes} Votes",
+                            song_name=existing[1],
+                            url="/?tab=pulse",
+                            actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                            meta={"artist": existing[2], "votes": new_votes, "title": existing[1]}
+                        )
+                    except Exception as push_err:
+                        print(f"[WebPush] Suggestion milestone push error: {push_err}")
                 return {"id": existing[0], "title": existing[1], "artist": existing[2], "votes": new_votes, "created_at": created_at}
                 
             c.execute("INSERT INTO suggestions (id, title, artist, votes, created_at, status) VALUES (?, ?, ?, ?, ?, ?)",
                       (sug_id, sug.title.strip(), sug.artist.strip(), 1, created_at, initial_status))
             conn.commit()
             conn.close()
+            try:
+                from web_push import send_web_push
+                background_tasks.add_task(
+                    send_web_push,
+                    notif_type="suggestion",
+                    title=f"💡 Song Request: {sug.title.strip()}",
+                    body=f"by {sug.artist.strip()} • 1 Votes",
+                    song_name=sug.title.strip(),
+                    url="/?tab=pulse",
+                    actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                    meta={"artist": sug.artist.strip(), "votes": 1, "title": sug.title.strip()}
+                )
+            except Exception as push_err:
+                print(f"[WebPush] New suggestion push error: {push_err}")
             return {"id": sug_id, "title": sug.title.strip(), "artist": sug.artist.strip(), "votes": 1, "created_at": created_at, "status": initial_status}
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @router.post("/api/public/suggestions/{sug_id}/vote")
-def upvote_suggestion(sug_id: str, request: Request):
+def upvote_suggestion(sug_id: str, request: Request, background_tasks: BackgroundTasks):
     if platform.system() == "Windows":
         try:
             r = requests.post(f"{VM_API_BASE}/api/public/suggestions/{sug_id}/vote", headers=get_proxy_headers(), timeout=5.0)
@@ -2567,15 +2627,31 @@ def upvote_suggestion(sug_id: str, request: Request):
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
             c = conn.cursor()
-            c.execute("SELECT votes FROM suggestions WHERE id = ?", (sug_id,))
+            c.execute("SELECT votes, title, artist FROM suggestions WHERE id = ?", (sug_id,))
             row = c.fetchone()
             if not row:
                 conn.close()
                 return JSONResponse(content={"error": "Suggestion not found"}, status_code=404)
             new_votes = row[0] + 1
+            s_title, s_artist = row[1], row[2]
             c.execute("UPDATE suggestions SET votes = ? WHERE id = ?", (new_votes, sug_id))
             conn.commit()
             conn.close()
+            if new_votes in (5, 10, 25):
+                try:
+                    from web_push import send_web_push
+                    background_tasks.add_task(
+                        send_web_push,
+                        notif_type="suggestion",
+                        title=f"💡 Song Request: {s_title}",
+                        body=f"by {s_artist} • {new_votes} Votes",
+                        song_name=s_title,
+                        url="/?tab=pulse",
+                        actions=[{"action": "add_todo", "title": "➕ Add to To-Do"}],
+                        meta={"artist": s_artist, "votes": new_votes, "title": s_title}
+                    )
+                except Exception as push_err:
+                    print(f"[WebPush] Upvote milestone push error: {push_err}")
             return {"id": sug_id, "votes": new_votes}
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)

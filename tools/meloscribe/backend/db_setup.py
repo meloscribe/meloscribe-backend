@@ -307,6 +307,33 @@ def init_db():
     except Exception:
         pass
 
+    # ── WEB PUSH SUBSCRIPTIONS & PULSE NOTIFICATIONS ─────────────────────────
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        endpoint TEXT UNIQUE NOT NULL,
+        p256dh TEXT NOT NULL,
+        auth TEXT NOT NULL,
+        user_agent TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS pulse_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        amount TEXT,
+        song_name TEXT,
+        cover_url TEXT,
+        meta_json TEXT,
+        is_read INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"[DB] Analytics DB initialized at {DB_PATH}")
