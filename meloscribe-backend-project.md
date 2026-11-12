@@ -324,11 +324,11 @@ git add . && git commit -m "..." && git push
     - Standardized default R2 bucket fallback to `meloscribe-sheets`.
 
 - [x] Web Push Engine, Dynamic Pillow Glass Notification Cards & Pulse Summary API (2026-11-12):
-  - Created `web_push.py`: ECDSA P-256 VAPID auto-generation (`vapid_public_key`, `vapid_private_key`, `vapid_claims_email`), `push_subscriptions` & `pulse_notifications` SQLite tables in WAL mode, and W3C Web Push dispatcher via `pywebpush`.
-  - Implemented `GET /api/push/card/{notif_id}.png` (1200x600 Gaussian-blurred cover background + frosted dark glass card with color-coded glow) and `GET /api/push/badge.png` (96x96 white monochrome alpha mask from `monogram-transparent.png`).
-  - Added consolidated `GET /api/admin/pulse-summary`, `POST /api/admin/suggestions/manage`, and `/api/admin/queue*` routes, ordered `web_push_router` before `admin_router` in `main.py` to avoid Windows wildcard proxy shadowing.
-  - Wired non-blocking background Web Push dispatches in `routes_public.py` (`stripe_webhook`, `notify_confirm`, `create_suggestion`, `upvote_suggestion` at 5/10/25 vote milestones).
-  - Updated `shared.py` `verify_admin()` to accept either `x-admin-passcode` or `X-Meloscribe-Key` consistently.
+  - Created `web_push.py`: ECDSA P-256 VAPID auto-generation (`vapid_public_key`, `vapid_private_key`, `vapid_claims_email`), `push_subscriptions` & `pulse_notifications` SQLite tables in WAL mode, and W3C Web Push dispatcher via `pywebpush` (`Vapid.from_pem`).
+  - Implemented distinct 1200x600 Pillow cards at `GET /api/push/card/{notif_id}.png` (Stripe-minimalist Emerald paid sale, Ice-Cyan circular M-monogram lead unlock, Neon-Pink Vote Ticket community request) and `GET /api/push/badge.png` (96x96 white monochrome alpha mask).
+  - Extended `GET /api/admin/pulse-summary` with async non-blocking checkout cache warming (`warm_pulse_caches_async`), `subscribers_list`, `todos_list`, `checkout_ratings` (from `purchases.rating` + optional `checkout_ratings`), `vm_services` (`systemctl is-active`), and `rating` activity feed items.
+  - Added `POST /api/admin/suggestions/manage`, `POST /api/admin/pulse/todos/manage`, `POST /api/admin/queue/retry/{task_id}`, and multi-status `GET /api/admin/queue`, ordered `web_push_router` before `admin_router` in `main.py` to avoid Windows wildcard proxy shadowing.
+  - Wired non-blocking background Web Push dispatches in `routes_public.py` and updated `shared.py` `verify_admin()` to accept either `x-admin-passcode` or `X-Meloscribe-Key`.
 
 ## Active Blockers / Next Steps
 

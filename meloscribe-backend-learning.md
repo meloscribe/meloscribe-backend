@@ -12,7 +12,9 @@ Living database of technical quirks, bugs, environment insights, and resolved is
 - **Non-Blocking Pulse Summary & Background Telemetry Warming (`web_push.py`, `main.py`)**:
   - *Issue:* Calling `get_checkout_analytics_data()` (Stripe multi-page crawl) and `parse_traffic_sources()` (Nginx log scan, ~2.1s) synchronously inside `/api/admin/pulse-summary` delayed PWA startup by 15-30 seconds on cold cache.
   - *Resolution:* Offloaded checkout/traffic aggregation into a 300s-TTL memory cache (`_CHECKOUT_CACHE`) warmed asynchronously via `warm_pulse_caches_async()` daemon thread on Linux startup and background requests, keeping `/api/admin/pulse-summary` sub-second even on cold boot.
-- **Pillow Lockscreen Glass Banner & Monochrome Android Badge (`web_push.py`)**:
+- **Analytics Schema Reality for Ratings, Subscribers & To-Dos (`web_push.py`)**:
+  - Live `analytics.db` stores customer ratings on `purchases.rating` (`'up'` / `'down'`) with no guaranteed standalone `checkout_ratings` table, `notify_subscribers` already tracks `song_name` + `locale`, and `todos` uses `added_date` with `[PRIORITY]` prefixed into `song_name`. Querying `sqlite_master` (`conn.commit()` before DDL) + normalizing fields preserves 100% compatibility with the desktop app while separating `$0.00` free unlocks visually from paid Stripe sales.
+- **Minimalist Stripe Sale vs Distinct Lead/Request Card Rendering (`web_push.py`)**:
   - Android OS `SystemUI` renders native notifications without CSS `backdrop-filter`. Dynamically compositing 1200x600 RGBA cards server-side (30px Gaussian-blurred song artwork darkened by 65%, frosted inner card with specular highlight line, square-cropped cover thumbnail, and type-coded pill badge) achieves consistent dark glassmorphism on native lockscreens.
   - Android requires pure white (`#FFFFFF`) pixels + alpha transparency for notification `badge` icons; full-color PNGs collapse into opaque white squares in the status bar.
 
