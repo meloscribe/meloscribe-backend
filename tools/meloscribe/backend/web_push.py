@@ -10,6 +10,7 @@ import platform
 import datetime
 import urllib.parse
 import subprocess
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -51,7 +52,43 @@ router = APIRouter()
 
 # In-memory caches to keep pulse-summary and card rendering ultra-fast
 _COVER_CACHE: Dict[str, bytes] = {}
-_CHECKOUT_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
+_CHECKOUT_CACHE: Dict[str, Any] = {
+    "ts": 0.0,
+    "updating": False,
+    "data": None,
+    "traffic_overall": {}
+}
+
+def warm_pulse_caches_async(force: bool = False) -> None:
+    """Refresh slow Stripe checkout analytics and Nginx log parsing asynchronously."""
+    now = time.time()
+    if _CHECKOUT_CACHE["updating"]:
+        return
+    if not force and _CHECKOUT_CACHE["data"] is not None and (now - _CHECKOUT_CACHE["ts"]) < 300:
+        return
+
+    _CHECKOUT_CACHE["updating"] = True
+
+    def _worker():
+        try:
+            from checkout_analytics import parse_traffic_sources, get_checkout_analytics_data
+            try:
+                t_data = parse_traffic_sources()
+                _CHECKOUT_CACHE["traffic_overall"] = t_data.get("overall", {}) or {}
+            except Exception as err:
+                print(f"[Pulse Cache] Traffic sources refresh warning: {err}")
+
+            try:
+                ca_data = get_checkout_analytics_data()
+                if ca_data:
+                    _CHECKOUT_CACHE["data"] = ca_data
+                    _CHECKOUT_CACHE["ts"] = time.time()
+            except Exception as err:
+                print(f"[Pulse Cache] Checkout analytics refresh warning: {err}")
+        finally:
+            _CHECKOUT_CACHE["updating"] = False
+
+    threading.Thread(target=_worker, daemon=True).start()
 
 # -------------------------------------------------------------------
 # Database Initialization & Migration (WAL mode, timeout=30.0)
@@ -555,6 +592,15 @@ def send_web_push(
         print(f"[WebPush] No push subscriptions registered. Notification #{notif_id} saved to DB.")
         return
 
+    try:
+        if "-----BEGIN" in priv_key:
+            vapid_signer = Vapid.from_pem(priv_key.encode("utf-8"))
+        else:
+            vapid_signer = Vapid.from_string(priv_key)
+    except Exception as key_err:
+        print(f"[WebPush] Invalid VAPID private key format: {key_err}")
+        return
+
     dead_subscription_ids = []
     sent_count = 0
 
@@ -571,7 +617,7 @@ def send_web_push(
             webpush(
                 subscription_info=sub_info,
                 data=payload_str,
-                vapid_private_key=priv_key,
+                vapid_private_key=vapid_signer,
                 vapid_claims={"sub": claims_email},
                 ttl=86400
             )
@@ -1016,35 +1062,20 @@ def get_pulse_summary(request: Request):
                 "saves": 0
             }
 
-    # Checkout conversion rate & social attribution
+    # Checkout conversion rate & social attribution (never block request; refresh in background)
+    warm_pulse_caches_async()
     checkout_conv_rate = 0.0
-    social_traffic_attribution = {}
-    try:
-        from checkout_analytics import parse_traffic_sources, get_checkout_analytics_data
-        t_data = parse_traffic_sources()
-        social_traffic_attribution = t_data.get("overall", {})
+    social_traffic_attribution = _CHECKOUT_CACHE.get("traffic_overall") or {}
+    ca_data = _CHECKOUT_CACHE.get("data")
 
-        now = time.time()
-        if _CHECKOUT_CACHE["data"] is not None and (now - _CHECKOUT_CACHE["ts"]) < 180:
-            ca_data = _CHECKOUT_CACHE["data"]
-        else:
-            try:
-                ca_data = get_checkout_analytics_data()
-                _CHECKOUT_CACHE["data"] = ca_data
-                _CHECKOUT_CACHE["ts"] = now
-            except Exception:
-                ca_data = None
-
-        if ca_data and ca_data.get("summary"):
-            checkout_conv_rate = float(ca_data["summary"].get("conversion_rate", 0.0))
-        else:
-            c.execute("SELECT SUM(profile_views) as web_views FROM channel_insights WHERE platform = 'website' AND date >= date('now', '-30 days')")
-            web_row = c.fetchone()
-            web_views = web_row["web_views"] or 0
-            if web_views > 0:
-                checkout_conv_rate = round((sales_count_30d / web_views) * 100.0, 2)
-    except Exception as e:
-        print(f"[Pulse Summary] Checkout analytics warning: {e}")
+    if ca_data and ca_data.get("summary"):
+        checkout_conv_rate = float(ca_data["summary"].get("conversion_rate", 0.0))
+    else:
+        c.execute("SELECT SUM(profile_views) as web_views FROM channel_insights WHERE platform = 'website' AND date >= date('now', '-30 days')")
+        web_row = c.fetchone()
+        web_views = web_row["web_views"] or 0
+        if web_views > 0:
+            checkout_conv_rate = round((sales_count_30d / web_views) * 100.0, 2)
 
     # 2. Revenue & Views Timeline (Contiguous 30 days)
     timeline_dict = {}

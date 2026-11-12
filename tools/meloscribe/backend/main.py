@@ -32,7 +32,7 @@ from routes_public import router as public_router
 from routes_admin import router as admin_router
 from routes_settings import router as settings_router, sync_credentials_route_internal
 from routes_workflow import router as workflow_router
-from web_push import router as web_push_router, init_push_db, get_or_create_vapid_keys
+from web_push import router as web_push_router, init_push_db, get_or_create_vapid_keys, warm_pulse_caches_async
 
 # -------------------------------------------------------------------
 # FastAPI App Settings & Instance
@@ -381,6 +381,8 @@ def startup_event():
         init_db()
         init_push_db()
         get_or_create_vapid_keys()
+        if platform.system() != "Windows":
+            warm_pulse_caches_async(force=True)
         print("[Startup] Database & Web Push initialized/migrated.")
     except Exception as e:
         print(f"[Startup] Database/Push initialization failed: {e}")
