@@ -2,6 +2,14 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-14: Missing Sale Push Notifications When Purchases Clear via API Fallback (`/api/order/hash-by-checkout`)
+- **Root Cause**:
+  1. Live Stripe purchases (e.g. `#85 Sweetest Rain`, `#86 Goodbye To A Lover Again`) cleared via the checkout success redirect endpoint `GET /api/order/hash-by-checkout` (`[Stripe API Fallback]`) instead of `/api/webhooks/stripe` (which has received zero verified webhooks since 2026-09-13).
+  2. Unlike `stripe_webhook`, both `[Stripe API Fallback]` and `[Paddle API Fallback]` inside `get_hash_by_checkout` recorded `purchases` with `is_new = True` and called `send_purchase_delivery_email(...)`, **without** scheduling `send_web_push(...)` — leaving `native_push_queue` and `pulse_notifications` empty for real sales even while the Android APK polled `/api/push/native-poll` continuously in the background.
+- **Resolution**:
+  1. Extracted shared helper `_dispatch_sale_push(...)` in `routes_public.py` and wired it into `stripe_webhook` plus both `[Stripe API Fallback]` and `[Paddle API Fallback]` inside `get_hash_by_checkout` (with `background_tasks: BackgroundTasks`).
+  2. Mirrored identically to `meloscribe-app`, deployed to the Oracle VM, and restarted `meloscribe-backend.service`.
+
 ### 2026-11-13: `meloscribe-app` vs `meloscribe-backend` Drift (`yt_poster.py` `comment_text` TypeError & `ig_poster.py` Timeout Regression)
 - **Root Cause**:
   1. Updates to 10 shared files (`yt_poster.py`, `ig_poster.py`, `server_uploader.py`, `settings.py`, `routes_settings.py`, `fb_sync.py`, `content_brain.py`, `trend_engine.py`, `audio_visualizer.py`, `forensic_midi_scanner.py`) had been committed in `meloscribe-app` and previously SCP'd to the Oracle VM, but never synced into `meloscribe-backend`.

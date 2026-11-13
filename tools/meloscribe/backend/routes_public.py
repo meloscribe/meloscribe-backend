@@ -1196,6 +1196,52 @@ def log_webhook(msg: str):
     except Exception as e:
         print(f"Failed to write webhook log: {e}")
 
+def _dispatch_sale_push(
+    background_tasks: BackgroundTasks,
+    tx_id: str,
+    email: str,
+    song_title: str,
+    amount_total: float,
+    currency: str,
+    locale: str = "en",
+    buyer_name: str = "",
+    payment_method: str = "Stripe",
+) -> None:
+    """Schedule clean sale Web Push and native APK push event for verified non-test purchases."""
+    if not tx_id or str(tx_id).startswith(("cs_test_", "pi_test_")) or email == "2beers.sm@gmail.com":
+        return
+    try:
+        from web_push import send_web_push
+        curr_up = (currency or "EUR").upper()
+        if curr_up == "USD":
+            fmt_amt = f"${amount_total:.2f}"
+        elif curr_up == "GBP":
+            fmt_amt = f"£{amount_total:.2f}"
+        elif curr_up == "EUR":
+            fmt_amt = f"{amount_total:.2f} €"
+        else:
+            fmt_amt = f"{amount_total:.2f} {curr_up}"
+        background_tasks.add_task(
+            send_web_push,
+            notif_type="sale",
+            title=fmt_amt,
+            body=song_title or "Sheet Order",
+            song_name=song_title,
+            amount=f"{amount_total:.2f}",
+            currency=curr_up,
+            url="/?tab=sales",
+            meta={
+                "email": email,
+                "locale": locale,
+                "buyer_name": buyer_name,
+                "currency": curr_up,
+                "payment_method": payment_method,
+            },
+        )
+    except Exception as push_err:
+        log_webhook(f"[WebPush] Failed to schedule sale push: {push_err}")
+
+
 @router.post("/api/webhooks/stripe")
 async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
     payload = await request.body()
@@ -1349,31 +1395,17 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     log_webhook(f"Triggering email delivery function for {email}...")
                     success = send_purchase_delivery_email(email, song_title, download_hash, locale)
                     log_webhook(f"Email delivery function completed. Result: {'SUCCESS' if success else 'FAILED'}")
-                    if not session_id.startswith("cs_test_") and email != "2beers.sm@gmail.com":
-                        try:
-                            from web_push import send_web_push
-                            curr_up = (currency or "EUR").upper()
-                            if curr_up == "USD":
-                                fmt_amt = f"${amount_total:.2f}"
-                            elif curr_up == "GBP":
-                                fmt_amt = f"£{amount_total:.2f}"
-                            elif curr_up == "EUR":
-                                fmt_amt = f"{amount_total:.2f} €"
-                            else:
-                                fmt_amt = f"{amount_total:.2f} {curr_up}"
-                            background_tasks.add_task(
-                                send_web_push,
-                                notif_type="sale",
-                                title=fmt_amt,
-                                body=song_title or "Sheet Order",
-                                song_name=song_title,
-                                amount=f"{amount_total:.2f}",
-                                currency=currency,
-                                url="/?tab=sales",
-                                meta={"email": email, "locale": locale, "buyer_name": buyer_name, "currency": currency, "payment_method": "Stripe"}
-                            )
-                        except Exception as push_err:
-                            log_webhook(f"[WebPush] Failed to schedule sale push: {push_err}")
+                    _dispatch_sale_push(
+                        background_tasks=background_tasks,
+                        tx_id=session_id,
+                        email=email,
+                        song_title=song_title,
+                        amount_total=amount_total,
+                        currency=currency,
+                        locale=locale,
+                        buyer_name=buyer_name,
+                        payment_method="Stripe",
+                    )
                     
         elif event_type == "charge.refunded":
             charge_id = data_object.get("id")
@@ -1413,7 +1445,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 # Order retrieval & Verification
 # -------------------------------------------------------------------
 @router.get("/api/order/hash-by-checkout")
-def get_hash_by_checkout(checkout_id: str):
+def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks):
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
     c.execute("SELECT download_hash FROM purchases WHERE transaction_id = ?", (checkout_id,))
@@ -1543,6 +1575,17 @@ def get_hash_by_checkout(checkout_id: str):
                     
                     if is_new:
                         send_purchase_delivery_email(email, song_title, download_hash, locale)
+                        _dispatch_sale_push(
+                            background_tasks=background_tasks,
+                            tx_id=checkout_id,
+                            email=email,
+                            song_title=song_title,
+                            amount_total=amount_total,
+                            currency=currency,
+                            locale=locale,
+                            buyer_name=buyer_name,
+                            payment_method="Stripe",
+                        )
                     
                     return {"download_hash": download_hash}
         except Exception as api_err:
@@ -1611,6 +1654,17 @@ def get_hash_by_checkout(checkout_id: str):
                         
                         if is_new:
                             send_purchase_delivery_email(email, song_title, download_hash, locale)
+                            _dispatch_sale_push(
+                                background_tasks=background_tasks,
+                                tx_id=checkout_id,
+                                email=email,
+                                song_title=song_title,
+                                amount_total=grand_total,
+                                currency=currency,
+                                locale=locale,
+                                buyer_name=buyer_name,
+                                payment_method="Paddle",
+                            )
                         
                         return {"download_hash": download_hash}
         except Exception as api_err:
