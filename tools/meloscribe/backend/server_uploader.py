@@ -175,7 +175,8 @@ def run_uploads():
                 conn.commit()
             else:
                 # Execution failed
-                error_msg = res.stderr or res.stdout or f"Exit code {res.returncode}"
+                err_parts = [p.strip() for p in (res.stdout, res.stderr) if p and p.strip()]
+                error_msg = "\n---\n".join(err_parts) if err_parts else f"Exit code {res.returncode}"
                 print(f"[Uploader] FAILED: Task {task_id} failed: {error_msg}")
                 cursor.execute("""
                     UPDATE upload_queue 
@@ -198,6 +199,19 @@ def run_uploads():
 
 def main():
     print("[Uploader] Server scheduled uploader daemon starting...")
+    
+    # Ensure only a single instance of server_uploader runs on Linux
+    import platform
+    if platform.system() == "Linux":
+        import fcntl
+        lock_file_path = "/tmp/server_uploader.lock"
+        try:
+            fp = open(lock_file_path, "w")
+            fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (IOError, OSError):
+            print("[Uploader] Another instance of server_uploader is already running. Exiting.")
+            sys.exit(0)
+            
     init_db()
     
     # Run once at startup
@@ -206,9 +220,11 @@ def main():
     
     while True:
         try:
+            # Sleep first to prevent back-to-back execution race conditions
+            time.sleep(60)
             run_uploads()
-            # Disk space check every hour (60 loops of 60s)
-            for _ in range(60):
+            # Disk space check every hour (60 loops of 60s total, we already did 1 loop)
+            for _ in range(59):
                 time.sleep(60)
                 run_uploads()
             check_disk_space()

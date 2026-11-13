@@ -20,7 +20,7 @@ DEFAULT_SETTINGS = {
     "gemini_api_key": "",
     "ig_app_id": "26975285422066567",
     "ig_app_secret": "",
-    "tiktok_client_key": "sbawllqdpf3yk6g8kh",
+    "tiktok_client_key": "awe54p8mg3xasm1l",
     "tiktok_client_secret": "",
     "threads_app_id": "26975285422066567",
     "threads_app_secret": "",
@@ -46,6 +46,13 @@ DEFAULT_SETTINGS = {
         "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself, the full learning package has you covered.\n\n"
         "Check out my channel for more aesthetic piano covers and tutorials!\n\n"
         "#piano #pianocover #pianotutorial #music #synthesia #keysight #{song}"
+    ),
+    "comment_template_youtube": (
+        "Hope you enjoyed playing along or listening! 🎹✨\n\n"
+        "🎼 Sheet Music & MIDI for this piece:\n"
+        "👉 {song_link}\n\n"
+        "Have a song you'd love to learn? You can suggest your favorite songs for free on the website (or just leave a comment below) — I read every request!\n\n"
+        "Happy practicing! 🎶"
     ),
     "desc_template_youtube_shorts": (
         "Handcrafted piano arrangement for {song} by {author}.\n\n"
@@ -151,12 +158,33 @@ DEFAULT_SETTINGS = {
     "pinterest_upload_easy": True,
     "pinterest_upload_hook": True,
     "doPinterest": True,
+    "song": "Sweetest Rain",
+    "author": "Dave Kerr",
+    "theme": "warm",
+    "price": "6.00",
+    "format": "full_arrangement",
+    "doR2": True,
+    "doYoutube": True,
+    "doInstagram": True,
+    "doFacebook": True,
+    "doTiktok": True,
+    "doThreads": True,
+    "zoom": 1.5,
+    "shift": 0,
     "enableVisualizerNormal": True,
     "enableVisualizerTutorial": True,
     "enableVisualizerWideNormal": True,
     "enableVisualizerWideTutorial": True,
     "enableMetronome": True,
+    "enableReflection": True,
+    "enablePortraitAddon": True,
+    "manual_crop": False,
+    "timesig": "auto",
     "metro_offset": 0.0,
+    "scheduleDate": "",
+    "scheduleTime": "16:00",
+    "hook_start": 0.0,
+    "hook_end": 60.0,
     "desc_template_pinterest": (
         "Handcrafted piano arrangement of {song} by {author}!\n\n"
         "👉 Click the Pin to download the complete learning bundle (Sheets + MIDI + 2K Tutorials)!\n\n"
@@ -354,5 +382,13 @@ def load_settings():
     return settings
 
 def save_settings(settings_dict):
+    current = {}
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                current = json.load(f)
+        except Exception:
+            current = {}
+    current.update(settings_dict)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(settings_dict, f, indent=4)
+        json.dump(current, f, indent=4)

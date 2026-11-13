@@ -42,15 +42,43 @@ def check_duplicate(youtube, song_name: str) -> bool:
     return False
 
 
+def post_comment(youtube, video_id: str, comment_text: str):
+    """Posts a top-level comment to a YouTube video using YouTube Data API v3."""
+    try:
+        body = {
+            "snippet": {
+                "videoId": video_id,
+                "topLevelComment": {
+                    "snippet": {
+                        "textOriginal": comment_text
+                    }
+                }
+            }
+        }
+        res = youtube.commentThreads().insert(
+            part="snippet",
+            body=body
+        ).execute()
+        print(f"[YouTube API] Successfully posted top-level comment on video {video_id}.")
+        return res
+    except HttpError as e:
+        print(f"[YouTube API] Warning: Failed to post comment ({e.resp.status}): {e.content}")
+        return None
+    except Exception as e:
+        print(f"[YouTube API] Warning: Failed to post comment: {e}")
+        return None
+
+
 def post_video(video_path: str, title: str, description: str, tags: list = None,
                publish_at_dt: datetime.datetime = None, privacy: str = "private",
                format: str = "full_arrangement", thumbnail_path: str = None,
-               skip_duplicate_check: bool = False) -> str | None:
+               skip_duplicate_check: bool = False, comment_text: str = None) -> str | None:
     """
     Uploads a video to YouTube.
     format="viral_part"       → Shorts format (no scheduling, posted public immediately or at publish_at)
     format="full_arrangement"  → Long-form video with optional thumbnail
     publish_at_dt              → Schedule the video (sets status to private + publishAt)
+    comment_text               → Automated top-level comment with direct sheet music link & request invite
     Returns the YouTube URL or None on failure.
     """
     if not os.path.exists(video_path):
@@ -132,6 +160,14 @@ def post_video(video_path: str, title: str, description: str, tags: list = None,
                     print("[YouTube API] Thumbnail uploaded successfully.")
             except HttpError as te:
                 print(f"[YouTube API] Warning: Thumbnail upload failed: {te}")
+
+        # Post top-level comment if provided
+        if comment_text:
+            try:
+                print(f"[YouTube API] Posting automated top-level comment...")
+                post_comment(youtube, video_id, comment_text)
+            except Exception as ce:
+                print(f"[YouTube API] Warning: Comment posting failed: {ce}")
 
         return yt_url
 

@@ -56,7 +56,7 @@ def _get_all_fb_videos(access_token: str, page_id: str) -> list[dict]:
     videos = []
     url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
     params = {
-        "fields": "id,title,description,created_time,length,permalink_url,views",
+        "fields": "id,title,description,created_time,length,permalink_url,views,likes.summary(true),comments.summary(true)",
         "access_token": access_token,
         "limit": 50
     }
@@ -129,6 +129,18 @@ def sync_facebook():
         views     = v.get("views", 0)
         reach     = views  # Approximation since insights are broken
 
+        likes = 0
+        if isinstance(v.get("likes"), dict):
+            likes = v.get("likes", {}).get("summary", {}).get("total_count", 0) or 0
+        elif isinstance(v.get("likes"), (int, float)):
+            likes = int(v.get("likes"))
+
+        comments = 0
+        if isinstance(v.get("comments"), dict):
+            comments = v.get("comments", {}).get("summary", {}).get("total_count", 0) or 0
+        elif isinstance(v.get("comments"), (int, float)):
+            comments = int(v.get("comments"))
+
         # Match to song
         song_name = sync_utils.match_song_name(title or desc, known_songs, cursor)
         if not song_name:
@@ -149,8 +161,8 @@ def sync_facebook():
             "publish_date": published,
             "duration_sec": duration,
             "views": views,
-            "likes": 0, # requires comments.summary(true),likes.summary(true) on the original request
-            "comments": 0,
+            "likes": likes,
+            "comments": comments,
             "shares": 0,
             "saves": 0,
             "reach": reach,

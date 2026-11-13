@@ -368,11 +368,28 @@ def _render_chunk_worker(
     out.release()
     return chunk_idx, end_frame - start_frame
 
+def cleanup_stale_temp_files(temp_dir, max_age_seconds=900):
+    """Removes leftover chunk and audio temp files older than max_age_seconds."""
+    try:
+        now = time.time()
+        for fname in os.listdir(temp_dir):
+            if fname.startswith(("temp_mask_chunk_", "temp_audio_", "temp_concat_", "waves_mask_", "temp_")):
+                fpath = os.path.join(temp_dir, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        if (now - os.path.getmtime(fpath)) > max_age_seconds:
+                            os.remove(fpath)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
 def generate_fluid_mask(video_path, duration=30, fps=60, is_tutorial=False, is_wide=False, theme="warm", midipath="", delay=0.0, outmask="", zoom=1.0, shift=0):
     import uuid
     uid = uuid.uuid4().hex[:8]
     temp_dir = os.path.join(TOOL_DIR, "temp")
     os.makedirs(temp_dir, exist_ok=True)
+    cleanup_stale_temp_files(temp_dir)
     mask_path = outmask if outmask else os.path.join(temp_dir, f"waves_mask_{uid}.mp4")
     wav_path = os.path.join(temp_dir, f"temp_audio_{uid}.wav")
 
@@ -565,48 +582,64 @@ def generate_fluid_mask(video_path, duration=30, fps=60, is_tutorial=False, is_w
     mon_t.start()
 
     is_midi = (midi_amps is not None)
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {
-            executor.submit(
-                _render_chunk_worker,
-                c_idx, sf, ef, width, height, fps,
-                is_wide, is_tutorial, is_midi, theme, amplitudes_all, vis_band_min, vis_band_max, c_path, prog_array, ambient_fx_all
-            ): (c_idx, ef - sf) for c_idx, sf, ef, c_path in chunks
-        }
+    concat_list_path = None
+    try:
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(
+                    _render_chunk_worker,
+                    c_idx, sf, ef, width, height, fps,
+                    is_wide, is_tutorial, is_midi, theme, amplitudes_all, vis_band_min, vis_band_max, c_path, prog_array, ambient_fx_all
+                ): (c_idx, ef - sf) for c_idx, sf, ef, c_path in chunks
+            }
 
-        for future in as_completed(futures):
-            c_idx, num_f = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error in visualizer chunk {c_idx}: {e}")
+            for future in as_completed(futures):
+                c_idx, num_f = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Error in visualizer chunk {c_idx}: {e}")
 
-    stop_monitor.set()
-    mon_t.join(timeout=1.0)
-    print("VIS_PROGRESS:100%", flush=True)
+        stop_monitor.set()
+        mon_t.join(timeout=1.0)
+        print("VIS_PROGRESS:100%", flush=True)
 
-    # Concatenate chunk videos instantly with FFmpeg concat demuxer
-    concat_list_path = os.path.join(temp_dir, f"temp_concat_{uid}.txt")
-    with open(concat_list_path, "w", encoding="utf-8") as f:
+        # Concatenate chunk videos instantly with FFmpeg concat demuxer
+        concat_list_path = os.path.join(temp_dir, f"temp_concat_{uid}.txt")
+        with open(concat_list_path, "w", encoding="utf-8") as f:
+            for cf in chunk_files:
+                if os.path.exists(cf):
+                    clean_p = cf.replace("\\", "/")
+                    f.write(f"file '{clean_p}'\n")
+
+        concat_cmd = [
+            get_ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0",
+            "-i", concat_list_path, "-c", "copy", mask_path
+        ]
+        subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    finally:
+        stop_monitor.set()
+        try:
+            mon_t.join(timeout=0.5)
+        except Exception:
+            pass
+        # Always cleanup temporary chunk files even on abort/exception
         for cf in chunk_files:
-            if os.path.exists(cf):
-                clean_p = cf.replace("\\", "/")
-                f.write(f"file '{clean_p}'\n")
-
-    concat_cmd = [
-        get_ffmpeg_exe(), "-y", "-f", "concat", "-safe", "0",
-        "-i", concat_list_path, "-c", "copy", mask_path
-    ]
-    subprocess.run(concat_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    # Cleanup temporary files
-    for cf in chunk_files:
-        try: os.remove(cf)
-        except: pass
-    try: os.remove(concat_list_path)
-    except: pass
-    try: os.remove(wav_path)
-    except: pass
+            try:
+                if os.path.exists(cf):
+                    os.remove(cf)
+            except Exception:
+                pass
+        if concat_list_path and os.path.exists(concat_list_path):
+            try:
+                os.remove(concat_list_path)
+            except Exception:
+                pass
+        try:
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+        except Exception:
+            pass
 
     elapsed = time.time() - t_start
     print(f"VIS_PROGRESS:100%", flush=True)

@@ -253,7 +253,7 @@ Antworte AUSSCHLIESSLICH im folgenden JSON-Format ohne Markdown-Codeblöcke:
 
     genai.configure(api_key=api_key)
     res_text = ""
-    for model_name in ['models/gemini-2.5-flash', 'models/gemini-flash-latest', 'models/gemini-2.5-flash-lite']:
+    for model_name in ['models/gemini-3.8-flash', 'models/gemini-2.5-flash', 'models/gemini-flash-latest']:
         try:
             m = genai.GenerativeModel(model_name)
             resp = m.generate_content(prompt)

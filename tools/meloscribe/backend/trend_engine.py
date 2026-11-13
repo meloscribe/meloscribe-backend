@@ -7,10 +7,11 @@ LASTFM_API_KEY = 'c18bc78a009197198f262ba7e54da9e5'
 def get_lastfm_trends():
     url = f'http://ws.audioscrobbler.com/2.0/?method=chart.gettoptracks&api_key={LASTFM_API_KEY}&format=json&limit=20'
     try:
-        req = urllib.request.urlopen(url)
-        data = json.loads(req.read().decode())
-        tracks = [t['name'] + ' by ' + t['artist']['name'] for t in data.get('tracks', {}).get('track', [])]
-        return tracks
+        req = urllib.request.Request(url, headers={'User-Agent': 'meloscribe/1.0'})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode('utf-8', errors='ignore'))
+            tracks = [t['name'] + ' by ' + t['artist']['name'] for t in data.get('tracks', {}).get('track', [])]
+            return tracks
     except Exception as e:
         print(f"Error fetching Last.fm trends: {e}")
         return []
@@ -67,12 +68,22 @@ def get_google_trends():
         print(f"Error fetching Google Trends: {e}")
     return {}
 
+_TRENDS_CACHE = {"data": None, "timestamp": 0}
+
 def get_all_trends():
-    return {
+    import time
+    now = time.time()
+    if _TRENDS_CACHE["data"] and (now - _TRENDS_CACHE["timestamp"] < 600):
+        return _TRENDS_CACHE["data"]
+        
+    data = {
         "lastfm_top_20": get_lastfm_trends(),
         "youtube_music_trending": get_youtube_trends(),
         "google_search_interest": get_google_trends()
     }
+    _TRENDS_CACHE["data"] = data
+    _TRENDS_CACHE["timestamp"] = now
+    return data
 
 if __name__ == "__main__":
     print(json.dumps(get_all_trends(), indent=2))

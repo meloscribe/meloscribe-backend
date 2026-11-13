@@ -138,7 +138,16 @@ def get_settings():
 async def update_settings(request: Request):
     data = await request.json()
     save_settings(data)
-    threading.Thread(target=sync_credentials_route_internal, daemon=True).start()
+    cred_keys = {
+        "stripe_sandbox_secret_key", "stripe_sandbox_publishable_key",
+        "stripe_live_secret_key", "stripe_live_publishable_key",
+        "stripe_sandbox_webhook_secret", "stripe_live_webhook_secret",
+        "resend_api_key", "gemini_api_key", "ig_app_id", "ig_app_secret",
+        "tiktok_client_key", "tiktok_client_secret", "threads_app_id", "threads_app_secret",
+        "r2_account_id", "r2_access_key", "r2_secret_key", "r2_bucket", "server_api_key"
+    }
+    if any(k in data for k in cred_keys):
+        threading.Thread(target=sync_credentials_route_internal, daemon=True).start()
     return {"status": "success"}
 
 @router.post("/api/server/sync-credentials")

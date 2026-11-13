@@ -134,8 +134,13 @@ def post_reel(video_path: str, caption: str, publish_at_dt: datetime = None, thu
 
         print(f"[Instagram API] Container created (ID: {container_id}). Waiting for processing...")
 
+        file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+        if file_size_mb > 300:
+            print(f"[Instagram API] WARNING: Video size ({file_size_mb:.1f} MB) exceeds Instagram Reel limit of 300 MB! Processing may fail on Meta's servers.")
+
         # Step 2: Wait for container to be ready
-        for attempt in range(15):
+        is_ready = False
+        for attempt in range(40):
             time.sleep(10)
             status_resp = requests.get(
                 f"{GRAPH_URL}/{container_id}",
@@ -143,13 +148,18 @@ def post_reel(video_path: str, caption: str, publish_at_dt: datetime = None, thu
             )
             status_data = status_resp.json()
             status_code = status_data.get("status_code", "")
-            print(f"  Container status: {status_code} (attempt {attempt+1}/15)")
+            print(f"  Container status: {status_code} (attempt {attempt+1}/40)")
 
             if status_code == "FINISHED":
+                is_ready = True
                 break
             elif status_code in ("ERROR", "EXPIRED"):
                 print(f"[Instagram API] Container failed: {status_data}")
                 return False
+
+        if not is_ready:
+            print(f"[Instagram API] ERROR: Container {container_id} not finished after 400s (last status: {status_code}). Aborting publish.")
+            return False
 
         # Step 3: Publish
         publish_resp = requests.post(
