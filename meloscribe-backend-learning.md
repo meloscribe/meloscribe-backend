@@ -2,6 +2,15 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-13: `meloscribe-app` vs `meloscribe-backend` Drift (`yt_poster.py` `comment_text` TypeError & `ig_poster.py` Timeout Regression)
+- **Root Cause**:
+  1. Updates to 10 shared files (`yt_poster.py`, `ig_poster.py`, `server_uploader.py`, `settings.py`, `routes_settings.py`, `fb_sync.py`, `content_brain.py`, `trend_engine.py`, `audio_visualizer.py`, `forensic_midi_scanner.py`) had been committed in `meloscribe-app` and previously SCP'd to the Oracle VM, but never synced into `meloscribe-backend`.
+  2. When the Oracle VM pulled from `meloscribe-backend`, `yt_poster.py` reverted to the older signature without `comment_text`, causing Task 270 (`Goodbye To A Lover Again` YouTube tutorial) to crash with `TypeError: post_video() got an unexpected keyword argument 'comment_text'`. Similarly, `ig_poster.py` reverted to 150s polling (15 × 10s), causing Task 273 (351.64 MB, also >300 MB Instagram Reels limit) to attempt premature `media_publish`.
+- **Resolution**:
+  1. Synced all 10 files from `meloscribe-app` to `meloscribe-backend` (`4208f57`), pulled cleanly onto the Oracle VM, and restarted `meloscribe-backend` + `oci-uploader`.
+  2. Re-queued and completed Task 270 (`https://youtu.be/pXkK825bs5M`).
+  3. **Rule**: Never hot-patch shared backend/tool files via direct SCP to the VM without committing to `meloscribe-backend`; keep `meloscribe-app` and `meloscribe-backend` in strict parity. (Note: YouTube auto-commenting still logs non-fatal 403 `insufficientPermissions` because `yt_tokens.json` lacks the `youtube.force-ssl` scope.)
+
 ### 2026-11-12: Stripe-Minimalist Web Push Payloads, OS-Level Priority Separation & APK v1.3.1 (`web_push.py`, `routes_public.py`)
 - **Ultra-Clean Stripe-Style Lockscreen Notifications & Vote-Noise Reduction (`web_push.py`, `routes_public.py`)**:
   - *Issue:* Including `icon`/`image` or `setLargeIcon`/`MessagingStyle` caused double-icon rendering on Android 12+ Pixel SystemUI and pulled low-priority requests into the top shade section; triggering push alerts at `votes == 5` also created low-signal lockscreen noise, while all-caps `subText` badges and `+` currency prefixes added unnecessary visual clutter.
