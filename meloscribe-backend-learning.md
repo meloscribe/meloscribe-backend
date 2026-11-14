@@ -2,6 +2,11 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-14: Queue Ordering, Auto-Pruning Missing Staging Files, & Selectable Sales Notification Sounds (`APK v1.4.0`)
+- **Upload Queue Ordering & Orphaned Failed Cleanup (`web_push.py`, `server_uploader.py`)**:
+  - *Issue:* `get_admin_queue` and `get_pulse_summary` sorted `failed` tasks by `datetime(schedule_time) ASC`, placing old September failures (`2026-09-28`) above recent failures (`2026-11-13`), and `check_disk_space` treated `failed` tasks as active blockers while missing a prune check when VM staging files are removed.
+  - *Resolution:* Shared `_load_ordered_queue_items` now sorts `failed` and `completed` newest-first (`DESC`) and `pending`/`disabled` chronologically (`ASC`), auto-marks `failed` entries as `'cancelled'` via `_prune_missing_failed_queue_tasks` when `/home/ubuntu/meloscribe/staging` no longer has media for that song, and exposes `DELETE /api/admin/queue/{task_id}`. Fixed `server_uploader.py` `check_disk_space()` to only treat `pending`/`processing`/`disabled` as active blockers.
+
 ### 2026-11-14: Missing Sale Push Notifications When Purchases Clear via API Fallback (`/api/order/hash-by-checkout`)
 - **Root Cause**:
   1. Live Stripe purchases (e.g. `#85 Sweetest Rain`, `#86 Goodbye To A Lover Again`) cleared via the checkout success redirect endpoint `GET /api/order/hash-by-checkout` (`[Stripe API Fallback]`) instead of `/api/webhooks/stripe` (which has received zero verified webhooks since 2026-09-13).

@@ -65,21 +65,28 @@ def check_disk_space():
                     
                     conn = sqlite3.connect(DB_PATH)
                     cursor = conn.cursor()
-                    # Query if any task is not completed for this base song or its variations
+                    # Query if any active/queued task remains for this base song or its variations
                     cursor.execute("""
                         SELECT COUNT(*) FROM upload_queue 
-                        WHERE (song = ? OR song LIKE ?) AND status != 'completed'
+                        WHERE (song = ? OR song LIKE ?) AND status IN ('pending', 'processing', 'disabled')
                     """, (folder, f"{folder} %"))
                     active_count = cursor.fetchone()[0]
-                    conn.close()
-                    
+
                     if active_count == 0:
                         print(f"[Cleanup] Removing staged files for completed song folder: {folder}")
                         try:
                             shutil.rmtree(folder_path)
+                            cursor.execute("""
+                                UPDATE upload_queue
+                                SET status = 'cancelled',
+                                    error = COALESCE(error, '') || CASE WHEN COALESCE(error, '') = '' THEN '' ELSE '\n' END || '[Auto-Cleared] Staging files cleaned up on VM.'
+                                WHERE (song = ? OR song LIKE ?) AND status = 'failed'
+                            """, (folder, f"{folder} %"))
+                            conn.commit()
                             cleaned_any = True
                         except Exception as clean_err:
                             print(f"[Cleanup] Error deleting {folder_path}: {clean_err}")
+                    conn.close()
             
             if not cleaned_any:
                 print("[Cleanup] Low space but no completed songs found to clean up.")

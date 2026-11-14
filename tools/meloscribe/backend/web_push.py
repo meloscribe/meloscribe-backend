@@ -1395,6 +1395,95 @@ def _get_queue_db_path() -> Optional[Path]:
             return p
     return None
 
+_STAGING_ROOT = Path("/home/ubuntu/meloscribe/staging")
+
+def _staging_has_media_for_song(song: str) -> bool:
+    """Return True if staged video/sheet media for a queue song still exists on the VM."""
+    if not _STAGING_ROOT.is_dir():
+        return True
+    base = (song or "").strip()
+    if not base:
+        return False
+    lower = base.lower()
+    if lower.endswith(" easy"):
+        base = base[:-5].strip()
+    elif lower.endswith(" teaser"):
+        base = base[:-7].strip()
+
+    target_dir = None
+    try:
+        for entry in _STAGING_ROOT.iterdir():
+            if entry.is_dir() and entry.name.lower() == base.lower():
+                target_dir = entry
+                break
+    except OSError:
+        return True
+
+    if not target_dir:
+        return False
+
+    for sub_name in ("TikToks", "Scores", "Covers"):
+        for candidate in target_dir.iterdir():
+            if candidate.is_dir() and candidate.name.lower() == sub_name.lower():
+                if any(f.is_file() and f.stat().st_size > 0 for f in candidate.rglob("*")):
+                    return True
+    return any(f.is_file() and f.stat().st_size > 0 for f in target_dir.iterdir())
+
+def _prune_missing_failed_queue_tasks(q_conn: sqlite3.Connection) -> int:
+    """Clear failed queue entries whose staged files are no longer present on the VM."""
+    if not _STAGING_ROOT.is_dir():
+        return 0
+    qc = q_conn.cursor()
+    qc.execute("SELECT id, song FROM upload_queue WHERE status = 'failed'")
+    failed_rows = qc.fetchall()
+    stale_ids = [r[0] for r in failed_rows if not _staging_has_media_for_song(r[1])]
+    if not stale_ids:
+        return 0
+    placeholders = ",".join("?" for _ in stale_ids)
+    qc.execute(
+        f"""
+        UPDATE upload_queue
+        SET status = 'cancelled',
+            error = COALESCE(error, '') || CASE WHEN COALESCE(error, '') = '' THEN '' ELSE '\n' END || '[Auto-Cleared] Staging files no longer exist on VM.'
+        WHERE id IN ({placeholders})
+        """,
+        stale_ids,
+    )
+    q_conn.commit()
+    return len(stale_ids)
+
+def _load_ordered_queue_items(q_conn: sqlite3.Connection, completed_limit: int = 50) -> list[dict]:
+    """Prune orphaned failed rows and return pending (ASC), failed (DESC), completed (DESC)."""
+    _prune_missing_failed_queue_tasks(q_conn)
+    q_conn.row_factory = sqlite3.Row
+    qc = q_conn.cursor()
+    qc.execute("""
+        SELECT id, song, mode, profile, schedule_time, status, error, attempts
+        FROM upload_queue
+        WHERE status IN ('pending', 'processing', 'disabled', 'failed')
+        ORDER BY
+          CASE
+            WHEN status IN ('pending', 'processing') THEN 0
+            WHEN status = 'failed' THEN 1
+            ELSE 2
+          END,
+          CASE WHEN status = 'failed' THEN datetime(schedule_time) END DESC,
+          CASE WHEN status = 'failed' THEN id END DESC,
+          datetime(schedule_time) ASC,
+          id ASC
+    """)
+    active_and_failed = [dict(r) for r in qc.fetchall()]
+
+    qc.execute("""
+        SELECT id, song, mode, profile, schedule_time, status, error, attempts
+        FROM upload_queue
+        WHERE status = 'completed'
+        ORDER BY datetime(schedule_time) DESC, id DESC
+        LIMIT ?
+    """, (completed_limit,))
+    completed_items = [dict(r) for r in qc.fetchall()]
+    return active_and_failed + completed_items
+
 @router.get("/api/admin/queue")
 def get_admin_queue(request: Request):
     """Fetch Oracle VM upload queue items across pending, failed, disabled, and completed states."""
@@ -1403,23 +1492,7 @@ def get_admin_queue(request: Request):
     if q_path:
         q_conn = sqlite3.connect(str(q_path), timeout=15.0)
         q_conn.execute("PRAGMA journal_mode=WAL;")
-        q_conn.row_factory = sqlite3.Row
-        qc = q_conn.cursor()
-        qc.execute("""
-            SELECT id, song, mode, profile, schedule_time, status, error, attempts
-            FROM upload_queue
-            ORDER BY
-              CASE
-                WHEN status = 'pending' THEN 0
-                WHEN status = 'failed' THEN 1
-                WHEN status = 'disabled' THEN 2
-                ELSE 3
-              END,
-              CASE WHEN status = 'completed' THEN datetime(schedule_time) END DESC,
-              datetime(schedule_time) ASC
-            LIMIT 100
-        """)
-        items = [dict(r) for r in qc.fetchall()]
+        items = _load_ordered_queue_items(q_conn, completed_limit=60)
         q_conn.close()
         return {"queue": items}
 
@@ -1428,7 +1501,7 @@ def get_admin_queue(request: Request):
         if not os.path.exists(key_path):
             key_path = r"C:\Dev\ssh-key-2026-05-07.key"
         if os.path.exists(key_path):
-            py_query = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; cursor=conn.cursor(); cursor.execute('SELECT id, song, mode, profile, schedule_time, status, error, attempts FROM upload_queue ORDER BY CASE WHEN status = \"pending\" THEN 0 WHEN status = \"failed\" THEN 1 WHEN status = \"disabled\" THEN 2 ELSE 3 END, datetime(schedule_time) ASC LIMIT 100'); print(json.dumps([dict(r) for r in cursor.fetchall()]))"
+            py_query = "import sqlite3, json; conn=sqlite3.connect('/home/ubuntu/meloscribe/queue.db'); conn.row_factory=sqlite3.Row; cursor=conn.cursor(); cursor.execute('SELECT id, song, mode, profile, schedule_time, status, error, attempts FROM upload_queue WHERE status != \"cancelled\" ORDER BY CASE WHEN status = \"pending\" THEN 0 WHEN status = \"failed\" THEN 1 WHEN status = \"disabled\" THEN 2 ELSE 3 END, CASE WHEN status IN (\"failed\", \"completed\") THEN datetime(schedule_time) END DESC, datetime(schedule_time) ASC, id DESC LIMIT 120'); print(json.dumps([dict(r) for r in cursor.fetchall()]))"
             cmd = ["ssh", "-i", key_path, "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=5", "-o", "IdentitiesOnly=yes", "ubuntu@152.70.23.171", f"python3 -c \"{py_query}\""]
             try:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=10, creationflags=CREATION_FLAGS)
@@ -1499,6 +1572,25 @@ def reschedule_admin_queue_task(task_id: int, req: QueueRescheduleRequest, reque
         q_conn.commit()
         q_conn.close()
         return {"status": "success", "schedule_time": req.schedule_time}
+    raise HTTPException(status_code=404, detail="Queue database not found on this host.")
+
+@router.delete("/api/admin/queue/{task_id}")
+def dismiss_admin_queue_task(task_id: int, request: Request):
+    """Dismiss a failed or disabled upload queue item from Pulse."""
+    verify_pulse_admin(request)
+    q_path = _get_queue_db_path()
+    if q_path:
+        q_conn = sqlite3.connect(str(q_path), timeout=15.0)
+        q_conn.execute("PRAGMA journal_mode=WAL;")
+        qc = q_conn.cursor()
+        qc.execute(
+            "UPDATE upload_queue SET status = 'cancelled' WHERE id = ? AND status IN ('failed', 'disabled', 'pending')",
+            (task_id,),
+        )
+        updated = qc.rowcount
+        q_conn.commit()
+        q_conn.close()
+        return {"status": "success", "dismissed": updated > 0, "task_id": task_id}
     raise HTTPException(status_code=404, detail="Queue database not found on this host.")
 
 # -------------------------------------------------------------------
@@ -1894,17 +1986,7 @@ def get_pulse_summary(request: Request):
         try:
             q_conn = sqlite3.connect(str(q_path), timeout=10.0)
             q_conn.execute("PRAGMA journal_mode=WAL;")
-            q_conn.row_factory = sqlite3.Row
-            qc = q_conn.cursor()
-            qc.execute("""
-                SELECT id, song, mode, profile, schedule_time, status, error, attempts
-                FROM upload_queue
-                ORDER BY
-                  CASE WHEN status = 'pending' THEN 0 WHEN status = 'failed' THEN 1 ELSE 2 END,
-                  datetime(schedule_time) ASC
-                LIMIT 60
-            """)
-            upcoming_queue = [dict(r) for r in qc.fetchall()]
+            upcoming_queue = _load_ordered_queue_items(q_conn, completed_limit=30)
             q_conn.close()
         except Exception as q_err:
             print(f"[Pulse Summary] Queue read error: {q_err}")
