@@ -23,6 +23,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from py_vapid import Vapid
 from pywebpush import webpush, WebPushException
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 # Ensure backend root is on sys.path
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -675,6 +677,78 @@ def record_native_push_event(
 
 _NATIVE_POLL_LOCK = threading.Lock()
 _NATIVE_WAITERS: Set[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
+_FCM_LOCK = threading.Lock()
+_FCM_CREDS = None
+
+def _get_fcm_access_token_and_project() -> Tuple[Optional[str], Optional[str]]:
+    """Return cached OAuth2 access token and Firebase project_id from the gitignored service account JSON."""
+    global _FCM_CREDS
+    cred_candidates = [
+        os.environ.get("FIREBASE_CREDENTIALS_PATH", ""),
+        str(CURRENT_DIR / "firebase-service-account.json"),
+    ]
+    cred_path = next((p for p in cred_candidates if p and os.path.exists(p)), None)
+    if not cred_path:
+        return None, None
+
+    with _FCM_LOCK:
+        try:
+            if _FCM_CREDS is None:
+                _FCM_CREDS = service_account.Credentials.from_service_account_file(
+                    cred_path,
+                    scopes=["https://www.googleapis.com/auth/firebase.messaging"],
+                )
+            if not _FCM_CREDS.valid or not _FCM_CREDS.token:
+                _FCM_CREDS.refresh(GoogleAuthRequest())
+            return _FCM_CREDS.token, _FCM_CREDS.project_id
+        except Exception as fcm_auth_err:
+            print(f"[FCM] Service account auth failed: {fcm_auth_err}")
+            _FCM_CREDS = None
+            return None, None
+
+def _send_fcm_v1(fcm_token: str, data_map: Dict[str, str]) -> Tuple[bool, bool]:
+    """Send high-priority data-only FCM HTTP v1 push. Returns (delivered, is_unregistered)."""
+    token, project_id = _get_fcm_access_token_and_project()
+    if not token or not project_id:
+        print("[FCM] Skipping dispatch: missing firebase-service-account.json credentials.")
+        return False, False
+
+    url = f"https://fcm.googleapis.com/v1/projects/{project_id}/messages:send"
+    body = {
+        "message": {
+            "token": fcm_token,
+            "data": data_map,
+            "android": {
+                "priority": "HIGH",
+                "ttl": "86400s",
+            },
+        }
+    }
+    try:
+        resp = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
+            json=body,
+            timeout=8,
+        )
+        if resp.status_code == 200:
+            return True, False
+        err_text = resp.text or ""
+        if resp.status_code in (400, 404) and (
+            "UNREGISTERED" in err_text
+            or "Requested entity was not found" in err_text
+            or "not a valid FCM registration token" in err_text
+        ):
+            print(f"[FCM] Pruning expired/unregistered token ({resp.status_code})")
+            return False, True
+        print(f"[FCM] Send failed ({resp.status_code}): {err_text[:240]}")
+        return False, False
+    except Exception as req_err:
+        print(f"[FCM] Request exception: {req_err}")
+        return False, False
 
 def _notify_native_waiters() -> None:
     """Wake any suspended long-poll requests from any sync or async caller thread."""
@@ -828,7 +902,7 @@ def send_web_push(
     else:
         notif_id = int(datetime.datetime.utcnow().timestamp() * 1000) % 1000000000
 
-    record_native_push_event(
+    ev_id = record_native_push_event(
         notif_type=effective_type,
         title=push_title,
         body=push_body,
@@ -839,6 +913,19 @@ def send_web_push(
         actions=effective_actions,
         meta=meta_payload
     )
+
+    fcm_data_map = {
+        "id": str(ev_id or notif_id),
+        "type": str(effective_type),
+        "title": str(push_title),
+        "body": str(push_body),
+        "song_name": str(song_name or ""),
+        "amount": f"{numeric_amt:.2f}" if effective_type == "sale" else "",
+        "currency": str(currency or "EUR"),
+        "url": str(url or push_url),
+        "actions_json": json.dumps(effective_actions),
+        "meta_json": json.dumps(meta_payload),
+    }
 
     artist_suffix = f" - {meta_payload['artist']}" if meta_payload.get("artist") else ""
     song_title_full = f"{song_name}{artist_suffix}".strip()
@@ -889,6 +976,15 @@ def send_web_push(
     for sub in subs:
         sub_id = sub["id"]
         ep_str = str(sub["endpoint"] or "")
+        if ep_str.startswith("fcm://"):
+            fcm_tok = ep_str[6:].strip()
+            if fcm_tok:
+                ok, is_dead = _send_fcm_v1(fcm_tok, fcm_data_map)
+                if ok:
+                    sent_count += 1
+                elif is_dead:
+                    dead_subscription_ids.append(sub_id)
+            continue
         if ep_str.startswith("native://"):
             sent_count += 1
             continue
@@ -1075,6 +1171,10 @@ def subscribe_push(req: SubscribeRequest, request: Request):
 
     conn = get_db_connection()
     c = conn.cursor()
+    if p256dh.startswith("replace:"):
+        legacy_ep = p256dh[len("replace:"):].strip()
+        if legacy_ep:
+            c.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (legacy_ep,))
     c.execute("""
         INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent)
         VALUES (?, ?, ?, ?)

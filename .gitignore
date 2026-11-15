@@ -67,6 +67,10 @@ tools/meloscribe/backend/*tokens*.json
 tools/meloscribe/backend/*token*.json
 tools/meloscribe/backend/*secrets*.json
 tools/meloscribe/backend/*client_secret*.json
+tools/meloscribe/backend/*firebase*.json
+tools/meloscribe/backend/*adminsdk*.json
+**/*firebase*.json
+**/*adminsdk*.json
 tools/meloscribe/backend/*cookie*.txt
 tools/meloscribe/backend/settings.json
 tools/meloscribe/backend/api_key.txt

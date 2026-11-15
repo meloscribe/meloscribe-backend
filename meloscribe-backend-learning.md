@@ -2,6 +2,13 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-15: Native Firebase Cloud Messaging (FCM HTTP v1) Backend Push Dispatch
+- **Context**: Replaced the persistent Foreground-Service polling workaround (`v1.5.0`) with direct Firebase Cloud Messaging (`FCM HTTP v1`) so Android devices wake instantly even when the app is closed/frozen and without showing a permanent `"Live Connection"` notification bar.
+- **Implementation (`web_push.py`)**:
+  - Added `_get_fcm_access_token_and_project()` using `google.oauth2.service_account.Credentials` (`firebase.messaging` scope) from `firebase-service-account.json` (gitignored across all repos).
+  - Added `_send_fcm_v1()` sending `android.priority = "HIGH"` `data`-only payloads (so `MeloscribeFirebaseMessagingService.onMessageReceived` always builds custom icons, `Lo`/`Tethys`/`Ceres` sound channels, stacking, and action buttons).
+  - Updated `send_web_push()` and `subscribe_push()` to dispatch `fcm://<token>` endpoints natively, prune `UNREGISTERED`/`INVALID_ARGUMENT` tokens automatically, and clean up superseded `native://` endpoints via `replace`.
+
 ### 2026-11-15: Real-Time Long-Polling Push Wakeups (`wait=25`) & Android 17 Cached App Freezer Fix (`APK v1.5.0`)
 - **Root Cause**:
   - Live Nginx access logs proved Purchase `#90` (`2026-11-15 13:22:43` UTC) entered `native_push_queue` (`id=39`) on the exact second of the sale, yet Android 17's Cached App Freezer froze `MeloscribePushService` (e.g. `13:11:27 -> 13:29:30`, `1083s` gap) because it ran as a plain background `Service` (`startService()`) without `startForeground()`, even with Unrestricted Battery Usage enabled. When opened (`13:29:30`), `MainActivity` unfroze polling and immediately surfaced the alert.
