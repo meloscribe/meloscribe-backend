@@ -2,6 +2,13 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-15: Real-Time Long-Polling Push Wakeups (`wait=25`) & Android 17 Cached App Freezer Fix (`APK v1.5.0`)
+- **Root Cause**:
+  - Live Nginx access logs proved Purchase `#90` (`2026-11-15 13:22:43` UTC) entered `native_push_queue` (`id=39`) on the exact second of the sale, yet Android 17's Cached App Freezer froze `MeloscribePushService` (e.g. `13:11:27 -> 13:29:30`, `1083s` gap) because it ran as a plain background `Service` (`startService()`) without `startForeground()`, even with Unrestricted Battery Usage enabled. When opened (`13:29:30`), `MainActivity` unfroze polling and immediately surfaced the alert.
+- **Resolution**:
+  - **Backend (`web_push.py`)**: Upgraded `/api/push/native-poll` to `async def` with zero-thread `asyncio.Event` long-polling (`wait=0..25`), woken in `<50ms` via `loop.call_soon_threadsafe(...)` inside `record_native_push_event()`.
+  - **Android (`APK v1.5.0`)**: Upgraded `MeloscribePushService` to a true `remoteMessaging` Foreground Service (`startForegroundService` + silent `IMPORTANCE_MIN` `meloscribe_sync_bg` channel, `wait=25` long-polling, `NetworkCallback` instant reconnect, `AlarmManager` restart on `onTaskRemoved`, and short `PARTIAL_WAKE_LOCK` during dispatch).
+
 ### 2026-11-14: Queue Ordering, Auto-Pruning Missing Staging Files, & Selectable Sales Notification Sounds (`APK v1.4.0`)
 - **Upload Queue Ordering & Orphaned Failed Cleanup (`web_push.py`, `server_uploader.py`)**:
   - *Issue:* `get_admin_queue` and `get_pulse_summary` sorted `failed` tasks by `datetime(schedule_time) ASC`, placing old September failures (`2026-09-28`) above recent failures (`2026-11-13`), and `check_disk_space` treated `failed` tasks as active blockers while missing a prune check when VM staging files are removed.

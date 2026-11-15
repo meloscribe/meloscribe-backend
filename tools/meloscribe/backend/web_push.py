@@ -11,8 +11,9 @@ import datetime
 import urllib.parse
 import subprocess
 import threading
+import asyncio
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set, Tuple
 
 import requests
 from fastapi import APIRouter, Request, HTTPException, Response, BackgroundTasks
@@ -669,7 +670,74 @@ def record_native_push_event(
     c.execute("DELETE FROM native_push_queue WHERE id NOT IN (SELECT id FROM native_push_queue ORDER BY id DESC LIMIT 200)")
     conn.commit()
     conn.close()
+    _notify_native_waiters()
     return ev_id
+
+_NATIVE_POLL_LOCK = threading.Lock()
+_NATIVE_WAITERS: Set[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
+
+def _notify_native_waiters() -> None:
+    """Wake any suspended long-poll requests from any sync or async caller thread."""
+    with _NATIVE_POLL_LOCK:
+        waiters = list(_NATIVE_WAITERS)
+    for loop, ev in waiters:
+        try:
+            loop.call_soon_threadsafe(ev.set)
+        except Exception:
+            pass
+
+def _query_native_push_events(since_id: int, endpoint: str) -> Dict[str, Any]:
+    init_push_db()
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    is_sub = True
+    if endpoint:
+        c.execute("SELECT 1 FROM push_subscriptions WHERE endpoint = ? LIMIT 1", (endpoint,))
+        is_sub = c.fetchone() is not None
+
+    c.execute("SELECT COALESCE(MAX(id), 0) as max_id FROM native_push_queue")
+    latest_id = int(c.fetchone()["max_id"] or 0)
+
+    if not is_sub or since_id < 0:
+        conn.close()
+        return {"subscribed": is_sub, "latest_id": latest_id, "events": []}
+
+    c.execute("""
+        SELECT id, type, title, body, song_name, amount, currency, url, actions_json, meta_json, created_at
+        FROM native_push_queue
+        WHERE id > ?
+        ORDER BY id ASC
+        LIMIT 20
+    """, (since_id,))
+    rows = c.fetchall()
+    conn.close()
+
+    events = []
+    for r in rows:
+        try:
+            actions = json.loads(r["actions_json"] or "[]")
+        except Exception:
+            actions = []
+        try:
+            meta = json.loads(r["meta_json"] or "{}")
+        except Exception:
+            meta = {}
+        events.append({
+            "id": r["id"],
+            "type": r["type"],
+            "title": r["title"],
+            "body": r["body"],
+            "song_name": r["song_name"] or "",
+            "amount": r["amount"] or "",
+            "currency": r["currency"] or "EUR",
+            "url": r["url"] or "/?tab=pulse",
+            "actions": actions,
+            "meta": meta,
+            "created_at": r["created_at"]
+        })
+
+    return {"subscribed": True, "latest_id": latest_id, "events": events}
 
 def send_web_push(
     notif_type: str,
@@ -943,60 +1011,32 @@ def _summarize_user_agent(ua: str) -> Dict[str, str]:
     return {"browser": browser, "platform": platform, "device_label": f"{browser} • {platform}"}
 
 @router.get("/api/push/native-poll")
-def poll_native_push_events(request: Request, since_id: int = -1, endpoint: str = ""):
-    """Lightweight poll endpoint for the Native Android APK background notification service."""
+async def poll_native_push_events(request: Request, since_id: int = -1, endpoint: str = "", wait: int = 0):
+    """Long-poll/instant poll endpoint for the Native Android APK foreground notification service."""
     verify_pulse_admin(request)
-    init_push_db()
-    conn = get_db_connection()
-    c = conn.cursor()
+    wait_sec = max(0, min(int(wait or 0), 25))
+    loop = asyncio.get_running_loop()
+    ev = asyncio.Event()
+    waiter = (loop, ev)
 
-    is_sub = True
-    if endpoint:
-        c.execute("SELECT 1 FROM push_subscriptions WHERE endpoint = ? LIMIT 1", (endpoint,))
-        is_sub = c.fetchone() is not None
+    if wait_sec > 0 and since_id >= 0:
+        with _NATIVE_POLL_LOCK:
+            _NATIVE_WAITERS.add(waiter)
 
-    c.execute("SELECT COALESCE(MAX(id), 0) as max_id FROM native_push_queue")
-    latest_id = int(c.fetchone()["max_id"] or 0)
+    try:
+        res = _query_native_push_events(since_id, endpoint)
+        if not res["subscribed"] or since_id < 0 or res["events"] or wait_sec <= 0:
+            return res
 
-    if not is_sub or since_id < 0:
-        conn.close()
-        return {"subscribed": is_sub, "latest_id": latest_id, "events": []}
-
-    c.execute("""
-        SELECT id, type, title, body, song_name, amount, currency, url, actions_json, meta_json, created_at
-        FROM native_push_queue
-        WHERE id > ?
-        ORDER BY id ASC
-        LIMIT 20
-    """, (since_id,))
-    rows = c.fetchall()
-    conn.close()
-
-    events = []
-    for r in rows:
         try:
-            actions = json.loads(r["actions_json"] or "[]")
-        except Exception:
-            actions = []
-        try:
-            meta = json.loads(r["meta_json"] or "{}")
-        except Exception:
-            meta = {}
-        events.append({
-            "id": r["id"],
-            "type": r["type"],
-            "title": r["title"],
-            "body": r["body"],
-            "song_name": r["song_name"] or "",
-            "amount": r["amount"] or "",
-            "currency": r["currency"] or "EUR",
-            "url": r["url"] or "/?tab=pulse",
-            "actions": actions,
-            "meta": meta,
-            "created_at": r["created_at"]
-        })
+            await asyncio.wait_for(ev.wait(), timeout=float(wait_sec))
+        except asyncio.TimeoutError:
+            return res
 
-    return {"subscribed": True, "latest_id": latest_id, "events": events}
+        return _query_native_push_events(since_id, endpoint)
+    finally:
+        with _NATIVE_POLL_LOCK:
+            _NATIVE_WAITERS.discard(waiter)
 
 @router.get("/api/push/subscriptions")
 def list_push_subscriptions(request: Request):
