@@ -681,7 +681,7 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
                     ]
                     if midi_p:
                         cmd_teaser.extend(["--midipath", midi_p])
-                    if settings.get("enable_visualizer_normal", True) and not kwargs.get("no_visualizer_hook", False):
+                    if settings.get("enableVisualizerHook", True) and not kwargs.get("no_visualizer_hook", False):
                         cmd_teaser.append("--visualizer")
                     rc_teaser = subprocess.run(cmd_teaser, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=creation_flags).returncode
                     

@@ -20,11 +20,24 @@ from fastapi import APIRouter, Request, HTTPException, Response, BackgroundTasks
 from pydantic import BaseModel
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
-from py_vapid import Vapid
-from pywebpush import webpush, WebPushException
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from google.oauth2 import service_account
-from google.auth.transport.requests import Request as GoogleAuthRequest
+try:
+    from py_vapid import Vapid
+    from pywebpush import webpush, WebPushException
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+except ImportError as _wp_imp_err:
+    Vapid = None
+    webpush = None
+    WebPushException = Exception
+    Encoding = PublicFormat = None
+    print(f"[WebPush] Optional WebPush dependencies unavailable locally: {_wp_imp_err}")
+
+try:
+    from google.oauth2 import service_account
+    from google.auth.transport.requests import Request as GoogleAuthRequest
+except ImportError as _fcm_imp_err:
+    service_account = None
+    GoogleAuthRequest = None
+    print(f"[FCM] Optional Google Auth dependencies unavailable locally: {_fcm_imp_err}")
 
 # Ensure backend root is on sys.path
 CURRENT_DIR = Path(__file__).resolve().parent

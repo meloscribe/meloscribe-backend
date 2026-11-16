@@ -372,6 +372,8 @@ async def _run_workflow(req: WorkflowRequest):
                 cmd.extend(["--subtitle_hook", req.subtitle_hook.strip()])
             if req.metro_offset:
                 cmd.extend(["--metro_offset", str(req.metro_offset)])
+            if not req.enableVisualizerHook:
+                cmd.append("--no-visualizer-hook")
             steps.append((cmd, f"Cloudflare R2 Upload ({v_song})"))
 
     # Local website catalog sync

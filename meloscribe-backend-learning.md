@@ -2,6 +2,9 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-16: Settings Load/Save Persistence Fix & Teaser Visualizer Parity
+- **Fix (`settings.py`, `web_push.py`, `routes_workflow.py`, `tools/upload_bot.py`)**: Mirrored desktop stability fixes — guarded optional WebPush/FCM imports for environments without push deps, fixed `load_settings()` keeping `SETTINGS_FILE` open during `needs_save` + contradictory `legacy_phrases` match + added locked atomic writes, and wired `enableVisualizerHook` / `--no-visualizer-hook` cleanly.
+
 ### 2026-11-16: Fail-Safe Purchase Platform Attribution (`traffic_source`, `referrer`, `utm_*`)
 - **Context**: Needed deterministic platform attribution (TikTok, Instagram, Facebook, YouTube, Pinterest, Google, Direct) stored directly per Stripe purchase without risking any checkout or Stripe Metadata errors.
 - **Implementation (`db_setup.py`, `routes_public.py`, `routes_admin.py`, `web_push.py`)**:

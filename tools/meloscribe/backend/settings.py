@@ -1,8 +1,10 @@
 import json
+import threading
 from pathlib import Path
 import os
 
 SETTINGS_FILE = Path(__file__).parent / "settings.json"
+_SETTINGS_LOCK = threading.Lock()
 
 DEFAULT_SETTINGS = {
     "musescore_dir": r"C:\Dev\meloscribe\Scores",
@@ -175,6 +177,7 @@ DEFAULT_SETTINGS = {
     "enableVisualizerTutorial": True,
     "enableVisualizerWideNormal": True,
     "enableVisualizerWideTutorial": True,
+    "enableVisualizerHook": True,
     "enableMetronome": True,
     "enableReflection": True,
     "enablePortraitAddon": True,
@@ -203,55 +206,60 @@ def load_settings():
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                settings = DEFAULT_SETTINGS.copy()
-                settings.update(data)
-                
-                # Self-healing / migration checks for description templates
-                needs_save = False
-                for k in ["desc_template_youtube_video", "desc_template_youtube_shorts",
-                          "desc_template_facebook_post", "desc_template_facebook_reel", "desc_template_pinterest",
-                          "desc_template_tiktok", "desc_template_instagram", "desc_template_threads"]:
-                    if k not in data:
-                        data[k] = DEFAULT_SETTINGS[k]
-                        settings[k] = DEFAULT_SETTINGS[k]
-                        needs_save = True
+        except Exception as e:
+            print(f"[Settings] Error reading settings.json: {e}")
+            data = {}
 
-                # Upgrade legacy templates to high-converting bundle copy
-                legacy_phrases = [
-                    "Sheet Music (PDF) & free Videos",
-                    "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.",
-                    "Whether you're here to listen or want to learn this piece yourself",
-                    "Click the Pin to get the Sheet Music (PDF)"
-                ]
-                template_keys = [
-                    "desc_template_tiktok", "desc_template_instagram", "desc_template_threads",
-                    "desc_template_youtube_shorts", "desc_template_youtube_video", "desc_template_youtube",
-                    "desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel",
-                    "desc_template_pinterest"
-                ]
-                for tk in template_keys:
-                    curr_val = data.get(tk, "")
-                    if not curr_val or any(lp in curr_val for lp in legacy_phrases):
-                        data[tk] = DEFAULT_SETTINGS[tk]
-                        settings[tk] = DEFAULT_SETTINGS[tk]
-                        needs_save = True
+        if data:
+            settings = DEFAULT_SETTINGS.copy()
+            settings.update(data)
 
-                # Upgrade legacy Facebook templates if containing URLs/links (Link in Bio is kept)
-                for fb_k in ["desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel"]:
-                    val = data.get(fb_k, "")
-                    if any(x in val for x in ["http://", "https://", "{song_link}", "meloscribesheets"]):
-                        data[fb_k] = DEFAULT_SETTINGS[fb_k]
-                        settings[fb_k] = DEFAULT_SETTINGS[fb_k]
-                        needs_save = True
-                if "Link in Bio" in data.get("desc_template_youtube", ""):
-                    data["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
-                    settings["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
+            # Self-healing / migration checks for description templates
+            needs_save = False
+            for k in ["desc_template_youtube_video", "desc_template_youtube_shorts",
+                      "desc_template_facebook_post", "desc_template_facebook_reel", "desc_template_pinterest",
+                      "desc_template_tiktok", "desc_template_instagram", "desc_template_threads"]:
+                if k not in data:
+                    data[k] = DEFAULT_SETTINGS[k]
+                    settings[k] = DEFAULT_SETTINGS[k]
                     needs_save = True
 
-                if needs_save:
-                    save_settings(data)
-        except Exception:
-            settings = DEFAULT_SETTINGS
+            # Upgrade legacy templates to high-converting bundle copy
+            legacy_phrases = [
+                "Sheet Music (PDF) & free Videos",
+                "Enjoy this piano arrangement! Whether you're here to listen or want to learn this piece yourself - I've got you covered.",
+                "Whether you're here to listen or want to learn this piece yourself - I've got you covered",
+                "Click the Pin to get the Sheet Music (PDF)"
+            ]
+            template_keys = [
+                "desc_template_tiktok", "desc_template_instagram", "desc_template_threads",
+                "desc_template_youtube_shorts", "desc_template_youtube_video", "desc_template_youtube",
+                "desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel",
+                "desc_template_pinterest"
+            ]
+            for tk in template_keys:
+                curr_val = data.get(tk) or ""
+                if not curr_val or any(lp in curr_val for lp in legacy_phrases):
+                    data[tk] = DEFAULT_SETTINGS[tk]
+                    settings[tk] = DEFAULT_SETTINGS[tk]
+                    needs_save = True
+
+            # Upgrade legacy Facebook templates if containing URLs/links (Link in Bio is kept)
+            for fb_k in ["desc_template_facebook", "desc_template_facebook_post", "desc_template_facebook_reel"]:
+                val = data.get(fb_k) or ""
+                if any(x in val for x in ["http://", "https://", "{song_link}", "meloscribesheets"]):
+                    data[fb_k] = DEFAULT_SETTINGS[fb_k]
+                    settings[fb_k] = DEFAULT_SETTINGS[fb_k]
+                    needs_save = True
+            if "Link in Bio" in (data.get("desc_template_youtube") or ""):
+                data["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
+                settings["desc_template_youtube"] = DEFAULT_SETTINGS["desc_template_youtube"]
+                needs_save = True
+
+            if needs_save:
+                save_settings(data)
+        else:
+            settings = DEFAULT_SETTINGS.copy()
 
     # Fallback to .env in workspace root if R2 credentials are missing
     if not settings.get("r2_account_id") or not settings.get("r2_access_key") or not settings.get("r2_secret_key"):
@@ -382,13 +390,16 @@ def load_settings():
     return settings
 
 def save_settings(settings_dict):
-    current = {}
-    if SETTINGS_FILE.exists():
-        try:
-            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                current = json.load(f)
-        except Exception:
-            current = {}
-    current.update(settings_dict)
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(current, f, indent=4)
+    with _SETTINGS_LOCK:
+        current = {}
+        if SETTINGS_FILE.exists():
+            try:
+                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+            except Exception:
+                current = {}
+        current.update(settings_dict)
+        tmp_path = SETTINGS_FILE.with_suffix(".json.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(current, f, indent=4)
+        os.replace(tmp_path, SETTINGS_FILE)
