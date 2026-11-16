@@ -2,6 +2,13 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-16: Fail-Safe Purchase Platform Attribution (`traffic_source`, `referrer`, `utm_*`)
+- **Context**: Needed deterministic platform attribution (TikTok, Instagram, Facebook, YouTube, Pinterest, Google, Direct) stored directly per Stripe purchase without risking any checkout or Stripe Metadata errors.
+- **Implementation (`db_setup.py`, `routes_public.py`, `routes_admin.py`, `web_push.py`)**:
+  - Added optional `traffic_source`, `referrer`, `utm_source`, `utm_campaign` columns to `purchases`.
+  - `_resolve_checkout_attribution` safely clips values well below Stripe's 500-char metadata limit, falls back to server-side `User-Agent` detection for In-App WebViews, and `_save_purchase_attribution` wraps updates in `try/except` in both `stripe_webhook` and `get_hash_by_checkout` so attribution never interferes with order delivery.
+  - Note: Always run explicit `import main` / live HTTP checks after backend edits — `py_compile` checks syntax only and misses missing type imports (caught `Dict` `NameError` pre-launch).
+
 ### 2026-11-15: Native Firebase Cloud Messaging (FCM HTTP v1) Backend Push Dispatch
 - **Context**: Replaced the persistent Foreground-Service polling workaround (`v1.5.0`) with direct Firebase Cloud Messaging (`FCM HTTP v1`) so Android devices wake instantly even when the app is closed/frozen and without showing a permanent `"Live Connection"` notification bar.
 - **Implementation (`web_push.py`)**:

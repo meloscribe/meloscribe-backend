@@ -10,7 +10,7 @@ import boto3
 import re
 import html
 import threading
-from typing import Optional
+from typing import Optional, Dict
 from pathlib import Path
 from pydantic import BaseModel
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
@@ -67,6 +67,106 @@ class CheckoutRequest(BaseModel):
     difficulty: str = "Original"
     language: str = "en"
     embedded: bool = False
+    traffic_source: Optional[str] = None
+    referrer: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+
+
+def _clip_attr(val: Optional[str], max_len: int) -> str:
+    if not val:
+        return ""
+    s = str(val).strip()
+    return s[:max_len] if len(s) > max_len else s
+
+
+def _detect_source_from_ua(ua: str) -> str:
+    if not ua:
+        return ""
+    u = ua.lower()
+    if "musical_ly" in u or "tiktok" in u or "bytedance" in u or "bytelocale" in u:
+        return "TikTok"
+    if "instagram" in u:
+        return "Instagram"
+    if "fban/" in u or "fb_iab" in u or "fbios" in u or "fb4a" in u:
+        return "Facebook"
+    if "pinterest" in u:
+        return "Pinterest"
+    if "youtube" in u:
+        return "YouTube"
+    if "barcelona" in u or "threads" in u:
+        return "Threads"
+    return ""
+
+
+def _resolve_checkout_attribution(req: CheckoutRequest, request: Request) -> Dict[str, str]:
+    try:
+        traffic_source = _clip_attr(req.traffic_source, 64)
+        referrer = _clip_attr(req.referrer, 240)
+        utm_source = _clip_attr(req.utm_source, 100)
+        utm_medium = _clip_attr(req.utm_medium, 100)
+        utm_campaign = _clip_attr(req.utm_campaign, 120)
+
+        ua = request.headers.get("user-agent", "") if request else ""
+        ua_source = _detect_source_from_ua(ua)
+        if ua_source and (not traffic_source or traffic_source.lower() == "direct"):
+            traffic_source = ua_source
+
+        if not traffic_source:
+            traffic_source = "Direct"
+
+        return {
+            "traffic_source": traffic_source,
+            "referrer": referrer,
+            "utm_source": utm_source,
+            "utm_medium": utm_medium,
+            "utm_campaign": utm_campaign,
+        }
+    except Exception:
+        return {}
+
+
+def _extract_purchase_attribution(metadata: Optional[dict], user_agent: str = "") -> Dict[str, str]:
+    meta = metadata or {}
+    traffic_source = _clip_attr(meta.get("traffic_source"), 64)
+    referrer = _clip_attr(meta.get("referrer"), 240)
+    utm_source = _clip_attr(meta.get("utm_source"), 100)
+    utm_campaign = _clip_attr(meta.get("utm_campaign"), 120)
+    ua_source = _detect_source_from_ua(user_agent)
+    if ua_source and (not traffic_source or traffic_source.lower() == "direct"):
+        traffic_source = ua_source
+    return {
+        "traffic_source": traffic_source,
+        "referrer": referrer,
+        "utm_source": utm_source,
+        "utm_campaign": utm_campaign,
+    }
+
+
+def _save_purchase_attribution(cursor, tx_id: str, attr: Dict[str, str]) -> None:
+    try:
+        if not attr:
+            return
+        cursor.execute(
+            """
+            UPDATE purchases
+            SET traffic_source = COALESCE(NULLIF(?, ''), traffic_source),
+                referrer = COALESCE(NULLIF(?, ''), referrer),
+                utm_source = COALESCE(NULLIF(?, ''), utm_source),
+                utm_campaign = COALESCE(NULLIF(?, ''), utm_campaign)
+            WHERE transaction_id = ?
+            """,
+            (
+                attr.get("traffic_source", ""),
+                attr.get("referrer", ""),
+                attr.get("utm_source", ""),
+                attr.get("utm_campaign", ""),
+                tx_id,
+            ),
+        )
+    except Exception as attr_err:
+        print(f"[Attribution] Non-fatal save error for {tx_id}: {attr_err}")
 
 class NewSuggestion(BaseModel):
     title: str
@@ -1123,6 +1223,21 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         }
 
         cf_country = geo_country
+        attr = _resolve_checkout_attribution(req, request)
+        stripe_metadata = {
+            "song_title": song_name_meta,
+            "download_hash": download_hash,
+            "locale": req.language,
+            "country": cf_country or "unknown",
+        }
+        if attr.get("traffic_source"):
+            stripe_metadata["traffic_source"] = attr["traffic_source"]
+        if attr.get("referrer"):
+            stripe_metadata["referrer"] = attr["referrer"]
+        if attr.get("utm_source"):
+            stripe_metadata["utm_source"] = attr["utm_source"]
+        if attr.get("utm_campaign"):
+            stripe_metadata["utm_campaign"] = attr["utm_campaign"]
 
         if req.embedded:
             # Payment methods: Card, PayPal for all currencies; iDEAL and EPS only for EUR; Bancontact only for BE
@@ -1137,12 +1252,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 amount=amount_cents,
                 currency=currency,
                 payment_method_types=pm_types,
-                metadata={
-                    "song_title": song_name_meta,
-                    "download_hash": download_hash,
-                    "locale": req.language,
-                    "country": cf_country or "unknown"
-                },
+                metadata=stripe_metadata,
                 description=f"Meloscribe - {product_name}"
             )
             return {
@@ -1171,12 +1281,7 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 excluded_payment_method_types=excluded_methods,
                 success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
                 cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
-                metadata={
-                    "song_title": song_name_meta,
-                    "download_hash": download_hash,
-                    "locale": req.language,
-                    "country": cf_country or "unknown"
-                }
+                metadata=stripe_metadata
             )
             return {"url": session.url}
     except Exception as e:
@@ -1206,6 +1311,7 @@ def _dispatch_sale_push(
     locale: str = "en",
     buyer_name: str = "",
     payment_method: str = "Stripe",
+    traffic_source: str = "",
 ) -> None:
     """Schedule clean sale Web Push and native APK push event for verified non-test purchases."""
     if not tx_id or str(tx_id).startswith(("cs_test_", "pi_test_")) or email == "2beers.sm@gmail.com":
@@ -1221,6 +1327,15 @@ def _dispatch_sale_push(
             fmt_amt = f"{amount_total:.2f} €"
         else:
             fmt_amt = f"{amount_total:.2f} {curr_up}"
+        push_meta = {
+            "email": email,
+            "locale": locale,
+            "buyer_name": buyer_name,
+            "currency": curr_up,
+            "payment_method": payment_method,
+        }
+        if traffic_source:
+            push_meta["traffic_source"] = traffic_source
         background_tasks.add_task(
             send_web_push,
             notif_type="sale",
@@ -1230,13 +1345,7 @@ def _dispatch_sale_push(
             amount=f"{amount_total:.2f}",
             currency=curr_up,
             url="/?tab=sales",
-            meta={
-                "email": email,
-                "locale": locale,
-                "buyer_name": buyer_name,
-                "currency": curr_up,
-                "payment_method": payment_method,
-            },
+            meta=push_meta,
         )
     except Exception as push_err:
         log_webhook(f"[WebPush] Failed to schedule sale push: {push_err}")
@@ -1380,6 +1489,8 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                     "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
                     (locale, buyer_name, session_id)
                 )
+                attr = _extract_purchase_attribution(metadata)
+                _save_purchase_attribution(c, session_id, attr)
                 
                 c.execute("SELECT id FROM revenue WHERE message LIKE ?", (f"%{session_id}%",))
                 if not c.fetchone():
@@ -1405,6 +1516,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                         locale=locale,
                         buyer_name=buyer_name,
                         payment_method="Stripe",
+                        traffic_source=attr.get("traffic_source", ""),
                     )
                     
         elif event_type == "charge.refunded":
@@ -1445,7 +1557,7 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
 # Order retrieval & Verification
 # -------------------------------------------------------------------
 @router.get("/api/order/hash-by-checkout")
-def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks):
+def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks, request: Request):
     conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
     c.execute("SELECT download_hash FROM purchases WHERE transaction_id = ?", (checkout_id,))
@@ -1562,6 +1674,9 @@ def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks):
                         "UPDATE purchases SET locale = ?, buyer_name = ? WHERE transaction_id = ?",
                         (locale, buyer_name, checkout_id)
                     )
+                    ua = request.headers.get("user-agent", "") if request else ""
+                    attr = _extract_purchase_attribution(metadata, user_agent=ua)
+                    _save_purchase_attribution(c, checkout_id, attr)
                     
                     c.execute("SELECT id FROM revenue WHERE message LIKE ?", (f"%{checkout_id}%",))
                     if not c.fetchone():
@@ -1585,6 +1700,7 @@ def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks):
                             locale=locale,
                             buyer_name=buyer_name,
                             payment_method="Stripe",
+                            traffic_source=attr.get("traffic_source", ""),
                         )
                     
                     return {"download_hash": download_hash}

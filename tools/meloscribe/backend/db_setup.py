@@ -222,7 +222,18 @@ def init_db():
     ''')
 
     # Migrate: add columns that may not exist in purchases
-    for col, coltype in [('download_hash', 'TEXT'), ('download_count', 'INTEGER DEFAULT 0'), ('downloaded_types', 'TEXT'), ('ip_addresses', 'TEXT'), ('buyer_name', 'TEXT'), ('locale', 'TEXT')]:
+    for col, coltype in [
+        ('download_hash', 'TEXT'),
+        ('download_count', 'INTEGER DEFAULT 0'),
+        ('downloaded_types', 'TEXT'),
+        ('ip_addresses', 'TEXT'),
+        ('buyer_name', 'TEXT'),
+        ('locale', 'TEXT'),
+        ('traffic_source', 'TEXT'),
+        ('referrer', 'TEXT'),
+        ('utm_source', 'TEXT'),
+        ('utm_campaign', 'TEXT'),
+    ]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
         except Exception:

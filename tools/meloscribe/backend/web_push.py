@@ -1857,7 +1857,7 @@ def get_pulse_summary(request: Request):
     activity_items = []
 
     c.execute(f"""
-        SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, locale, rating
+        SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, locale, rating, traffic_source, referrer, utm_source, utm_campaign
         FROM purchases
         WHERE {sales_filter}
         ORDER BY created_at DESC LIMIT 40
@@ -1867,6 +1867,10 @@ def get_pulse_summary(request: Request):
         amt_val = float(p["amount"] or 0.0)
         curr_val = (p["currency"] or "EUR").upper()
         loc_val = (p["locale"] or "en").lower()
+        tsrc_val = (p["traffic_source"] or "") if "traffic_source" in p.keys() else ""
+        ref_val = (p["referrer"] or "") if "referrer" in p.keys() else ""
+        usrc_val = (p["utm_source"] or "") if "utm_source" in p.keys() else ""
+        ucmp_val = (p["utm_campaign"] or "") if "utm_campaign" in p.keys() else ""
         if amt_val > 0.0:
             activity_items.append({
                 "id": f"sale_{p['id']}",
@@ -1879,6 +1883,10 @@ def get_pulse_summary(request: Request):
                 "email": p["email"],
                 "buyer_name": p["buyer_name"] or "",
                 "locale": loc_val,
+                "traffic_source": tsrc_val,
+                "referrer": ref_val,
+                "utm_source": usrc_val,
+                "utm_campaign": ucmp_val,
                 "cover_url": resolve_cover_url(song),
                 "timestamp": p["created_at"],
                 "is_read": 1
@@ -1895,6 +1903,10 @@ def get_pulse_summary(request: Request):
                 "email": p["email"] or "",
                 "buyer_name": p["buyer_name"] or "",
                 "locale": loc_val,
+                "traffic_source": tsrc_val,
+                "referrer": ref_val,
+                "utm_source": usrc_val,
+                "utm_campaign": ucmp_val,
                 "cover_url": resolve_cover_url(song),
                 "timestamp": p["created_at"],
                 "is_read": 1
@@ -2070,6 +2082,10 @@ def get_pulse_summary(request: Request):
             "email": meta.get("email", ""),
             "buyer_name": meta.get("buyer_name", ""),
             "locale": meta.get("locale", "en"),
+            "traffic_source": meta.get("traffic_source", ""),
+            "referrer": meta.get("referrer", ""),
+            "utm_source": meta.get("utm_source", ""),
+            "utm_campaign": meta.get("utm_campaign", ""),
             "cover_url": pn["cover_url"] or "https://api.meloscribe.dev/api/push/badge.png",
             "timestamp": pn["created_at"],
             "is_read": pn["is_read"]
