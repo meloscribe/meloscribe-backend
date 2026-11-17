@@ -117,9 +117,9 @@ async def broadcast_log(msg: str):
             active_websockets.remove(dead)
 
 def verify_admin(request: Request):
-    passcode = request.headers.get("x-admin-passcode")
+    passcode = request.headers.get("x-admin-passcode") or request.query_params.get("passcode") or request.query_params.get("admin_passcode")
     expected = load_settings().get("admin_passcode", "579110")
-    api_key = request.headers.get("X-Meloscribe-Key")
+    api_key = request.headers.get("X-Meloscribe-Key") or request.query_params.get("api_key")
     stored_key = get_server_api_key()
     if (passcode and str(passcode) == str(expected)) or (stored_key and api_key and api_key == stored_key):
         return True

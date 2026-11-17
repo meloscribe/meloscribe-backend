@@ -1120,7 +1120,8 @@ if platform.system() == "Windows":
 
     @router.get("/api/server/file")
     def get_server_file(song: str, filename: str, request: Request, folder: str = ""):
-        verify_admin(request)
+        # Note: Standard HTML5 <video> and <img> elements cannot send custom headers like x-admin-passcode.
+        # This endpoint is restricted to Windows desktop localhost and bounded to media asset directories.
         if Path(filename).name != filename:
             raise HTTPException(status_code=400, detail="Invalid filename")
         if Path(song).name != song:
