@@ -1,5 +1,30 @@
 [
   {
+    "id": "19",
+    "title": "Carol of the Bells",
+    "artist": "Traditional",
+    "difficulty": "Original / Easy",
+    "price": "6 €",
+    "coverImage": "/covers/Carol of the Bells_clean.jpg",
+    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
+    "stripePriceId": "price_1UcunKQ4cuBqoYoXqXdlOEJt",
+    "theme": "cold",
+    "audioPreviewUrl": "/audio-previews/Carol of the Bells.mp3",
+    "kofiId": "price_1UcunKQ4cuBqoYoXqXdlOEJt",
+    "trending": true,
+    "isTrending": true,
+    "pdfPages": 5,
+    "easyPdfPages": 5,
+    "isArrangeMe": false,
+    "paymentsDisabled": false,
+    "hasOriginal": true,
+    "hasEasy": true,
+    "easyPrice": "6 €",
+    "easyStripePriceId": "price_1Ucuo6Q4cuBqoYoXWt8Z0zrG",
+    "easyKofiId": "price_1Ucuo6Q4cuBqoYoXWt8Z0zrG",
+    "easyId": "62"
+  },
+  {
     "id": "61",
     "title": "Goodbye To A Lover Again",
     "artist": "Isak Danielson",
@@ -410,22 +435,6 @@
     "theme": "cold",
     "trending": false,
     "isTrending": false,
-    "pdfPages": 1
-  },
-  {
-    "id": "19",
-    "title": "Carol of the Bells",
-    "artist": "Traditional",
-    "difficulty": "Original",
-    "price": "4 €",
-    "coverImage": "/covers/Carol of the Bells_clean.jpg",
-    "gradient": "from-neon-cyan/20 via-dark-700 to-neon-cyan/5",
-    "stripePriceId": "pri_01kwap87zrswysf4vqcaasvm89",
-    "theme": "cold",
-    "audioPreviewUrl": "/audio-previews/Carol of the Bells.mp3",
-    "kofiId": "prod_dummy123",
-    "trending": true,
-    "isTrending": true,
     "pdfPages": 1
   },
   {

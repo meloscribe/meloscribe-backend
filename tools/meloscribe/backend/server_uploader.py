@@ -73,6 +73,16 @@ def check_disk_space():
                     active_count = cursor.fetchone()[0]
 
                     if active_count == 0:
+                        # Safety check: Never delete a folder modified in the last 24 hours (e.g. active upload in progress)
+                        try:
+                            folder_mtime = os.path.getmtime(folder_path)
+                            if (time.time() - folder_mtime) < 86400:
+                                print(f"[Cleanup] Skipping recent folder (modified <24h ago): {folder}")
+                                conn.close()
+                                continue
+                        except Exception:
+                            pass
+
                         print(f"[Cleanup] Removing staged files for completed song folder: {folder}")
                         try:
                             shutil.rmtree(folder_path)

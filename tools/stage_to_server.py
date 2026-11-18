@@ -393,7 +393,12 @@ def main():
                 print(f"PROGRESS: {pct}% (Already on server: {desc} [{idx+1}/{total_tasks}], skipping)")
                 continue
             print(f"PROGRESS: {pct}% (Uploading {desc} [{idx+1}/{total_tasks}]...)")
-            run_scp_command(local, remote)
+            res_scp = run_scp_command(local, remote)
+            if res_scp.returncode != 0:
+                print(f"[StageToServer] Retrying upload for {desc} after re-creating parent directory...")
+                parent_dir = remote.rsplit('/', 1)[0]
+                run_ssh_command(f"mkdir -p '{parent_dir}'")
+                run_scp_command(local, remote)
     else:
         print("No assets found to upload.")
         
