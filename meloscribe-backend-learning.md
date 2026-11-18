@@ -2,6 +2,24 @@
 
 Living database of technical quirks, bugs, environment insights, and resolved issues for the Meloscribe backend (`C:\Dev\meloscribe-backend`).
 
+### 2026-11-18: Download Limit False 50/50 Spike & 3-IP Lockout Trap (`TOO_MANY_LOCATIONS`)
+- **Root Cause**:
+  - Over-aggressive 3-IP limit in `routes_public.py` caused buyer links to lock out with HTTP 403 when preview crawlers (Gmail, Facebook, Telegram, WhatsApp) pinged the URL before the buyer opened it.
+  - Admin reset in `routes_admin.py` cleared `download_count` but left `ip_addresses` intact.
+- **Resolution**:
+  - Raised IP limit from 3 to 12 in `routes_public.py`.
+  - Added user-agent crawler filtering to ignore link preview bots from consuming IP quota.
+  - Added `ip_addresses = ''` to `admin_reset_order_downloads` in `routes_admin.py`.
+  - Deployed to Oracle VM and restarted `meloscribe-backend.service`.
+
+### 2026-11-18: Staging SCP Upload Failure (`dest open: No such file or directory`) & VM Disk Cleanup Race Condition
+- **Root Cause**:
+  - `server_uploader.py` `check_disk_space()` deleted staging directories mid-upload when disk space was under 10 GB because queue jobs were not committed until Step 5.
+- **Resolution**:
+  - Added 24-hour mtime safety guard to `server_uploader.py` `check_disk_space()`.
+  - Added `mkdir -p` auto-retry to `stage_to_server.py`.
+  - Deployed to Oracle VM and restarted `oci-uploader.service`.
+
 ### 2026-11-16: Settings Load/Save Persistence Fix & Teaser Visualizer Parity
 - **Fix (`settings.py`, `web_push.py`, `routes_workflow.py`, `tools/upload_bot.py`)**: Mirrored desktop stability fixes — guarded optional WebPush/FCM imports for environments without push deps, fixed `load_settings()` keeping `SETTINGS_FILE` open during `needs_save` + contradictory `legacy_phrases` match + added locked atomic writes, and wired `enableVisualizerHook` / `--no-visualizer-hook` cleanly.
 
