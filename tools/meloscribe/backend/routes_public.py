@@ -1899,17 +1899,20 @@ def request_download(hash: str, type: str, request: Request):
     if row and not (hash.startswith("demo_hash_") and is_sandbox_or_local()):
         ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
         if client_ip not in ip_list:
-            if len(ip_list) >= 3:
+            if len(ip_list) >= 12:
                 conn.close()
-                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
-            ip_list.append(client_ip)
-            new_ip_str = ",".join(ip_list)
-            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
-            conn.commit()
+                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support.", "code": "TOO_MANY_LOCATIONS"}, status_code=403)
+            ua = (request.headers.get("user-agent") or "").lower()
+            is_bot = any(b in ua for b in ("bot", "crawl", "spider", "preview", "facebookexternalhit", "googleimageproxy", "telegram", "whatsapp", "slack", "discord", "applebot", "meta-externalagent"))
+            if not is_bot:
+                ip_list.append(client_ip)
+                new_ip_str = ",".join(ip_list)
+                c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
+                conn.commit()
             
     if download_count >= 50:
         conn.close()
-        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)"}, status_code=403)
+        return JSONResponse(content={"error": "Download limit reached (maximum 50 downloads allowed)", "code": "DOWNLOAD_LIMIT_REACHED"}, status_code=403)
         
     new_count = download_count
     if row:
@@ -2023,13 +2026,16 @@ def download_file(hash: str, type: str, request: Request):
     if row and not (hash.startswith("demo_hash_") and is_sandbox_or_local()):
         ip_list = [ip.strip() for ip in ip_addresses.split(",") if ip.strip()]
         if client_ip not in ip_list:
-            if len(ip_list) >= 3:
+            if len(ip_list) >= 12:
                 conn.close()
-                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support."}, status_code=403)
-            ip_list.append(client_ip)
-            new_ip_str = ",".join(ip_list)
-            c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
-            conn.commit()
+                return JSONResponse(content={"error": "Link has been accessed from too many different devices or locations. Please contact support.", "code": "TOO_MANY_LOCATIONS"}, status_code=403)
+            ua = (request.headers.get("user-agent") or "").lower()
+            is_bot = any(b in ua for b in ("bot", "crawl", "spider", "preview", "facebookexternalhit", "googleimageproxy", "telegram", "whatsapp", "slack", "discord", "applebot", "meta-externalagent"))
+            if not is_bot:
+                ip_list.append(client_ip)
+                new_ip_str = ",".join(ip_list)
+                c.execute("UPDATE purchases SET ip_addresses = ? WHERE download_hash = ?", (new_ip_str, hash))
+                conn.commit()
     conn.close()
     
     r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")

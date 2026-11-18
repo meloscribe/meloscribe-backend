@@ -2094,7 +2094,7 @@ else:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
         c = conn.cursor()
         c.execute("PRAGMA journal_mode=WAL")
-        c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '' WHERE transaction_id = ?", (transaction_id,))
+        c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '', ip_addresses = '' WHERE transaction_id = ? OR download_hash = ?", (transaction_id, transaction_id))
         conn.commit()
         conn.close()
 
