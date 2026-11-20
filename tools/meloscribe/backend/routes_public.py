@@ -361,84 +361,84 @@ def watermark_video(original_video_bytes: bytes, song_name: str, type: str) -> b
 
 EMAIL_TEMPLATES = {
     "en": {
-        "purchase_subject": "🎹 Your learning package for {song_name} is ready!",
-        "gift_subject": "🎁 A music gift for you: {song_name} sheets!",
-        "heading_purchase": "🎹 Your Sheets Are Ready!",
-        "heading_gift": "🎁 A Music Gift for You!",
-        "intro_gift": "Hey {buyer_name}!",
-        "intro_purchase": "Hey!",
-        "body_purchase": "Thanks for supporting my arrangements! Your learning package for <strong>{song_name}</strong> is ready to practice:",
-        "body_gift": "You have received a learning package for <strong>{song_name}</strong> as a gift – ready to practice:",
+        "purchase_subject": "Your sheet music for {song_name}",
+        "gift_subject": "Sheet music gift for you: {song_name}",
+        "heading_purchase": "Your sheet music for {song_name}",
+        "heading_gift": "Sheet music for {song_name}",
+        "intro_gift": "Hi {buyer_name},",
+        "intro_purchase": "Hi,",
+        "body_purchase": "Thank you for supporting my piano arrangements. Your files for <strong>{song_name}</strong> (PDF, MIDI, and practice videos) are ready at your personal link:",
+        "body_gift": "Here is your personal link to download the sheet music and practice files for <strong>{song_name}</strong>:",
         "action": "",
-        "button": "Download Learning Package",
-        "footer": "This download link is permanent – you can access it anytime.",
-        "ps": "PS: Any issues with the files, or ideas to improve? Just hit reply – every feedback helps!",
+        "button": "Open your files",
+        "footer": "This link stays active so you can return anytime.",
+        "ps": "If you have any questions or feedback about the arrangement, just reply directly to this message.",
         "happy_practicing": "Happy practicing,",
-        "help_text": "Need help? Reply directly to this email or visit"
+        "help_text": "meloscribe ·"
     },
     "de": {
-        "purchase_subject": "🎹 Dein Lernpaket für {song_name} ist bereit!",
-        "gift_subject": "🎁 Ein Musikgeschenk für dich: Noten für {song_name}!",
-        "heading_purchase": "🎹 Deine Klaviernoten sind bereit!",
-        "heading_gift": "🎁 Ein Musikgeschenk für dich!",
-        "intro_gift": "Hallo {buyer_name}!",
-        "intro_purchase": "Hey!",
-        "body_purchase": "Danke für die Unterstützung meiner Arrangements! Dein Lernpaket für <strong>{song_name}</strong> steht bereit zum Üben:",
-        "body_gift": "Du hast ein Lernpaket für <strong>{song_name}</strong> als Geschenk erhalten – bereit zum Üben:",
+        "purchase_subject": "Deine Klaviernoten für {song_name}",
+        "gift_subject": "Noten-Geschenk für dich: {song_name}",
+        "heading_purchase": "Deine Noten für {song_name}",
+        "heading_gift": "Noten für {song_name}",
+        "intro_gift": "Hallo {buyer_name},",
+        "intro_purchase": "Hallo,",
+        "body_purchase": "vielen Dank für deine Unterstützung! Deine Dateien für <strong>{song_name}</strong> (PDF-Noten, MIDI und Übungsvideos) stehen über deinen persönlichen Link bereit:",
+        "body_gift": "hier ist dein persönlicher Link zum Herunterladen der Noten und Übungsdateien für <strong>{song_name}</strong>:",
         "action": "",
-        "button": "Lernpaket herunterladen",
-        "footer": "Dieser Download-Link ist dauerhaft gültig – du kannst jederzeit darauf zugreifen.",
-        "ps": "PS: Probleme mit den Dateien oder Ideen zur Verbesserung? Antworte einfach auf diese Mail – jedes Feedback hilft!",
-        "happy_practicing": "Viel Spaß beim Üben,",
-        "help_text": "Brauchst du Hilfe? Antworte direkt auf diese E-Mail oder besuche"
+        "button": "Zu deinen Dateien",
+        "footer": "Dieser Link bleibt dauerhaft aktiv, du kannst jederzeit darauf zugreifen.",
+        "ps": "Falls irgendetwas nicht klappt oder du Feedback hast, antworte einfach direkt auf diese Mail.",
+        "happy_practicing": "Viel Freude beim Spielen,",
+        "help_text": "meloscribe ·"
     },
     "fr": {
-        "purchase_subject": "🎹 Votre pack musical pour {song_name} est prêt !",
-        "gift_subject": "🎁 Un cadeau musical pour vous : partitions de {song_name} !",
-        "heading_purchase": "🎹 Vos partitions sont prêtes !",
-        "heading_gift": "🎁 Un cadeau musical pour vous !",
-        "intro_gift": "Bonjour {buyer_name} !",
-        "intro_purchase": "Bonjour !",
-        "body_purchase": "Merci de soutenir mes arrangements ! Votre pack d'apprentissage pour <strong>{song_name}</strong> est prêt pour la pratique :",
-        "body_gift": "Vous avez reçu un pack d'apprentissage pour <strong>{song_name}</strong> en cadeau – prêt pour la pratique :",
+        "purchase_subject": "Vos partitions pour {song_name}",
+        "gift_subject": "Partitions pour vous : {song_name}",
+        "heading_purchase": "Vos partitions pour {song_name}",
+        "heading_gift": "Partitions pour {song_name}",
+        "intro_gift": "Bonjour {buyer_name},",
+        "intro_purchase": "Bonjour,",
+        "body_purchase": "merci pour votre soutien ! Vos fichiers pour <strong>{song_name}</strong> (PDF, MIDI et vidéos) sont prêts via votre lien personnel :",
+        "body_gift": "voici votre lien personnel pour télécharger les partitions et fichiers pour <strong>{song_name}</strong> :",
         "action": "",
-        "button": "Télécharger le pack d'apprentissage",
-        "footer": "Ce lien de téléchargement est permanent – vous pouvez y accéder à tout moment.",
-        "ps": "PS : Un problème avec les fichiers ou une idée d'amélioration ? Répondez simplement à cet e-mail – chaque retour compte !",
+        "button": "Accéder aux fichiers",
+        "footer": "Ce lien reste actif en permanence.",
+        "ps": "Si vous avez une question ou un retour, répondez simplement à cet e-mail.",
         "happy_practicing": "Bonne pratique,",
-        "help_text": "Besoin d'aide ? Répondez directement à cet e-mail ou visitez"
+        "help_text": "meloscribe ·"
     },
     "es": {
-        "purchase_subject": "🎹 ¡Tu paquete de música para {song_name} está listo!",
-        "gift_subject": "🎁 Un regalo musical para ti: ¡partituras de {song_name}!",
-        "heading_purchase": "🎹 ¡Tus partituras están listas!",
-        "heading_gift": "🎁 ¡Un regalo musical para ti!",
-        "intro_gift": "¡Hola {buyer_name}!",
-        "intro_purchase": "¡Hola!",
-        "body_purchase": "¡Gracias por apoyar mis arreglos! Tu paquete de aprendizaje para <strong>{song_name}</strong> está listo para practicar:",
-        "body_gift": "¡Has recibido un paquete de aprendizaje para <strong>{song_name}</strong> como regalo – listo para practicar:",
+        "purchase_subject": "Tus partituras de {song_name}",
+        "gift_subject": "Partituras para ti: {song_name}",
+        "heading_purchase": "Tus partituras de {song_name}",
+        "heading_gift": "Partituras de {song_name}",
+        "intro_gift": "Hola {buyer_name},",
+        "intro_purchase": "Hola,",
+        "body_purchase": "¡muchas gracias por tu apoyo! Tus archivos para <strong>{song_name}</strong> (PDF, MIDI y vídeos) están listos en tu enlace personal:",
+        "body_gift": "aquí tienes tu enlace personal para descargar las partituras y archivos de <strong>{song_name}</strong>:",
         "action": "",
-        "button": "Descargar paquete de aprendizaje",
-        "footer": "Este enlace de descarga es permanente – puedes acceder en cualquier momento.",
-        "ps": "PD: ¿Algún problema con los archivos o ideas para mejorar? Solo responde a este correo – ¡cada comentario ayuda!",
-        "happy_practicing": "¡Disfruta practicando!,",
-        "help_text": "¿Necesitas ayuda? Responde directamente a este correo o visita"
+        "button": "Abrir tus archivos",
+        "footer": "Este enlace sigue activo para cuando lo necesites.",
+        "ps": "Si tienes alguna duda o comentario, solo responde a este correo.",
+        "happy_practicing": "Disfruta practicando,",
+        "help_text": "meloscribe ·"
     },
     "it": {
-        "purchase_subject": "🎹 Il tuo pacchetto musicale per {song_name} è pronto!",
-        "gift_subject": "🎁 Un regalo musical per te: spartiti di {song_name}!",
-        "heading_purchase": "🎹 I tuoi spartiti sono pronti!",
-        "heading_gift": "🎁 Un regalo musical per te!",
-        "intro_gift": "Ciao {buyer_name}!",
-        "intro_purchase": "Ciao!",
-        "body_purchase": "Grazie per supportare i miei arrangiamenti! Il tuo pacchetto di apprendimento per <strong>{song_name}</strong> è pronto per esercitarti:",
-        "body_gift": "Hai ricevuto un pacchetto di apprendimento per <strong>{song_name}</strong> in regalo – pronto per esercitarti:",
+        "purchase_subject": "I tuoi spartiti per {song_name}",
+        "gift_subject": "Spartiti per te: {song_name}",
+        "heading_purchase": "I tuoi spartiti per {song_name}",
+        "heading_gift": "Spartiti per {song_name}",
+        "intro_gift": "Ciao {buyer_name},",
+        "intro_purchase": "Ciao,",
+        "body_purchase": "grazie per il supporto! I tuoi file per <strong>{song_name}</strong> (PDF, MIDI e video) sono pronti al tuo link personale:",
+        "body_gift": "ecco il tuo link personale per scaricare spartiti e file di <strong>{song_name}</strong>:",
         "action": "",
-        "button": "Scarica pacchetto di apprendimento",
-        "footer": "Questo link di download è permanente – puoi accedervi in qualsiasi momento.",
-        "ps": "PS: Qualche problema con i file o idee per migliorare? Rispondi pure a questa email – ogni feedback è utile!",
-        "happy_practicing": "Buon esercizio,",
-        "help_text": "Hai bisogno di aiuto? Rispondi direttamente a questa email o visita"
+        "button": "Apri i file",
+        "footer": "Questo link rimane sempre attivo.",
+        "ps": "Per qualsiasi domanda o feedback, rispondi pure direttamente a questa email.",
+        "happy_practicing": "Buono studio,",
+        "help_text": "meloscribe ·"
     }
 }
 
@@ -457,7 +457,7 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
     tpl = EMAIL_TEMPLATES[lang]
     
     subject = tpl["gift_subject"].format(song_name=song_name) if is_gift else tpl["purchase_subject"].format(song_name=song_name)
-    heading = tpl["heading_gift"] if is_gift else tpl["heading_purchase"]
+    heading = tpl["heading_gift"].format(song_name=song_name) if is_gift else tpl["heading_purchase"].format(song_name=song_name)
     
     if is_gift and buyer_name:
         intro = tpl["intro_gift"].format(buyer_name=buyer_name)
@@ -466,39 +466,27 @@ def send_purchase_delivery_email(email: str, song_name: str, download_hash: str,
         
     body = tpl["body_gift"].format(song_name=song_name) if is_gift else tpl["body_purchase"].format(song_name=song_name)
     
-    html_body = f"""
-<!DOCTYPE html>
+    html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: 'Helvetica Neue', Arial, sans-serif; background: #0a0a0f; color: #e0e0e0; max-width: 520px; margin: 0 auto; padding: 32px 16px;">
-  <div style="background: #12121c; border: 1px solid #2a2a3e; border-radius: 16px; padding: 32px;">
-    <h2 style="color: #ffffff; font-size: 20px; margin-top: 0; margin-bottom: 20px; font-weight: 700; text-align: center;">{heading}</h2>
-    <p style="color: #b0b0c0; line-height: 1.7; font-size: 15px; margin-top: 0; margin-bottom: 12px;">{intro}</p>
-    <p style="color: #b0b0c0; line-height: 1.7; font-size: 15px; margin-top: 0; margin-bottom: 24px;">{body}</p>
-    
-    <div style="text-align: center; margin: 24px 0 16px 0;">
-      <a href="{download_url}" style="display: inline-block; background-color: #12121c; border: 2px solid #00f5d4; color: #00f5d4; font-family: 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 15px; padding: 14px 32px; border-radius: 10px; text-decoration: none; text-shadow: 0 0 8px rgba(0,245,212,0.35);">{tpl["button"]}</a>
-    </div>
-    
-    <p style="color: #888899; font-size: 13px; text-align: center; margin-top: 0; margin-bottom: 28px;">
-      {tpl["footer"]}
-    </p>
-    
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 14px; margin-top: 0; margin-bottom: 24px;">
-      {tpl["ps"]}
-    </p>
-    
-    <p style="color: #b0b0c0; line-height: 1.6; font-size: 15px; margin-top: 24px; margin-bottom: 0;">
-      {tpl["happy_practicing"]}<br><br>
-      meloscribe
-    </p>
-  </div>
-  <p style="text-align: center; font-size: 11px; color: #555; margin-top: 24px;">
-    {tpl["help_text"]} <a href="https://meloscribesheets.com" style="color: #00f5d4;">meloscribesheets.com</a>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px 16px; line-height: 1.65;">
+  <p style="font-size: 15px; margin: 0 0 14px 0;">{intro}</p>
+  <p style="font-size: 15px; margin: 0 0 18px 0;">{body}</p>
+  <p style="margin: 0 0 18px 0; font-size: 15px;">
+    <a href="{download_url}" style="color: #0284c7; font-weight: 600; text-decoration: underline;">{tpl["button"]} &rarr;</a><br>
+    <span style="font-size: 12.5px; color: #6b7280; word-break: break-all;">{download_url}</span>
+  </p>
+  <p style="font-size: 14px; color: #4b5563; margin: 0 0 14px 0;">{tpl["footer"]}</p>
+  <p style="font-size: 14px; color: #4b5563; margin: 0 0 22px 0;">{tpl["ps"]}</p>
+  <p style="font-size: 15px; margin: 0 0 24px 0;">
+    {tpl["happy_practicing"]}<br>
+    <strong>meloscribe</strong>
+  </p>
+  <p style="font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; margin: 0;">
+    {tpl["help_text"]} <a href="https://meloscribesheets.com" style="color: #6b7280; text-decoration: underline;">meloscribesheets.com</a>
   </p>
 </body>
-</html>
-"""
+</html>"""
 
     plain_body = body.replace("<strong>", "").replace("</strong>", "")
     text_body = f"""{heading}
@@ -619,89 +607,54 @@ CONFIRMATION_TEMPLATES = {
 
 NEWSLETTER_TEMPLATES = {
     "en": {
-        "subject": "New Sheet Music: {song_name} ({artist})",
-        "greeting": "Hey,",
-        "intro": "The sheet music and arrangement for <strong>{song_name}</strong> by {artist} is now ready.",
-        "box_title": "What's included:",
-        "feat_1_title": "Sheet Music",
-        "feat_1_desc": "Clean printable PDF",
-        "feat_2_title": "MIDI Files",
-        "feat_2_desc": "Both hands + separated practice tracks",
-        "feat_3_title": "Video Tutorials",
-        "feat_3_desc": "Original tempo & slow practice",
-        "cta": "Listen & View Sheet Music",
-        "preview_note": "Audio preview available on the website",
+        "subject": "{song_name} – piano sheet music ({artist})",
+        "greeting": "Hi,",
+        "intro": "I just finished a new piano arrangement for <strong>{song_name}</strong> ({artist}).",
+        "details": "As usual, the printable PDF sheet music, full & separated MIDI tracks, and synced practice videos (normal & slow speed) are ready.",
+        "cta": "View {song_name} here",
         "happy_practicing": "Happy practicing,",
-        "footer_reason": "You received this email as a subscriber on",
-        "unsubscribe": "Unsubscribe"
+        "footer_reason": "You asked for updates on new arrangements.",
+        "unsubscribe": "Leave list"
     },
     "de": {
-        "subject": "Neue Noten: {song_name} ({artist})",
-        "greeting": "Hey,",
-        "intro": "Die Noten und das Arrangement für <strong>{song_name}</strong> ({artist}) sind ab sofort verfügbar.",
-        "box_title": "Mit dabei:",
-        "feat_1_title": "Noten",
-        "feat_1_desc": "Druckfähiges PDF",
-        "feat_2_title": "MIDI-Dateien",
-        "feat_2_desc": "Beide Hände + getrennte Spuren",
-        "feat_3_title": "Video-Tutorials",
-        "feat_3_desc": "Original-Tempo & Slow Practice",
-        "cta": "Noten & Audio ansehen",
-        "preview_note": "Audio-Vorschau direkt auf der Website anhören",
+        "subject": "{song_name} – Klaviernoten ({artist})",
+        "greeting": "Hallo,",
+        "intro": "ich habe gerade mein neues Klavierarrangement zu <strong>{song_name}</strong> ({artist}) fertiggestellt.",
+        "details": "Wie gewohnt sind die druckfähigen PDF-Noten, die MIDI-Spuren sowie die synchronen Videos (Original & langsames Tempo) jetzt verfügbar.",
+        "cta": "Zu {song_name}",
         "happy_practicing": "Viel Spaß beim Üben,",
-        "footer_reason": "Du erhältst diese E-Mail als Abonnent auf",
-        "unsubscribe": "Abmelden"
+        "footer_reason": "Du bekommst diese kurze Info, weil du Benachrichtigungen für neue Stücke aktiviert hast.",
+        "unsubscribe": "Austragen"
     },
     "fr": {
-        "subject": "Nouvelles partitions : {song_name} ({artist})",
+        "subject": "{song_name} – partitions piano ({artist})",
         "greeting": "Bonjour,",
-        "intro": "Les partitions pour <strong>{song_name}</strong> ({artist}) sont maintenant disponibles.",
-        "box_title": "Contenu inclus :",
-        "feat_1_title": "Partitions",
-        "feat_1_desc": "PDF imprimable",
-        "feat_2_title": "Fichiers MIDI",
-        "feat_2_desc": "Deux mains + pistes séparées",
-        "feat_3_title": "Tutoriels vidéo",
-        "feat_3_desc": "Tempo original & ralenti",
-        "cta": "Voir les partitions & audio",
-        "preview_note": "Extrait audio disponible sur le site",
+        "intro": "je viens de terminer un nouvel arrangement au piano pour <strong>{song_name}</strong> ({artist}).",
+        "details": "La partition PDF, les pistes MIDI ainsi que les vidéos d'exercice (tempo normal et lent) sont disponibles.",
+        "cta": "Voir {song_name}",
         "happy_practicing": "Bonne pratique,",
-        "footer_reason": "Vous recevez cet e-mail en tant qu'abonné sur",
-        "unsubscribe": "Se désabonner"
+        "footer_reason": "Vous recevez ce message suite à votre demande de mise à jour.",
+        "unsubscribe": "Se retirer"
     },
     "es": {
-        "subject": "Nueva partitura: {song_name} ({artist})",
+        "subject": "{song_name} – partitura de piano ({artist})",
         "greeting": "Hola,",
-        "intro": "La partitura y el arreglo para <strong>{song_name}</strong> ({artist}) ya están disponibles.",
-        "box_title": "Incluido:",
-        "feat_1_title": "Partitura",
-        "feat_1_desc": "PDF imprimible",
-        "feat_2_title": "Archivos MIDI",
-        "feat_2_desc": "Ambas manos + separadas para practicar",
-        "feat_3_title": "Tutoriales en video",
-        "feat_3_desc": "Tempo original y lento",
-        "cta": "Ver partitura y audio",
-        "preview_note": "Vista previa de audio disponible en la web",
-        "happy_practicing": "¡Disfruta practicando!,",
-        "footer_reason": "Recibes este correo como suscriptor en",
+        "intro": "acabo de terminar un nuevo arreglo de piano para <strong>{song_name}</strong> ({artist}).",
+        "details": "La partitura en PDF, las pistas MIDI y los vídeos de práctica (velocidad normal y lenta) ya están listos.",
+        "cta": "Ver {song_name}",
+        "happy_practicing": "Disfruta practicando,",
+        "footer_reason": "Recibes este aviso porque activaste las notificaciones para nuevos arreglos.",
         "unsubscribe": "Darse de baja"
     },
     "it": {
-        "subject": "Nuovi spartiti: {song_name} ({artist})",
+        "subject": "{song_name} – spartiti pianoforte ({artist})",
         "greeting": "Ciao,",
-        "intro": "Gli spartiti per <strong>{song_name}</strong> ({artist}) sono ora disponibili.",
-        "box_title": "Incluso:",
-        "feat_1_title": "Spartiti",
-        "feat_1_desc": "PDF stampabile",
-        "feat_2_title": "File MIDI",
-        "feat_2_desc": "Entrambe le mani + separate",
-        "feat_3_title": "Tutorial video",
-        "feat_3_desc": "Tempo originale e lento",
-        "cta": "Visualizza spartiti e audio",
-        "preview_note": "Anteprima audio disponibile sul sito",
+        "intro": "ho appena completato un nuovo arrangiamento per pianoforte di <strong>{song_name}</strong> ({artist}).",
+        "details": "Sono pronti lo spartito PDF, le tracce MIDI e i video di studio (tempo originale e rallentato).",
+        "cta": "Apri {song_name}",
         "happy_practicing": "Buon esercizio,",
-        "footer_reason": "Hai ricevuto questa email come iscritto su",
-        "unsubscribe": "Annulla iscrizione"
+        "footer_reason": "Ricevi questo avviso perché hai attivato gli aggiornamenti sui nuovi brani.",
+        "unsubscribe": "Rimuovi iscrizione"
     }
 }
 
@@ -742,31 +695,19 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
     html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 24px 12px;">
-  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
-    <div style="height: 3px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
-    <div style="padding: 30px 24px;">
-      <p style="color: #ffffff; font-size: 16px; font-weight: 700; margin: 0 0 10px 0;">{greeting}</p>
-      <p style="color: #cbd5e1; line-height: 1.7; font-size: 14.5px; margin: 0 0 24px 0;">
-        {message_intro} {message_body}
-      </p>
-      <div style="text-align: center; margin: 26px 0;">
-        <a href="{confirm_url}" style="display: inline-block; background-color: #00f5d4; background: linear-gradient(135deg, #00f5d4 0%, #ff2d92 100%); color: #ffffff; font-weight: 800; font-size: 15px; padding: 14px 36px; border-radius: 12px; text-decoration: none; box-shadow: 0 4px 22px rgba(255, 45, 146, 0.35); text-shadow: 0 1px 2px rgba(0,0,0,0.35);">{cta_text}</a>
-      </div>
-      <p style="color: #94a3b8; font-size: 12.5px; text-align: center; line-height: 1.6; margin: 0 0 20px 0;">
-        {disclaimer}
-      </p>
-      <p style="color: #94a3b8; font-size: 14px; margin: 20px 0 0 0; line-height: 1.6;">
-        <span style="font-size: 17px; font-weight: 900; letter-spacing: 1px;"><span style="color: #00f5ff;">melo</span><span style="color: #ff2d92;">scribe</span></span>
-      </p>
-    </div>
-  </div>
-  <p style="text-align: center; font-size: 12px; color: #64748b; margin-top: 22px; line-height: 1.6;">
-    <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> • <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px 16px; line-height: 1.65;">
+  <p style="font-size: 15px; margin: 0 0 14px 0;">{greeting}</p>
+  <p style="font-size: 15px; margin: 0 0 18px 0;">{message_intro} {message_body}</p>
+  <p style="margin: 0 0 18px 0; font-size: 15px;">
+    <a href="{confirm_url}" style="color: #0284c7; font-weight: 600; text-decoration: underline;">{cta_text} &rarr;</a>
+  </p>
+  <p style="font-size: 13.5px; color: #4b5563; margin: 0 0 22px 0;">{disclaimer}</p>
+  <p style="font-size: 15px; margin: 0 0 24px 0;"><strong>meloscribe</strong></p>
+  <p style="font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; margin: 0;">
+    meloscribesheets.com &middot; <a href="{unsubscribe_url}" style="color: #6b7280; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
-</html>
-"""
+</html>"""
 
     text_body = f"""{greeting}
 
@@ -777,10 +718,10 @@ def _send_confirmation_email(email: str, token: str, song_name: str = None, loca
 
 {disclaimer}
 
+meloscribe
 https://meloscribesheets.com
 
-{unsubscribe_label}:
-{unsubscribe_url}
+{unsubscribe_label}: {unsubscribe_url}
 """
 
     try:
@@ -793,11 +734,7 @@ https://meloscribesheets.com
                 "reply_to": "info@meloscribe.dev",
                 "subject": subject,
                 "html": html_body,
-                "text": text_body,
-                "headers": {
-                    "List-Unsubscribe": f"<{unsubscribe_url}>",
-                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"
-                }
+                "text": text_body
             },
             timeout=10
         )
@@ -830,109 +767,47 @@ def send_newsletter_email(email: str, token: str, song_name: str, artist: str, l
     subject = tpl["subject"].format(song_name=song_name, artist=artist)
     greeting = tpl["greeting"]
     intro = tpl["intro"].format(song_name=song_name, artist=artist)
-    box_title = tpl["box_title"]
-    feat_1_title = tpl.get("feat_1_title", "Accurate Sheet Music")
-    feat_1_desc = tpl.get("feat_1_desc", "Clean printable PDF")
-    feat_2_title = tpl.get("feat_2_title", "Full MIDI Files")
-    feat_2_desc = tpl.get("feat_2_desc", "Both hands + separated practice tracks")
-    feat_3_title = tpl.get("feat_3_title", "Synced Video Tutorials")
-    feat_3_desc = tpl.get("feat_3_desc", "Original performance & slow practice tempo")
-    cta = tpl["cta"]
-    preview_note = tpl["preview_note"]
+    details = tpl["details"]
+    cta = tpl["cta"].format(song_name=song_name)
     happy_practicing = tpl["happy_practicing"]
     footer_reason = tpl["footer_reason"]
     unsubscribe_label = tpl["unsubscribe"]
 
+    # Clean light personal email layout (avoids dark marketing card / flyer button / Promotions tab heuristics in Gmail)
     html_body = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #08090d; color: #e2e8f0; max-width: 520px; margin: 0 auto; padding: 24px 12px;">
-  <!-- Main Card Container -->
-  <div style="background-color: #10131d; border: 1px solid #1e293b; border-radius: 14px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);">
-    
-    <!-- Subtle Meloscribe Top Hairline: Cyan to Magenta -->
-    <div style="height: 2px; background: linear-gradient(90deg, #00f5ff 0%, #ff2d92 100%);"></div>
-
-    <div style="padding: 28px 24px;">
-      <!-- Song Title & Artist -->
-      <h1 style="color: #ffffff; font-size: 22px; font-weight: 700; text-align: center; margin: 0 0 4px 0; line-height: 1.3; letter-spacing: -0.2px;">
-        {song_name}
-      </h1>
-      <p style="color: #94a3b8; font-size: 14.5px; text-align: center; margin: 0 0 22px 0; font-weight: 500;">
-        by <span style="color: #e2e8f0; font-weight: 600;">{artist}</span>
-      </p>
-
-      <!-- Clean Personal Intro -->
-      <p style="color: #ffffff; font-size: 15px; font-weight: 600; margin: 0 0 6px 0;">{greeting}</p>
-      <p style="color: #94a3b8; line-height: 1.6; font-size: 14px; margin: 0 0 20px 0;">
-        {intro}
-      </p>
-
-      <!-- Structured Learning Package Feature Box -->
-      <div style="background-color: #0b0e17; border: 1px solid #1e293b; border-radius: 10px; padding: 16px 18px; margin: 18px 0 22px 0;">
-        <p style="color: #94a3b8; font-size: 11px; font-weight: 700; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 0.8px;">
-          {box_title}
-        </p>
-        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
-          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_1_title}</strong> — {feat_1_desc}
-        </div>
-        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
-          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_2_title}</strong> — {feat_2_desc}
-        </div>
-        <div style="padding: 4px 0; color: #cbd5e1; font-size: 13.5px; line-height: 1.5;">
-          <span style="color: #00f5ff; margin-right: 6px;">•</span><strong style="color: #ffffff;">{feat_3_title}</strong> — {feat_3_desc}
-        </div>
-      </div>
-
-      <!-- Subtle CTA Button -->
-      <div style="text-align: center; margin: 24px 0 12px 0;">
-        <a href="{song_url}" style="display: inline-block; background-color: #00f5d4; color: #080a0f; font-weight: 700; font-size: 14.5px; padding: 12px 34px; border-radius: 8px; text-decoration: none; letter-spacing: 0.2px;">
-          {cta}
-        </a>
-      </div>
-
-      <!-- Audio Preview Callout -->
-      <p style="color: #64748b; font-size: 12px; text-align: center; margin: 0 0 22px 0;">
-        {preview_note}
-      </p>
-
-      <!-- Signature without colored split -->
-      <p style="color: #94a3b8; font-size: 13.5px; margin: 20px 0 0 0; line-height: 1.6;">
-        {happy_practicing}<br>
-        <span style="font-size: 15px; font-weight: 700; color: #ffffff; letter-spacing: 0.5px;">meloscribe</span>
-      </p>
-    </div>
-  </div>
-
-  <!-- Minimalist Footer -->
-  <p style="text-align: center; font-size: 11.5px; color: #64748b; margin-top: 20px; line-height: 1.6;">
-    {footer_reason} <a href="https://meloscribesheets.com" style="color: #94a3b8; text-decoration: underline;">meloscribesheets.com</a> &bull; <a href="{unsubscribe_url}" style="color: #64748b; text-decoration: underline;">{unsubscribe_label}</a>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; background-color: #ffffff; color: #1f2937; max-width: 560px; margin: 0 auto; padding: 24px 16px; line-height: 1.65;">
+  <p style="font-size: 15px; margin: 0 0 14px 0;">{greeting}</p>
+  <p style="font-size: 15px; margin: 0 0 14px 0;">{intro}</p>
+  <p style="font-size: 15px; color: #374151; margin: 0 0 18px 0;">{details}</p>
+  <p style="font-size: 15px; margin: 0 0 22px 0;">
+    <a href="{song_url}" style="color: #0284c7; font-weight: 600; text-decoration: underline;">{cta} &rarr;</a>
+  </p>
+  <p style="font-size: 15px; margin: 0 0 26px 0;">
+    {happy_practicing}<br>
+    <strong>meloscribe</strong>
+  </p>
+  <p style="font-size: 12px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; margin: 0; line-height: 1.5;">
+    {footer_reason} <a href="{unsubscribe_url}" style="color: #6b7280; text-decoration: underline;">{unsubscribe_label}</a>
   </p>
 </body>
-</html>
-"""
+</html>"""
 
     text_body = f"""{greeting}
 
 {intro.replace("<strong>", "").replace("</strong>", "")}
 
-{box_title}
-- {feat_1_title}: {feat_1_desc}
-- {feat_2_title}: {feat_2_desc}
-- {feat_3_title}: {feat_3_desc}
+{details}
 
-{song_url}
-
-{preview_note}
+{cta}: {song_url}
 
 {happy_practicing}
 meloscribe
 
 ---
-https://meloscribesheets.com
-
-{unsubscribe_label}:
-{unsubscribe_url}
+{footer_reason}
+{unsubscribe_label}: {unsubscribe_url}
 """
 
     try:
