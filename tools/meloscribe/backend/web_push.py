@@ -530,13 +530,15 @@ def render_glass_card(
         draw.rounded_rectangle([tx, card_y0 + 78, tx + pw, card_y0 + 116], radius=19, fill=(0, 245, 255, 36), outline=(56, 189, 248, 200), width=1)
         draw.text((tx + 17, card_y0 + 86), pill_txt, font=font_pill, fill=(125, 211, 252, 255))
 
-        email_disp = str(meta.get("email") or title or "New Subscriber")
-        if len(email_disp) > 29:
-            email_disp = email_disp[:26] + "..."
-        draw.text((tx, card_y0 + 162), email_disp, font=font_email, fill=(255, 255, 255, 255))
+        effective_song = clean_cover_song_name(song_name) if song_name else (title if title and "@" not in str(title) else "")
+        effective_email = str(meta.get("email") or (title if "@" in str(title) else subtitle) or "")
 
-        unlocked_song = clean_cover_song_name(song_name) if song_name else subtitle
-        sub_line = f"Unlocked: {unlocked_song}" if unlocked_song else "Double Opt-In Confirmed"
+        primary_disp = effective_song if effective_song else (effective_email or "New Lead")
+        if len(primary_disp) > 29:
+            primary_disp = primary_disp[:26] + "..."
+        draw.text((tx, card_y0 + 162), primary_disp, font=font_email, fill=(255, 255, 255, 255))
+
+        sub_line = effective_email if effective_song else "Double Opt-In Confirmed"
         if len(sub_line) > 40:
             sub_line = sub_line[:37] + "..."
         draw.text((tx, card_y0 + 234), sub_line, font=font_song, fill=(186, 230, 253, 255))
@@ -884,8 +886,9 @@ def send_web_push(
         vibrate = [90, 60, 160]
         effective_actions = actions or []
     elif effective_type == "subscriber":
-        push_title = clean_song or "Free Sheet Unlocked"
-        push_body = "New Subscriber"
+        meta_email = str(meta_payload.get("email") or (title if "@" in str(title) else "")).strip()
+        push_title = clean_song or (title if "@" not in str(title) else "") or "Free Sheet Unlocked"
+        push_body = meta_email or subtitle or "New Free Sheet Unlock"
         push_url = "/?tab=sales"
         vibrate = [35]
         effective_actions = actions or []
@@ -1947,8 +1950,8 @@ def get_pulse_summary(request: Request):
             free_item = {
                 "id": f"free_{p['id']}",
                 "type": "subscriber",
-                "title": p["email"] or "Free Unlock",
-                "subtitle": f"Unlocked free sheet: {song}",
+                "title": song or "Free Sheet Unlock",
+                "subtitle": p["email"] or "Free sheet unlock",
                 "song_name": song,
                 "amount": "",
                 "currency": curr_val,
@@ -2048,8 +2051,8 @@ def get_pulse_summary(request: Request):
             sub_item = {
                 "id": f"sub_{s['id']}",
                 "type": "subscriber",
-                "title": s["email"],
-                "subtitle": f"Unlocked free sheet: {s_song}" if s_song else "Double Opt-In Confirmed",
+                "title": s_song or s["email"],
+                "subtitle": s["email"] if s_song else "Double Opt-In Confirmed",
                 "song_name": s_song,
                 "amount": "",
                 "currency": "",

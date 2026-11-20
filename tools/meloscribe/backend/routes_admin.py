@@ -1259,7 +1259,7 @@ else:
     # Production Server Admin Route Handlers
     # -------------------------------------------------------------------
     @router.get("/api/notify/subscribers")
-    def notify_list_subscribers(request: Request):
+    def notify_list_subscribers(request: Request, status: Optional[str] = None):
         verify_admin(request)
         try:
             conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -1281,9 +1281,15 @@ else:
                     conn.commit()
                 except Exception:
                     pass
-            c.execute("""
+            query = """
                 SELECT email, status, song_name, locale, created_at, confirmed_at 
                 FROM notify_subscribers 
+            """
+            params = []
+            if status:
+                query += " WHERE status = ? "
+                params.append(status)
+            query += """
                 ORDER BY 
                     CASE 
                         WHEN status = 'active' THEN 0 
@@ -1292,10 +1298,19 @@ else:
                     END ASC,
                     COALESCE(confirmed_at, created_at) DESC,
                     created_at DESC
-            """)
+            """
+            c.execute(query, params)
             rows = [{"email": r[0], "status": r[1], "song_name": r[2], "locale": r[3] or "en", "created_at": r[4], "confirmed_at": r[5]} for r in c.fetchall()]
+
+            c.execute("SELECT COUNT(*) FROM notify_subscribers WHERE status = 'active'")
+            active_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM notify_subscribers WHERE status = 'pending'")
+            pending_count = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM notify_subscribers")
+            total_count = c.fetchone()[0]
+
             conn.close()
-            return {"subscribers": rows, "total": len(rows), "active": sum(1 for r in rows if r["status"] == "active")}
+            return {"subscribers": rows, "total": total_count, "active": active_count, "pending": pending_count}
         except Exception as e:
             return JSONResponse(content={"error": str(e)}, status_code=500)
 
