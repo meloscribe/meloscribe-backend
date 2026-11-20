@@ -1821,9 +1821,12 @@ def get_pulse_summary(request: Request):
     ca_data = _CHECKOUT_CACHE.get("data")
 
     if ca_data and ca_data.get("summary"):
-        # Use Tier-1 segmentation conversion rate so emerging/Asian browsing traffic does not skew Pulse KPI
+        # Prefer rolling 30d Tier-1 segmentation conversion rate so emerging traffic and older months do not skew Pulse 30d KPI
+        t1_30d = ca_data["summary"].get("tier1_segmentation_30d", {}).get("tier1", {})
         tier1_seg = ca_data["summary"].get("tier1_segmentation", {}).get("tier1", {})
-        if tier1_seg and int(tier1_seg.get("initiated", 0)) > 0:
+        if t1_30d and int(t1_30d.get("initiated", 0)) > 0:
+            checkout_conv_rate = float(t1_30d.get("conversion_rate", 0.0))
+        elif tier1_seg and int(tier1_seg.get("initiated", 0)) > 0:
             checkout_conv_rate = float(tier1_seg.get("conversion_rate", 0.0))
         else:
             checkout_conv_rate = float(ca_data["summary"].get("conversion_rate", 0.0))
@@ -1866,8 +1869,40 @@ def get_pulse_summary(request: Request):
 
     revenue_timeline = list(timeline_dict.values())
 
-    # 3. Activity Feed (Unified chronological stream, latest 60 items)
+    # 3. Activity Feed (Unified chronological stream, deduplicated across purchases, subscribers, suggestions, and notifications)
     activity_items = []
+    seen_free_keys: Set[Tuple[str, str]] = set()
+    sale_items_by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    sub_items_by_key: Dict[Tuple[str, str], List[Dict[str, Any]]] = {}
+    sug_items_by_key: Dict[str, Dict[str, Any]] = {}
+
+    def _parse_ts_epoch(ts_val: Any) -> Optional[float]:
+        if not ts_val:
+            return None
+        s_ts = str(ts_val).strip().replace("T", " ").replace("Z", "")
+        for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.datetime.strptime(s_ts, fmt).timestamp()
+            except ValueError:
+                continue
+        return None
+
+    def _match_feed_item(candidates: List[Dict[str, Any]], target_ts: Optional[float]) -> Optional[Dict[str, Any]]:
+        if not candidates:
+            return None
+        if target_ts is None:
+            return candidates[0]
+        best = None
+        best_diff = None
+        for cand in candidates:
+            cand_ts = _parse_ts_epoch(cand.get("timestamp"))
+            if cand_ts is None:
+                continue
+            diff = abs(cand_ts - target_ts)
+            if diff <= 600 and (best_diff is None or diff < best_diff):
+                best = cand
+                best_diff = diff
+        return best or candidates[0]
 
     c.execute(f"""
         SELECT id, transaction_id, song_name, amount, currency, email, created_at, buyer_name, locale, rating, traffic_source, referrer, utm_source, utm_campaign
@@ -1884,8 +1919,10 @@ def get_pulse_summary(request: Request):
         ref_val = (p["referrer"] or "") if "referrer" in p.keys() else ""
         usrc_val = (p["utm_source"] or "") if "utm_source" in p.keys() else ""
         ucmp_val = (p["utm_campaign"] or "") if "utm_campaign" in p.keys() else ""
+        email_key = (p["email"] or "").strip().lower()
+        song_key = clean_cover_song_name(song).lower()
         if amt_val > 0.0:
-            activity_items.append({
+            sale_item = {
                 "id": f"sale_{p['id']}",
                 "type": "sale",
                 "title": f"+{amt_val:.2f} {curr_val}",
@@ -1903,9 +1940,11 @@ def get_pulse_summary(request: Request):
                 "cover_url": resolve_cover_url(song),
                 "timestamp": p["created_at"],
                 "is_read": 1
-            })
+            }
+            activity_items.append(sale_item)
+            sale_items_by_key.setdefault((email_key, song_key), []).append(sale_item)
         else:
-            activity_items.append({
+            free_item = {
                 "id": f"free_{p['id']}",
                 "type": "subscriber",
                 "title": p["email"] or "Free Unlock",
@@ -1923,7 +1962,10 @@ def get_pulse_summary(request: Request):
                 "cover_url": resolve_cover_url(song),
                 "timestamp": p["created_at"],
                 "is_read": 1
-            })
+            }
+            activity_items.append(free_item)
+            seen_free_keys.add((email_key, song_key))
+            sub_items_by_key.setdefault((email_key, song_key), []).append(free_item)
 
     # Customer Checkout Ratings (from purchases.rating + optional checkout_ratings table)
     checkout_ratings: List[Dict[str, Any]] = []
@@ -2000,8 +2042,10 @@ def get_pulse_summary(request: Request):
             "created_at": s["created_at"],
             "confirmed_at": s["confirmed_at"]
         })
-        if s["status"] == "active" and len(activity_items) < 120:
-            activity_items.append({
+        sub_email_key = (s["email"] or "").strip().lower()
+        sub_song_key = clean_cover_song_name(s_song).lower()
+        if s["status"] == "active" and len(activity_items) < 120 and (sub_email_key, sub_song_key) not in seen_free_keys:
+            sub_item = {
                 "id": f"sub_{s['id']}",
                 "type": "subscriber",
                 "title": s["email"],
@@ -2015,7 +2059,9 @@ def get_pulse_summary(request: Request):
                 "cover_url": resolve_cover_url(s_song) if s_song else "https://api.meloscribe.dev/api/push/badge.png",
                 "timestamp": s["confirmed_at"] or s["created_at"],
                 "is_read": 1
-            })
+            }
+            activity_items.append(sub_item)
+            sub_items_by_key.setdefault((sub_email_key, sub_song_key), []).append(sub_item)
 
     # Creator To-Dos List
     _ensure_todos_table(conn, c)
@@ -2045,7 +2091,7 @@ def get_pulse_summary(request: Request):
         ORDER BY created_at DESC LIMIT 30
     """)
     for sug in c.fetchall():
-        activity_items.append({
+        sug_item = {
             "id": f"sug_{sug['id']}",
             "sug_id": sug["id"],
             "type": "suggestion",
@@ -2063,7 +2109,11 @@ def get_pulse_summary(request: Request):
             "cover_url": "https://api.meloscribe.dev/api/push/badge.png",
             "timestamp": sug["created_at"],
             "is_read": 1
-        })
+        }
+        activity_items.append(sug_item)
+        sug_key = clean_cover_song_name(sug["title"] or "").lower()
+        if sug_key:
+            sug_items_by_key[sug_key] = sug_item
 
     c.execute("SELECT * FROM pulse_notifications ORDER BY created_at DESC LIMIT 30")
     for pn in c.fetchall():
@@ -2081,6 +2131,27 @@ def get_pulse_summary(request: Request):
                     pn_type = "subscriber"
             except Exception:
                 pass
+
+        pn_email_key = (meta.get("email") or "").strip().lower()
+        pn_song_raw = pn["song_name"] or meta.get("title") or ""
+        pn_song_key = clean_cover_song_name(pn_song_raw).lower()
+        pn_ts = _parse_ts_epoch(pn["created_at"])
+
+        matched_item = None
+        if pn_type == "sale" and (pn_email_key or pn_song_key):
+            matched_item = _match_feed_item(sale_items_by_key.get((pn_email_key, pn_song_key), []), pn_ts)
+        elif pn_type == "subscriber" and (pn_email_key or pn_song_key):
+            matched_item = _match_feed_item(sub_items_by_key.get((pn_email_key, pn_song_key), []), pn_ts)
+        elif pn_type == "suggestion" and pn_song_key:
+            matched_item = sug_items_by_key.get(pn_song_key)
+
+        if matched_item is not None:
+            # Merge unread state and notification reference without duplicating the feed entry
+            matched_item["notif_id"] = pn["id"]
+            if pn["is_read"] == 0:
+                matched_item["is_read"] = 0
+            continue
+
         activity_items.append({
             "id": f"notif_{pn['id']}",
             "notif_id": pn["id"],

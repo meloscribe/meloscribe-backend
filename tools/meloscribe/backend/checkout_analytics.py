@@ -15,6 +15,37 @@ _TRAFFIC_CACHE = {
     "data": None
 }
 
+# Cache for aggregated Stripe checkout analytics to avoid repeated multi-page Stripe API calls
+_ANALYTICS_CACHE = {
+    "timestamp": 0.0,
+    "data": None
+}
+
+
+def _fetch_stripe_paginated(base_url: str, headers: dict, max_pages: int = 15) -> list:
+    """Fetch all Stripe list objects using cursor pagination (starting_after)."""
+    items = []
+    starting_after = None
+    for _ in range(max_pages):
+        sep = "&" if "?" in base_url else "?"
+        url = f"{base_url}{sep}limit=100"
+        if starting_after:
+            url += f"&starting_after={starting_after}"
+        resp = requests.get(url, headers=headers, timeout=12.0)
+        if resp.status_code != 200:
+            break
+        payload = resp.json()
+        batch = payload.get("data", [])
+        if not batch:
+            break
+        items.extend(batch)
+        if not payload.get("has_more"):
+            break
+        starting_after = batch[-1].get("id")
+        if not starting_after:
+            break
+    return items
+
 def parse_traffic_sources():
     """Parse Nginx logs for visitor origin platforms (TikTok, Facebook, etc.) with in-memory caching."""
     now = time.time()
@@ -108,14 +139,24 @@ def clear_checkout_analytics(reset_ts: int = None):
             except Exception as e:
                 print(f"[Checkout Analytics] Error saving reset timestamp to {candidate}: {e}")
 
-    global _TRAFFIC_CACHE
+    global _TRAFFIC_CACHE, _ANALYTICS_CACHE
     _TRAFFIC_CACHE["data"] = None
     _TRAFFIC_CACHE["timestamp"] = 0
+    _ANALYTICS_CACHE["data"] = None
+    _ANALYTICS_CACHE["timestamp"] = 0.0
     return {"status": "success", "reset_at": reset_ts}
 
 
-def get_checkout_analytics_data():
+def get_checkout_analytics_data(force_refresh: bool = False):
     """Query live Stripe Checkout sessions and PaymentIntents and aggregate monthly metrics, drop-offs, and logs."""
+    now_cache_ts = time.time()
+    if (
+        not force_refresh
+        and _ANALYTICS_CACHE["data"] is not None
+        and (now_cache_ts - _ANALYTICS_CACHE["timestamp"]) < 120
+    ):
+        return _ANALYTICS_CACHE["data"]
+
     try:
         from shared import settings
     except Exception:
@@ -248,21 +289,17 @@ def get_checkout_analytics_data():
 
     current_month_str = datetime.datetime.now().strftime('%Y-%m')
 
-    # 1. Query Checkout Sessions
+    # 1. Query Checkout Sessions (paginated)
     raw_sessions = []
     try:
-        resp = requests.get("https://api.stripe.com/v1/checkout/sessions?limit=100", headers=headers, timeout=12.0)
-        if resp.status_code == 200:
-            raw_sessions = resp.json().get("data", [])
+        raw_sessions = _fetch_stripe_paginated("https://api.stripe.com/v1/checkout/sessions", headers, max_pages=15)
     except Exception as e:
         print(f"[Checkout Analytics] Error fetching checkout sessions: {e}")
 
-    # 2. Query PaymentIntents (Embedded Checkouts)
+    # 2. Query PaymentIntents (Embedded Checkouts, paginated)
     raw_pis = []
     try:
-        resp_pi = requests.get("https://api.stripe.com/v1/payment_intents?limit=100", headers=headers, timeout=12.0)
-        if resp_pi.status_code == 200:
-            raw_pis = resp_pi.json().get("data", [])
+        raw_pis = _fetch_stripe_paginated("https://api.stripe.com/v1/payment_intents", headers, max_pages=15)
     except Exception as e:
         print(f"[Checkout Analytics] Error fetching payment intents: {e}")
 
@@ -334,6 +371,7 @@ def get_checkout_analytics_data():
             "id": s.get("id"),
             "type": "checkout_session",
             "created_at": dt.isoformat(),
+            "created_ts": ts,
             "month": month_str,
             "song": song_title,
             "amount": amount,
@@ -474,6 +512,7 @@ def get_checkout_analytics_data():
             "id": pi_id,
             "type": "payment_intent",
             "created_at": dt.isoformat(),
+            "created_ts": ts,
             "month": month_str,
             "song": song_title,
             "amount": amount,
@@ -573,28 +612,35 @@ def get_checkout_analytics_data():
             "top_songs": top_songs
         })
 
-    # Global Tier-1 summary across all attempts
-    tier1_global = {
-        "tier1": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
-        "emerging": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
-        "unknown": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()}
-    }
-    for a in attempts:
-        t = a.get("tier", "unknown")
-        tg = tier1_global.get(t, tier1_global["unknown"])
-        tg["initiated"] += 1
-        c = a.get("country", "UNKNOWN")
-        tg["countries"][c] += 1
-        if a.get("status") == "paid":
-            tg["paid"] += 1
-            tg["revenue"] += a.get("amount", 0.0)
-        elif a.get("status") == "abandoned":
-            tg["abandoned"] += 1
+    # Global & rolling 30d Tier-1 summary across attempts
+    def _build_tier1_seg(attempt_list):
+        seg = {
+            "tier1": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
+            "emerging": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()},
+            "unknown": {"initiated": 0, "paid": 0, "abandoned": 0, "conversion_rate": 0.0, "revenue": 0.0, "countries": Counter()}
+        }
+        for a in attempt_list:
+            t = a.get("tier", "unknown")
+            tg = seg.get(t, seg["unknown"])
+            tg["initiated"] += 1
+            c = a.get("country", "UNKNOWN")
+            tg["countries"][c] += 1
+            if a.get("status") == "paid":
+                tg["paid"] += 1
+                tg["revenue"] += a.get("amount", 0.0)
+            elif a.get("status") == "abandoned":
+                tg["abandoned"] += 1
 
-    for t_key, tg in tier1_global.items():
-        tg["conversion_rate"] = round((tg["paid"] / tg["initiated"] * 100), 1) if tg["initiated"] > 0 else 0.0
-        tg["revenue"] = round(tg["revenue"], 2)
-        tg["countries"] = dict(tg["countries"])
+        for tg in seg.values():
+            tg["conversion_rate"] = round((tg["paid"] / tg["initiated"] * 100), 1) if tg["initiated"] > 0 else 0.0
+            tg["revenue"] = round(tg["revenue"], 2)
+            tg["countries"] = dict(tg["countries"])
+        return seg
+
+    tier1_global = _build_tier1_seg(attempts)
+    cutoff_30d_ts = now_ts - (30 * 86400)
+    attempts_30d = [a for a in attempts if (a.get("created_ts") or 0) >= cutoff_30d_ts]
+    tier1_30d = _build_tier1_seg(attempts_30d)
 
     website_views_unique_ips = 0
     try:
@@ -673,7 +719,7 @@ def get_checkout_analytics_data():
     except Exception as e:
         print(f"[Checkout Analytics] Error getting rating stats: {e}")
 
-    return {
+    result = {
         "summary": {
             "total_initiated": total_all,
             "paid": paid_all,
@@ -682,10 +728,14 @@ def get_checkout_analytics_data():
             "conversion_rate": total_cr,
             "total_revenue": total_rev,
             "website_unique_ips": website_views_unique_ips,
-            "tier1_segmentation": tier1_global
+            "tier1_segmentation": tier1_global,
+            "tier1_segmentation_30d": tier1_30d
         },
         "traffic_sources": traffic,
         "ratings": rating_stats,
         "monthly": monthly_list,
         "attempts": attempts[:100]
     }
+    _ANALYTICS_CACHE["data"] = result
+    _ANALYTICS_CACHE["timestamp"] = time.time()
+    return result
