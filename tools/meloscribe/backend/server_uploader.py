@@ -230,6 +230,14 @@ def main():
             sys.exit(0)
             
     init_db()
+    # Recover tasks left stuck in 'processing' after an abrupt service restart or crash
+    try:
+        reset_conn = sqlite3.connect(DB_PATH, timeout=30.0)
+        reset_conn.execute("UPDATE upload_queue SET status = 'pending' WHERE status = 'processing'")
+        reset_conn.commit()
+        reset_conn.close()
+    except Exception as rst_err:
+        print(f"[Uploader] Warning: could not reset stale processing tasks: {rst_err}")
     
     # Run once at startup
     run_uploads()

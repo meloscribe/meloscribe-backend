@@ -498,9 +498,9 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
         title_txt = os.path.join(temp_dir, f"_title_{uid1}.txt")
         artist_txt = os.path.join(temp_dir, f"_artist_{uid1}.txt")
         endscreen_web_txt = os.path.join(temp_dir, f"_endscreen_web_{uid1}.txt")
-        is_easy = "easy" in song_name.lower()
         import re
-        clean_title = re.sub(r'(?i)\b(easy|slow)\b', '', song_name).strip()
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
+        clean_title = re.sub(r'(?i)(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+(?:Easy(?:\s+Version)?|slow)$)', '', song_name).strip()
         clean_title = re.sub(r'\s+', ' ', clean_title)
 
         display_title = clean_title if is_easy else song_name
@@ -564,7 +564,7 @@ def generate_previews(song_name, format_mode="full_arrangement", **kwargs):
         # Title subtitle: "Short Preview"
         # Endscreen text: "Full video coming soon"
         # -------------------------------------------------------------
-        is_easy_version = "easy" in song_name.lower()
+        is_easy_version = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
         if format_mode == "full_arrangement" and hook_start is not None and hook_end is not None and float(hook_end) > float(hook_start):
             teaser_start = float(hook_start)
             teaser_end = float(hook_end)
@@ -917,11 +917,11 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 pass
         next_id = str(max(numeric_ids) + 1) if numeric_ids else "1"
         
-        is_easy = "easy" in song_name.lower()
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
         if song_name.lower().endswith(" easy"):
             clean_name = song_name[:-5].strip()
-        elif song_name.lower().endswith("easy"):
-            clean_name = song_name[:-4].strip()
+        elif song_name.lower().endswith(" (easy)") or song_name.lower().endswith(" (easy version)"):
+            clean_name = re.sub(r'\s*\(\s*Easy(?:\s+Version)?\s*\)$', '', song_name, flags=re.IGNORECASE).strip()
         else:
             clean_name = song_name
             
@@ -1056,7 +1056,8 @@ def add_song_to_website(song_name, price, kofi_id, format_mode=None, author="Dav
                 existing["pdfPages"] = detected_pdf_pages
             if detected_easy_pages:
                 existing["easyPdfPages"] = detected_easy_pages
-            if is_arrangeme:
+            if is_arrangeme or existing.get("isArrangeMe"):
+                is_arrangeme = True
                 existing["isArrangeMe"] = True
                 existing["paymentsDisabled"] = True
                 if "arrangemeUrl" not in existing:
@@ -2275,9 +2276,9 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Warning: Failed to parse datetime '{args.datetime}': {e}")
         
-        is_easy = args.song.lower().endswith(" easy")
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', args.song, re.IGNORECASE)) or ("easy" in (args.profile or "").lower())
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
-        is_tut = args.profile == "tutorial"
+        is_tut = "tutorial" in (args.profile or "").lower()
         
         base_song = args.song
         if base_song.lower().endswith(" recycled"):
@@ -2442,9 +2443,9 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Warning: Failed to parse datetime '{args.datetime}': {e}")
         
-        is_easy = args.song.lower().endswith(" easy")
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', args.song, re.IGNORECASE)) or ("easy" in (args.profile or "").lower())
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
-        is_tut = args.profile == "tutorial"
+        is_tut = "tutorial" in (args.profile or "").lower()
         
         base_song = args.song
         if base_song.lower().endswith(" recycled"):
@@ -2516,9 +2517,9 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Warning: Failed to parse datetime '{args.datetime}': {e}")
         
-        is_easy = ("easy" in args.song.lower()) or (hasattr(args, 'profile') and args.profile == "easy")
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', args.song, re.IGNORECASE)) or ("easy" in (args.profile or "").lower())
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
-        is_tut = args.profile == "tutorial"
+        is_tut = "tutorial" in (args.profile or "").lower()
         
         base_song = args.song
         base_song = re.sub(r'(?i)\b(easy|teaser|tutorial|recycled)\b', '', base_song).strip()
@@ -2652,9 +2653,9 @@ if __name__ == "__main__":
             sys.path.append(os.path.join(os.path.dirname(__file__), "meloscribe", "backend"))
             from threads_poster import post_video as threads_post
         
-        is_easy = ("easy" in args.song.lower()) or (hasattr(args, 'profile') and args.profile == "easy")
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', args.song, re.IGNORECASE)) or ("easy" in (args.profile or "").lower())
         is_teaser = args.song.lower().endswith(" teaser") or args.profile == "hook"
-        is_tut = args.profile == "tutorial"
+        is_tut = "tutorial" in (args.profile or "").lower()
         
         base_song = args.song
         base_song = re.sub(r'(?i)\b(easy|teaser|tutorial|recycled)\b', '', base_song).strip()

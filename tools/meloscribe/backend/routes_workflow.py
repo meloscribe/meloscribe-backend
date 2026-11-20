@@ -98,7 +98,8 @@ async def run_tool(cmd: list[str], label: str = "", base_progress: float = 0.0, 
     if active_workflow_task.get("stop_requested"):
         print(f"[Workflow] Stop requested — skipping execution of {label}")
         return -1
-    loop = asyncio.get_event_loop()
+    import shared
+    loop = getattr(shared, "main_loop", None) or asyncio.get_event_loop()
 
     def _run():
         global workflow_global_progress
@@ -823,6 +824,7 @@ def batch_processor_worker():
     
     python = sys.executable
     log_error("[Batch Worker] Background processor loop started.")
+    should_abort_queue = False
     
     try:
         while True:
@@ -1453,9 +1455,13 @@ def run_git_push(song_title: str = None):
         frontend_dir = r"C:\Dev\meloscribe-frontend"
         if os.path.exists(frontend_dir):
             subprocess.run(["git", "add", "website/src/data/songs.json"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
-            subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
-            subprocess.run(["git", "push"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
-            print("[Git push] Catalog songs.json successfully pushed to remote repository.")
+            diff_res = subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=frontend_dir, creationflags=CREATION_FLAGS)
+            if diff_res.returncode != 0:
+                subprocess.run(["git", "commit", "-m", "Auto-sync songs.json from app"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
+                subprocess.run(["git", "push"], cwd=frontend_dir, check=True, creationflags=CREATION_FLAGS)
+                print("[Git push] Catalog songs.json successfully pushed to remote repository.")
+            else:
+                print("[Git push] No changes in songs.json to commit.")
             
             # Synchronize songs.json to production VM via SCP so pricing matches checkouts instantly
             ssh_key = r"C:\Dev\ssh-key-2026-05-07.key"
@@ -2945,14 +2951,18 @@ def stage_recycling_video(req: RecyclingStageRequest):
     req.platforms = filtered_platforms
         
     recycling_dir = Path(settings.get("recycling_dir", r"C:\Dev\meloscribe\Recycling"))
+    clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', req.song).strip()
     rec_vid = recycling_dir / f"{req.song}.mp4"
     if not rec_vid.exists():
         rec_vid = recycling_dir / f"{req.song} Recycled.mp4"
     if not rec_vid.exists():
+        numbered_matches = sorted(recycling_dir.glob(f"{clean_song} Recycled*.mp4"))
+        if numbered_matches:
+            rec_vid = numbered_matches[0]
+    if not rec_vid.exists():
         raise HTTPException(status_code=404, detail=f"Recycled video for '{req.song}' not found in {recycling_dir}. Please render it first.")
 
     # Record recycling event in database
-    clean_song = re.sub(r'(?i)\s+recycled(?:\s+\d+)?$', '', req.song).strip()
     db_path = Path(__file__).resolve().parent / "analytics.db"
     try:
         with sqlite3.connect(db_path) as conn:

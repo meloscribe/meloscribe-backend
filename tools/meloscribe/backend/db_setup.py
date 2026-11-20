@@ -233,6 +233,7 @@ def init_db():
         ('referrer', 'TEXT'),
         ('utm_source', 'TEXT'),
         ('utm_campaign', 'TEXT'),
+        ('rating', 'TEXT'),
     ]:
         try:
             cursor.execute(f'ALTER TABLE purchases ADD COLUMN {col} {coltype}')
@@ -251,10 +252,22 @@ def init_db():
         email      TEXT UNIQUE NOT NULL,
         token      TEXT UNIQUE NOT NULL,
         status     TEXT NOT NULL DEFAULT 'pending',
+        song_id    TEXT,
+        song_name  TEXT,
+        locale     TEXT DEFAULT 'en',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         confirmed_at TIMESTAMP
     )
     ''')
+    for col, coltype in [
+        ('song_id', 'TEXT'),
+        ('song_name', 'TEXT'),
+        ('locale', "TEXT DEFAULT 'en'"),
+    ]:
+        try:
+            cursor.execute(f'ALTER TABLE notify_subscribers ADD COLUMN {col} {coltype}')
+        except Exception:
+            pass
 
     # ── SUGGESTIONS (community sheet music requests) ──────────────────────────
     cursor.execute('''

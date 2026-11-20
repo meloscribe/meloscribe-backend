@@ -576,7 +576,7 @@ if platform.system() == "Windows":
         except Exception as e:
             return JSONResponse(content={"error": f"Upload proxy error: {e}"}, status_code=500)
 
-    @router.api_route("/api/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    @router.api_route("/api/admin/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def proxy_admin_routes(path: str, request: Request):
         try:
             method = request.method
@@ -1200,7 +1200,16 @@ if platform.system() == "Windows":
             raise HTTPException(status_code=404, detail=f"File '{filename}' not found locally (no SSH key configured for remote fallback)")
             
         sub_dir = "TikToks" if is_video else "Covers"
-        remote_path = f"/home/ubuntu/meloscribe/staging/{song}/{sub_dir}/{filename}"
+        base_song = re.sub(r'\s*(?:\(\s*(?:Easy(?:\s+Version)?|Teaser|Original)\s*\)|\s+(?:Easy|Teaser))$', '', song, flags=re.IGNORECASE).strip() or song
+        primary_path = f"/home/ubuntu/meloscribe/staging/{song}/{sub_dir}/{filename}"
+        fallback_path = f"/home/ubuntu/meloscribe/staging/{base_song}/{sub_dir}/{filename}"
+        if fallback_path != primary_path:
+            remote_cmd = (
+                f"if [ -f {shlex.quote(primary_path)} ]; then cat {shlex.quote(primary_path)}; "
+                f"elif [ -f {shlex.quote(fallback_path)} ]; then cat {shlex.quote(fallback_path)}; fi"
+            )
+        else:
+            remote_cmd = f"cat {shlex.quote(primary_path)}"
         
         from fastapi.responses import StreamingResponse
         
@@ -1210,7 +1219,7 @@ if platform.system() == "Windows":
             "-o", "ConnectTimeout=5", 
             "-o", "IdentitiesOnly=yes", 
             f"ubuntu@{server_ip}", 
-            f"cat {shlex.quote(remote_path)}"
+            remote_cmd
         ]
         
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=CREATION_FLAGS)
@@ -1831,7 +1840,12 @@ else:
                     conn.close()
                     
                     if rows:
-                        requests.post("https://api.meloscribe.dev/api/demographics/sync-raw", json={"demographics": rows}, timeout=10.0)
+                        requests.post(
+                            "https://api.meloscribe.dev/api/demographics/sync-raw",
+                            json={"demographics": rows},
+                            headers=get_proxy_headers(),
+                            timeout=10.0,
+                        )
                         print("[Demographics Sync] Successfully pushed demographic data to Oracle VM.")
             except Exception as push_err:
                 print(f"[Demographics Sync] Warning: Failed to push demographics to Oracle: {push_err}")
@@ -2097,21 +2111,20 @@ else:
         c.execute("UPDATE purchases SET download_count = 0, downloaded_types = '', ip_addresses = '' WHERE transaction_id = ? OR download_hash = ?", (transaction_id, transaction_id))
         conn.commit()
         conn.close()
+        return {"success": True}
 
-        if platform.system() == "Windows":
-            try:
-                import requests
-                admin_pass = settings.get("admin_passcode") or "579110"
-                requests.post(
-                    f"{VM_API_BASE}/api/admin/orders/reset",
-                    json={"transaction_id": transaction_id},
-                    headers={"x-admin-passcode": admin_pass},
-                    timeout=10
-                )
-                print(f"[Order Reset] Successfully synced reset for '{transaction_id}' to production VM.")
-            except Exception as e:
-                print(f"[Order Reset] Sync to VM failed: {e}")
-
+    @router.post("/api/admin/orders/{transaction_id}/reset-limit")
+    async def admin_reset_order_downloads_by_id(transaction_id: str, request: Request):
+        verify_admin(request)
+        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        c = conn.cursor()
+        c.execute("PRAGMA journal_mode=WAL")
+        c.execute(
+            "UPDATE purchases SET download_count = 0, downloaded_types = '', ip_addresses = '' WHERE transaction_id = ? OR download_hash = ?",
+            (transaction_id, transaction_id),
+        )
+        conn.commit()
+        conn.close()
         return {"success": True}
 
     class ManualOrderRequest(BaseModel):
@@ -2123,6 +2136,7 @@ else:
         locale: str = "de"
 
     @router.post("/api/admin/orders")
+    @router.post("/api/admin/orders/create")
     def admin_create_manual_order(req: ManualOrderRequest, request: Request):
         verify_admin(request)
         import uuid
@@ -2189,6 +2203,24 @@ async def global_toggle_order_status(request: Request):
     conn.close()
     return {"success": True, "status": new_status}
 
+@router.post("/api/admin/orders/{transaction_id}/status")
+async def global_set_order_status(transaction_id: str, request: Request):
+    verify_admin(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    new_status = payload.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="Status required")
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    c = conn.cursor()
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("UPDATE purchases SET status = ? WHERE transaction_id = ?", (new_status, transaction_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "status": new_status}
+
 @router.delete("/api/admin/orders/{transaction_id}")
 def global_delete_order(transaction_id: str, request: Request):
     verify_admin(request)
@@ -2205,10 +2237,20 @@ def global_delete_order(transaction_id: str, request: Request):
 # -------------------------------------------------------------------
 # Competitor Tracker Endpoints (Global)
 # -------------------------------------------------------------------
+def _proxy_to_vm(method: str, path: str, request: Request, json_body=None, timeout: float = 15.0):
+    headers = get_proxy_headers()
+    passcode = request.headers.get("x-admin-passcode")
+    if passcode:
+        headers["x-admin-passcode"] = passcode
+    resp = requests.request(method, f"https://api.meloscribe.dev{path}", headers=headers, json=json_body, timeout=timeout)
+    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+
 @router.post("/api/competitors")
 async def add_competitor(req: Request):
     verify_admin(req)
     data = await req.json()
+    if platform.system() == "Windows":
+        return _proxy_to_vm("POST", "/api/competitors", req, json_body=data)
     channel_input = data.get("channel", "").strip()
     if not channel_input:
         return JSONResponse(content={"error": "No channel provided"}, status_code=400)
@@ -2256,7 +2298,9 @@ async def add_competitor(req: Request):
 @router.delete("/api/competitors/{channel_id}")
 async def delete_competitor(channel_id: str, req: Request):
     verify_admin(req)
-    conn = sqlite3.connect(str(db_path))
+    if platform.system() == "Windows":
+        return _proxy_to_vm("DELETE", f"/api/competitors/{channel_id}", req)
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
     c = conn.cursor()
     c.execute("DELETE FROM competitors WHERE channel_id=?", (channel_id,))
     c.execute("DELETE FROM competitor_videos WHERE channel_id=?", (channel_id,))
@@ -2317,6 +2361,8 @@ async def _sync_competitors_core() -> int:
 @router.post("/api/competitors/sync")
 async def sync_competitors(req: Request):
     verify_admin(req)
+    if platform.system() == "Windows":
+        return _proxy_to_vm("POST", "/api/competitors/sync", req, timeout=45.0)
     try:
         total_synced = await _sync_competitors_core()
         return JSONResponse(content={"success": True, "synced": total_synced})

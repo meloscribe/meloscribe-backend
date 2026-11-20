@@ -29,10 +29,10 @@ def _get_tiktok_followers(access_token: str) -> int:
     headers = {"Authorization": f"Bearer {access_token}"}
     params = {"fields": "follower_count"}
     try:
-        resp = requests.get(url, headers=headers, params=params).json()
+        resp = requests.get(url, headers=headers, params=params, timeout=15).json()
         data = resp.get("data", {})
         user = data.get("user", {})
-        return user.get("follower_count", 0)
+        return user.get("follower_count", 0) or 0
     except Exception as e:
         print(f"  [TikTok] Error fetching user info: {e}")
         return 0
@@ -52,6 +52,7 @@ def _get_all_video_ids(access_token: str) -> list[dict]:
             params={"fields": "id,title,create_time"},
             json={"max_count": 20, "cursor": cursor},
             headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
         )
         if resp.status_code != 200:
             print(f"  [TikTok] List error {resp.status_code}: {resp.text}")
@@ -83,6 +84,7 @@ def _get_video_stats(access_token: str, video_ids: list[str]) -> list[dict]:
             params={"fields": VIDEO_FIELDS},
             json={"filters": {"video_ids": batch}},
             headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
         )
         if resp.status_code != 200:
             print(f"  [TikTok] Query error {resp.status_code}: {resp.text}")
@@ -149,6 +151,7 @@ def sync_tiktok():
     videos_meta = _get_all_video_ids(token)
     if not videos_meta:
         print("[TikTok Sync] No videos found on account.")
+        conn.commit()
         conn.close()
         return False
 

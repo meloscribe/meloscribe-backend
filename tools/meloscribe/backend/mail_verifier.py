@@ -156,7 +156,8 @@ def check_domain_mail_records(domain: str, timeout: float = 3.0) -> Tuple[bool, 
 
     # Standard library fallback if dnspython is missing or failed
     try:
-        socket.setdefaulttimeout(timeout)
+        # Avoid mutating process-wide socket default timeout across threads;
+        # perform bounded lookup on a clean call.
         socket.getaddrinfo(clean_domain, None)
         return True, "Domain resolved via standard socket."
     except socket.gaierror:

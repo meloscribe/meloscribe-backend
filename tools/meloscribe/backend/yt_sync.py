@@ -218,7 +218,11 @@ def sync_youtube():
                                 
             print(f"[YouTube Sync] Found {tutorial_requests} tutorial requests in comments -> added to To-Do.")
         except Exception as e:
-            print(f"[YouTube Sync] Error in comment mining: {e}")
+            err_str = str(e)
+            if "insufficientPermissions" in err_str or "403" in err_str:
+                print("[YouTube Sync] Comment mining skipped (current OAuth token lacks comment read scope).")
+            else:
+                print(f"[YouTube Sync] Error in comment mining: {e}")
             
         conn.commit()
 

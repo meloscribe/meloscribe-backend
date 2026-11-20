@@ -114,6 +114,7 @@ def sync_facebook():
     videos_list = _get_all_fb_videos(token, page_id)
     if not videos_list:
         print("[Facebook Sync] No videos found.")
+        conn.commit()
         conn.close()
         return False
 
@@ -121,12 +122,12 @@ def sync_facebook():
     skipped = 0
     for v in videos_list:
         vid       = v.get("id")
-        title     = v.get("title", "")
-        desc      = v.get("description", "")
+        title     = v.get("title") or ""
+        desc      = v.get("description") or ""
         published = v.get("created_time", "")
-        duration  = v.get("length", 0)
+        duration  = v.get("length", 0) or 0
         url       = v.get("permalink_url", "")
-        views     = v.get("views", 0)
+        views     = int(v.get("views") or 0)
         reach     = views  # Approximation since insights are broken
 
         likes = 0
@@ -147,7 +148,7 @@ def sync_facebook():
             skipped += 1
             continue
 
-        author = sync_utils.extract_author(title, desc)
+        author = sync_utils.extract_author(title or desc, desc)
         language = sync_utils.detect_language(title or desc)
         format_type = sync_utils.detect_format(title, desc)
 

@@ -73,7 +73,7 @@ def _refresh_access_token(refresh_token: str) -> dict | None:
         "client_secret":  CLIENT_SECRET,
         "grant_type":     "refresh_token",
         "refresh_token":  refresh_token,
-    }, headers={"Content-Type": "application/x-www-form-urlencoded"})
+    }, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=15)
     if resp.status_code == 200:
         data = resp.json()
         if "access_token" not in data:
@@ -102,8 +102,8 @@ def get_valid_token() -> str | None:
     Returns None if no tokens exist at all (first-time auth needed).
     """
     tokens = _load_tokens()
-    if not tokens:
-        print("[TikTok] No tokens found. Run: python tiktok_auth.py to authorize.")
+    if not tokens or tokens.get("disconnected"):
+        print("[TikTok] No active tokens found. Skipping auto-refresh.")
         return None
 
     # Check expiry (refresh 5 minutes early)

@@ -87,9 +87,8 @@ def _get_video_insights(access_token: str, media_ids: list[str]) -> dict:
         body = resp.json()
         for idx, item in enumerate(body):
             mid = batch[idx]
-            insights_map[mid] = {"views": 0, "shares": 0, "saved": 0, "reach": 0}
-            
             if item.get("code") == 200:
+                insights_map[mid] = {"views": 0, "shares": 0, "saved": 0, "reach": 0}
                 item_data = json.loads(item["body"])
                 data_list = item_data.get("data", [])
                 for metric in data_list:
@@ -102,7 +101,7 @@ def _get_video_insights(access_token: str, media_ids: list[str]) -> dict:
 
     return insights_map
 
-def _get_profile_insights(access_token: str, ig_business_id: str) -> dict:
+def _get_profile_insights(access_token: str, ig_business_id: str) -> dict | None:
     """Get profile views and website clicks for the last day."""
     url = f"https://graph.facebook.com/v19.0/{ig_business_id}/insights"
     params = {
@@ -111,7 +110,14 @@ def _get_profile_insights(access_token: str, ig_business_id: str) -> dict:
         "access_token": access_token
     }
     try:
-        resp = requests.get(url, params=params).json()
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            print(f"  [Instagram] Profile insights HTTP {r.status_code}: {r.text[:150]}")
+            return None
+        resp = r.json()
+        if "error" in resp:
+            print(f"  [Instagram] Profile insights API error: {resp['error']}")
+            return None
         res = {"profile_views": 0, "website_clicks": 0}
         for metric in resp.get("data", []):
             name = metric.get("name")
@@ -121,9 +127,9 @@ def _get_profile_insights(access_token: str, ig_business_id: str) -> dict:
         return res
     except Exception as e:
         print(f"  [Instagram] Error fetching profile insights: {e}")
-        return {"profile_views": 0, "website_clicks": 0}
+        return None
 
-def _get_followers_count(access_token: str, ig_business_id: str) -> int:
+def _get_followers_count(access_token: str, ig_business_id: str) -> int | None:
     """Get followers count for the Instagram business account."""
     url = f"https://graph.facebook.com/v19.0/{ig_business_id}"
     params = {
@@ -131,11 +137,15 @@ def _get_followers_count(access_token: str, ig_business_id: str) -> int:
         "access_token": access_token
     }
     try:
-        resp = requests.get(url, params=params).json()
-        return resp.get("followers_count", 0)
+        r = requests.get(url, params=params, timeout=15)
+        if r.status_code != 200:
+            return None
+        resp = r.json()
+        val = resp.get("followers_count")
+        return int(val) if val is not None else None
     except Exception as e:
         print(f"  [Instagram] Error fetching followers count: {e}")
-        return 0
+        return None
 
 
 
@@ -159,20 +169,26 @@ def sync_instagram():
     prof_insights = _get_profile_insights(token, ig_id)
     followers = _get_followers_count(token, ig_id)
     today = datetime.datetime.utcnow().strftime('%Y-%m-%d')
-    cursor.execute('''
-        INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks)
-        VALUES ('instagram', ?, ?, ?, ?)
-        ON CONFLICT(platform, date) DO UPDATE SET
-            followers = excluded.followers,
-            profile_views = excluded.profile_views,
-            website_clicks = excluded.website_clicks
-    ''', (today, followers, prof_insights['profile_views'], prof_insights['website_clicks']))
+    if prof_insights is not None or followers is not None:
+        pv = prof_insights["profile_views"] if prof_insights else 0
+        wc = prof_insights["website_clicks"] if prof_insights else 0
+        fl = followers if followers is not None else 0
+        cursor.execute('''
+            INSERT INTO channel_insights (platform, date, followers, profile_views, website_clicks)
+            VALUES ('instagram', ?, ?, ?, ?)
+            ON CONFLICT(platform, date) DO UPDATE SET
+                followers = CASE WHEN ? IS NOT NULL AND ? > 0 THEN excluded.followers ELSE channel_insights.followers END,
+                profile_views = CASE WHEN ? IS NOT NULL THEN excluded.profile_views ELSE channel_insights.profile_views END,
+                website_clicks = CASE WHEN ? IS NOT NULL THEN excluded.website_clicks ELSE channel_insights.website_clicks END
+        ''', (today, fl, pv, wc, followers, followers, prof_insights and 1, prof_insights and 1))
+        conn.commit()
 
     # 2. Get all Reels
     print("[Instagram Sync] Fetching Reels data...")
     media_list = _get_all_media(token, ig_id)
     if not media_list:
         print("[Instagram Sync] No Reels found on account.")
+        conn.commit()
         conn.close()
         return False
 

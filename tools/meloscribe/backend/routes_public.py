@@ -1152,14 +1152,19 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
         else:
             currency = auto_currency
             
+        if "free" in price_str.lower():
+            raise HTTPException(status_code=400, detail="Free arrangements do not require checkout.")
+
         try:
-            digits = re.findall(r"\d+", price_str)
-            if digits:
-                amount_cents = int(digits[0]) * 100
+            match = re.search(r"\d+(?:[.,]\d+)?", price_str)
+            if match:
+                amount_cents = int(round(float(match.group(0).replace(",", ".")) * 100))
             else:
                 amount_cents = 600
         except Exception:
             amount_cents = 600
+        if amount_cents <= 0:
+            raise HTTPException(status_code=400, detail="Free or invalid arrangements cannot use paid checkout.")
             
         download_hash = uuid.uuid4().hex
         origin = request.headers.get("origin") or "https://meloscribesheets.com"
@@ -1279,11 +1284,14 @@ async def create_checkout_session(req: CheckoutRequest, request: Request):
                 billing_address_collection="auto",
                 branding_settings=branding,
                 excluded_payment_method_types=excluded_methods,
+                payment_intent_data={"metadata": stripe_metadata},
                 success_url=f"{origin}/success?checkout_id={{CHECKOUT_SESSION_ID}}",
                 cancel_url=f"{origin}/sheets?song={to_slug(song.get('title', ''))}&version={to_slug(req.difficulty)}",
                 metadata=stripe_metadata
             )
             return {"url": session.url}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[Stripe Checkout] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1403,6 +1411,14 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
             
             if is_paid:
                 metadata = data_object.get("metadata", {})
+                if is_pi and not metadata.get("song_title") and not metadata.get("download_hash") and stripe:
+                    try:
+                        cs_list = stripe.checkout.Session.list(payment_intent=session_id, limit=1)
+                        if cs_list and getattr(cs_list, "data", None):
+                            log_webhook(f"Ignoring payment_intent.succeeded for Hosted Checkout Session {cs_list.data[0].id}")
+                            return {"status": "ignored", "reason": "Handled via checkout.session.completed"}
+                    except Exception as cs_chk_err:
+                        log_webhook(f"[Stripe Webhook] Checkout Session lookup warning for {session_id}: {cs_chk_err}")
                 song_title = metadata.get("song_title") or "Unknown Song"
                 download_hash = metadata.get("download_hash")
                 locale = metadata.get("locale") or "en"
@@ -1415,10 +1431,9 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                         with open(songs_json_path, "r", encoding="utf-8") as f:
                             songs_db = json.load(f)
                         matched_song = next((s for s in songs_db if s.get("title") == song_title), None)
-                        if matched_song:
-                            if matched_song.get("paymentsDisabled") or matched_song.get("hidden"):
-                                log_webhook(f"[Stripe Webhook] REJECTED purchase for '{song_title}' (paymentsDisabled or hidden).")
-                                return JSONResponse(content={"error": "Product is no longer available"}, status_code=403)
+                        if matched_song and (matched_song.get("paymentsDisabled") or matched_song.get("hidden")):
+                            # Stripe already collected payment; still fulfill the order rather than returning 403.
+                            log_webhook(f"[Stripe Webhook] WARNING: '{song_title}' is hidden/paymentsDisabled, still fulfilling paid txn {session_id}.")
                 except Exception as check_err:
                     log_webhook(f"[Stripe Webhook] Error checking song availability: {check_err}")
                 
@@ -1442,25 +1457,27 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                             buyer_name = billing.get("name") or ""
 
                     latest_charge = data_object.get("latest_charge")
-                    if (not email or "@" not in email) and latest_charge and stripe:
+                    if (not email or "@" not in str(email) or not buyer_name) and latest_charge and stripe:
                         try:
                             ch = stripe.Charge.retrieve(latest_charge)
                             ch_dict = ch.to_dict() if hasattr(ch, "to_dict") else ch
                             billing = ch_dict.get("billing_details") or {}
-                            email = ch_dict.get("receipt_email") or billing.get("email")
+                            if not email or "@" not in str(email):
+                                email = ch_dict.get("receipt_email") or billing.get("email")
                             if not email:
                                 pm_details = ch_dict.get("payment_method_details") or {}
-                                email = pm_details.get("paypal", {}).get("payer_email")
+                                email = (pm_details.get("paypal") or {}).get("payer_email")
                             if not buyer_name:
                                 buyer_name = billing.get("name") or ""
                         except Exception as ch_err:
                             log_webhook(f"[Stripe Webhook] Error fetching latest_charge {latest_charge}: {ch_err}")
 
-                    if (not email or "@" not in email) and data_object.get("customer") and stripe:
+                    if (not email or "@" not in str(email) or not buyer_name) and data_object.get("customer") and stripe:
                         try:
                             cust = stripe.Customer.retrieve(data_object.get("customer"))
                             cust_dict = cust.to_dict() if hasattr(cust, "to_dict") else cust
-                            email = cust_dict.get("email")
+                            if not email or "@" not in str(email):
+                                email = cust_dict.get("email")
                             if not buyer_name:
                                 buyer_name = cust_dict.get("name") or ""
                         except Exception:
@@ -1477,7 +1494,8 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 currency = (data_object.get("currency") or "eur").upper()
 
                 log_webhook(f"Recording purchase in DB: Email={email}, Song={song_title}, Amount={amount_total} {currency}, Hash={download_hash}")
-                conn = sqlite3.connect(str(db_path))
+                conn = sqlite3.connect(str(db_path), timeout=30.0)
+                conn.execute("PRAGMA journal_mode=WAL")
                 c = conn.cursor()
                 c.execute(
                     "INSERT OR IGNORE INTO purchases (transaction_id, email, song_name, amount, currency, status, download_hash, locale, buyer_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1505,6 +1523,9 @@ async def stripe_webhook(request: Request, background_tasks: BackgroundTasks):
                 if is_new:
                     log_webhook(f"Triggering email delivery function for {email}...")
                     success = send_purchase_delivery_email(email, song_title, download_hash, locale)
+                    if not success:
+                        time.sleep(1.0)
+                        success = send_purchase_delivery_email(email, song_title, download_hash, locale)
                     log_webhook(f"Email delivery function completed. Result: {'SUCCESS' if success else 'FAILED'}")
                     _dispatch_sale_push(
                         background_tasks=background_tasks,
@@ -1622,25 +1643,27 @@ def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks, re
                             buyer_name = billing.get("name") or ""
 
                     latest_charge = pi.get("latest_charge")
-                    if (not email or "@" not in email) and latest_charge and stripe:
+                    if (not email or "@" not in str(email) or not buyer_name) and latest_charge and stripe:
                         try:
                             ch = stripe.Charge.retrieve(latest_charge)
                             ch_dict = ch.to_dict() if hasattr(ch, "to_dict") else ch
                             billing = ch_dict.get("billing_details") or {}
-                            email = ch_dict.get("receipt_email") or billing.get("email")
+                            if not email or "@" not in str(email):
+                                email = ch_dict.get("receipt_email") or billing.get("email")
                             if not email:
                                 pm_details = ch_dict.get("payment_method_details") or {}
-                                email = pm_details.get("paypal", {}).get("payer_email")
+                                email = (pm_details.get("paypal") or {}).get("payer_email")
                             if not buyer_name:
                                 buyer_name = billing.get("name") or ""
                         except Exception as ch_err:
                             print(f"[Order Details] Error fetching latest_charge {latest_charge}: {ch_err}")
 
-                    if (not email or "@" not in email) and pi.get("customer") and stripe:
+                    if (not email or "@" not in str(email) or not buyer_name) and pi.get("customer") and stripe:
                         try:
                             cust = stripe.Customer.retrieve(pi.get("customer"))
                             cust_dict = cust.to_dict() if hasattr(cust, "to_dict") else cust
-                            email = cust_dict.get("email")
+                            if not email or "@" not in str(email):
+                                email = cust_dict.get("email")
                             if not buyer_name:
                                 buyer_name = cust_dict.get("name") or ""
                         except Exception:
@@ -1660,7 +1683,7 @@ def get_hash_by_checkout(checkout_id: str, background_tasks: BackgroundTasks, re
                 if is_paid:
                     song_title = metadata.get("song_title") or "Unknown Song"
                     download_hash = metadata.get("download_hash") or uuid.uuid4().hex
-                    locale = metadata.get("locale") or "de"
+                    locale = metadata.get("locale") or "en"
                     
                     conn = sqlite3.connect(str(db_path), timeout=30.0)
                     c = conn.cursor()
@@ -1926,10 +1949,12 @@ def request_download(hash: str, type: str, request: Request):
         conn.commit()
     conn.close()
     
+    public_api_base = "https://api.meloscribe.dev" if platform.system() != "Windows" else str(request.base_url).rstrip("/")
+
     # For PDF and MIDI, use proxy endpoint to apply dynamic watermark on demand.
     # For videos, generate direct presigned R2 URL instantly (1 ms) to make download start immediately!
     if type in ("pdf", "midi", "midi_slow"):
-        download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
+        download_file_url = f"{public_api_base}/api/download/file?hash={hash}&type={type}"
         return {"download_url": download_file_url, "download_count": new_count}
     else:
         r2_account_id = settings.get("r2_account_id") or os.environ.get("R2_ACCOUNT_ID")
@@ -1939,11 +1964,11 @@ def request_download(hash: str, type: str, request: Request):
 
         if r2_account_id and r2_access_key and r2_secret_key:
             try:
-                import boto3, re
+                import boto3, re, urllib.parse
                 from botocore.config import Config
                 clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
                 clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
-                is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+                is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
                 r2_base = f"{clean_base} Easy" if is_easy else clean_base
                 
                 if type == "midi":
@@ -1965,13 +1990,34 @@ def request_download(hash: str, type: str, request: Request):
                     region_name='auto',
                     config=Config(signature_version='s3v4')
                 )
+                try:
+                    s3.head_object(Bucket=r2_bucket, Key=file_key)
+                except Exception:
+                    ext = ".pdf" if type == "pdf" else (".mid" if "midi" in type else (".mp4" if "video" in type else ".zip"))
+                    is_slow = "slow" in type
+                    res_objs = s3.list_objects_v2(Bucket=r2_bucket, Prefix=f"{r2_base}/")
+                    found_key = None
+                    for obj in res_objs.get("Contents", []):
+                        k = obj["Key"]
+                        if k.endswith(ext):
+                            if is_slow and ("slow" in k.lower() or "tuto" in k.lower()):
+                                found_key = k
+                                break
+                            elif not is_slow and "slow" not in k.lower() and "tuto" not in k.lower() and "preview" not in k.lower():
+                                found_key = k
+                                break
+                    if found_key:
+                        file_key = found_key
+
                 filename = file_key.split('/')[-1]
+                ascii_name = re.sub(r'[^\x20-\x7e]', '_', filename).replace('"', '_')
+                disp = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{urllib.parse.quote(filename)}"
                 presigned_url = s3.generate_presigned_url(
                     ClientMethod='get_object',
                     Params={
                         'Bucket': r2_bucket, 
                         'Key': file_key,
-                        'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                        'ResponseContentDisposition': disp
                     },
                     ExpiresIn=900
                 )
@@ -1979,7 +2025,7 @@ def request_download(hash: str, type: str, request: Request):
             except Exception as e:
                 print(f"[Download Request] Error generating presigned URL: {e}")
 
-        download_file_url = f"{request.base_url}api/download/file?hash={hash}&type={type}"
+        download_file_url = f"{public_api_base}/api/download/file?hash={hash}&type={type}"
         return {"download_url": download_file_url, "download_count": new_count}
 
 @router.get("/api/download/file")
@@ -2063,10 +2109,10 @@ def download_file(hash: str, type: str, request: Request):
         import boto3
         from botocore.config import Config
         
-        import re
+        import re, urllib.parse
         clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
         clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
-        is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
         r2_base = f"{clean_base} Easy" if is_easy else clean_base
 
         if type == "pdf":
@@ -2113,6 +2159,10 @@ def download_file(hash: str, type: str, request: Request):
                 print(f"[Download File] Resolved alternate R2 key: '{found_key}'")
                 file_key = found_key
 
+        def _disposition(fname: str) -> str:
+            ascii_name = re.sub(r'[^\x20-\x7e]', '_', fname).replace('"', '_')
+            return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{urllib.parse.quote(fname)}"
+
         if type == "pdf":
             print(f"[Download File] Fetching '{file_key}' from R2 for watermarking...")
             pdf_obj = s3.get_object(Bucket=r2_bucket, Key=file_key)
@@ -2122,7 +2172,7 @@ def download_file(hash: str, type: str, request: Request):
             
             from fastapi.responses import Response
             headers = {
-                "Content-Disposition": f'attachment; filename="{song_name}.pdf"'
+                "Content-Disposition": _disposition(f"{song_name}.pdf")
             }
             return Response(content=watermarked_bytes, media_type="application/pdf", headers=headers)
         elif type in ("midi", "midi_slow"):
@@ -2136,7 +2186,7 @@ def download_file(hash: str, type: str, request: Request):
             from fastapi.responses import Response
             out_filename = f"{song_name} slow.mid" if type == "midi_slow" else f"{song_name}.mid"
             headers = {
-                "Content-Disposition": f'attachment; filename="{out_filename}"',
+                "Content-Disposition": _disposition(out_filename),
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"
             }
             return Response(content=watermarked_midi_bytes, media_type="audio/midi", headers=headers)
@@ -2147,7 +2197,7 @@ def download_file(hash: str, type: str, request: Request):
                 Params={
                     'Bucket': r2_bucket, 
                     'Key': file_key,
-                    'ResponseContentDisposition': f'attachment; filename="{filename}"'
+                    'ResponseContentDisposition': _disposition(filename)
                 },
                 ExpiresIn=900
             )
@@ -2204,10 +2254,10 @@ def verify_download(checkout_id: str):
             config=Config(signature_version='s3v4')
         )
 
-        import re
+        import re, urllib.parse
         clean_base = re.sub(r'\s*\((Original|Easy|Easy Version|All Parts|Part \d+|Original / Easy)\)', '', song_name, flags=re.IGNORECASE).strip()
         clean_base = re.sub(r'\s+(Easy|Original)$', '', clean_base, flags=re.IGNORECASE).strip()
-        is_easy = bool(re.search(r'\b(Easy|Easy Version)\b', song_name, re.IGNORECASE))
+        is_easy = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
         r2_base = f"{clean_base} Easy" if is_easy else clean_base
 
         file_specs = [
@@ -2260,6 +2310,54 @@ async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
     song_name = req.song_title.strip() if req.song_title else None
     song_id = req.song_id.strip() if req.song_id else None
     locale = req.locale.strip() if req.locale else "en"
+
+    def _is_song_free_for_download(target_title: str, target_id: str | None) -> bool:
+        try:
+            songs_json_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+            if not os.path.exists(songs_json_path):
+                songs_json_path = Path(__file__).resolve().parent / "songs.json"
+            if not os.path.exists(songs_json_path):
+                return False
+            with open(songs_json_path, "r", encoding="utf-8") as f:
+                songs_db = json.load(f)
+
+            clean_req = re.sub(r'\s*\((Original|Easy|Easy Version)\)\s*$', '', target_title, flags=re.IGNORECASE).strip()
+            clean_req = re.sub(r'\s+(Easy|Original)$', '', clean_req, flags=re.IGNORECASE).strip()
+            is_easy_req = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', target_title, re.IGNORECASE))
+
+            matched = None
+            if target_id:
+                matched = next((s for s in songs_db if str(s.get("id", "")).strip() == str(target_id).strip()), None)
+            if not matched:
+                t_low = target_title.strip().lower()
+                c_low = clean_req.lower()
+                matched = next(
+                    (s for s in songs_db if (s.get("title") or "").strip().lower() in (t_low, c_low)),
+                    None,
+                )
+            if not matched:
+                return False
+
+            def _price_is_free(val) -> bool:
+                s = str(val or "").strip().lower()
+                if not s or "free" in s:
+                    return True
+                m = re.search(r"\d+(?:[.,]\d+)?", s)
+                if not m:
+                    return False
+                return float(m.group(0).replace(",", ".")) <= 0.0
+
+            if is_easy_req and matched.get("hasEasy"):
+                price_val = matched.get("easyPrice")
+                if price_val not in (None, ""):
+                    return _price_is_free(price_val)
+            return _price_is_free(matched.get("price"))
+        except Exception as e:
+            print(f"[Notify Subscribe] Free-song check error: {e}")
+            return False
+
+    if song_name and not _is_song_free_for_download(song_name, song_id):
+        return JSONResponse(content={"error": "This arrangement is not free."}, status_code=403)
     
     try:
         conn = sqlite3.connect(str(db_path), timeout=30.0)
@@ -2300,7 +2398,12 @@ async def notify_subscribe(req: NotifySubscribeRequest, request: Request):
                         download_hash = p_row[0]
                     conn.close()
                     # Delivery-only via inbox: send single delivery email for already active subscriber
-                    send_purchase_delivery_email(email, song_name, download_hash, locale)
+                    delivered = send_purchase_delivery_email(email, song_name, download_hash, locale)
+                    if not delivered:
+                        return JSONResponse(
+                            content={"error": "Could not send download link email. Please try again later."},
+                            status_code=502,
+                        )
                     return {"status": "active", "message": "Download link sent to your inbox!"}
                 
                 conn.close()
@@ -2395,8 +2498,39 @@ def notify_confirm(token: str, background_tasks: BackgroundTasks):
             except Exception as push_err:
                 print(f"[WebPush] Subscriber push error: {push_err}")
         
-        # If this DOI confirmation was triggered for a free song, create an active purchase
+        # If this DOI confirmation was triggered for a free song, verify free eligibility then unlock
         if song_name:
+            is_free_verified = False
+            try:
+                songs_json_path = r"c:\Dev\meloscribe-frontend\website\src\data\songs.json"
+                if not os.path.exists(songs_json_path):
+                    songs_json_path = Path(__file__).resolve().parent / "songs.json"
+                if os.path.exists(songs_json_path):
+                    with open(songs_json_path, "r", encoding="utf-8") as f:
+                        songs_db = json.load(f)
+                    clean_req = re.sub(r'\s*\((Original|Easy|Easy Version)\)\s*$', '', song_name, flags=re.IGNORECASE).strip()
+                    clean_req = re.sub(r'\s+(Easy|Original)$', '', clean_req, flags=re.IGNORECASE).strip()
+                    is_easy_req = bool(re.search(r'(?:\(\s*Easy(?:\s+Version)?\s*\)|\s+Easy(?:\s+Version)?$)', song_name, re.IGNORECASE))
+                    matched = None
+                    if song_id:
+                        matched = next((s for s in songs_db if str(s.get("id", "")).strip() == str(song_id).strip()), None)
+                    if not matched:
+                        matched = next((s for s in songs_db if (s.get("title") or "").strip().lower() in (song_name.strip().lower(), clean_req.lower())), None)
+                    if matched:
+                        pval = matched.get("easyPrice") if (is_easy_req and matched.get("hasEasy") and matched.get("easyPrice") not in (None, "")) else matched.get("price")
+                        s_val = str(pval or "").strip().lower()
+                        if not s_val or "free" in s_val:
+                            is_free_verified = True
+                        else:
+                            m_p = re.search(r"\d+(?:[.,]\d+)?", s_val)
+                            is_free_verified = bool(m_p and float(m_p.group(0).replace(",", ".")) <= 0.0)
+            except Exception as chk_err:
+                print(f"[Notify Confirm] Free song check warning: {chk_err}")
+
+            if not is_free_verified:
+                conn.close()
+                return HTMLResponse(content="<html><body><h1>Arrangement Not Free</h1><p>This sheet is no longer free.</p></body></html>", status_code=403)
+
             download_hash = uuid.uuid4().hex
             c.execute("SELECT download_hash FROM purchases WHERE email = ? AND song_name = ?", (email, song_name))
             p_row = c.fetchone()
@@ -3449,9 +3583,14 @@ def public_free_download_internal(song_id: str, type: str, request: Request):
 @router.get("/callback")
 def oauth_callback(code: str = None, state: str = "fb", error: str = None, error_description: str = None):
     """
-    Handle authorization callback codes (for Facebook Graph / Threads APIs).
-    Renders a premium success HTML block with micro-animations.
+    Handle authorization callback codes (for Facebook Graph / Threads / TikTok / Pinterest APIs).
     """
+    if state == "threads" and code and not error:
+        try:
+            from routes_settings import exchange_threads_oauth_code
+            return exchange_threads_oauth_code(code)
+        except Exception as th_err:
+            print(f"[OAuth Callback] Threads delegation failed: {th_err}")
     safe_state = html.escape(state) if state else "APP"
     if error or not code:
         err_msg = html.escape(error_description or error or "Authorization was canceled or failed.")
@@ -3695,6 +3834,20 @@ def get_affiliate_stats(request: Request):
     Aggregates affiliate outbound click metrics from analytics.db for the internal dashboard.
     """
     verify_admin(request)
+    if platform.system() == "Windows":
+        try:
+            headers = {}
+            api_key = get_server_api_key()
+            if api_key:
+                headers["X-Meloscribe-Key"] = api_key
+            passcode = request.headers.get("x-admin-passcode")
+            if passcode:
+                headers["x-admin-passcode"] = passcode
+            r = requests.get("https://api.meloscribe.dev/api/events/outbound/stats", headers=headers, timeout=10.0)
+            if r.status_code == 200:
+                return r.json()
+        except Exception as e:
+            print(f"[Affiliate Stats Proxy] Fallback to local DB after error: {e}")
     try:
         db_file = Path(__file__).resolve().parent / "analytics.db"
         conn = sqlite3.connect(str(db_file), timeout=10.0)

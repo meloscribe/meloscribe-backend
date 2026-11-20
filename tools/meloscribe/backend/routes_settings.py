@@ -20,92 +20,90 @@ from settings import save_settings
 
 router = APIRouter()
 
-@router.get("/callback")
-def oauth_callback(code: str, state: str = None):
-    """
-    Unified OAuth callback proxy and direct processor.
-    - If state == 'threads', directly handles Threads token exchange and saves it.
-    - Otherwise, forwards to localhost:8080 (e.g. for TikTok/other local auth).
-    """
-    if state == "threads":
-        try:
-            settings_path = TOOLS_DIR / "meloscribe" / "backend" / "settings.json"
-            tokens_path = TOOLS_DIR / "meloscribe" / "backend" / "threads_tokens.json"
-            
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings_data = json.load(f)
-            
-            app_id = settings_data.get("threads_app_id", "2376057852870646")
-            app_secret = settings_data.get("threads_app_secret", "")
-            redirect_uri = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
+def exchange_threads_oauth_code(code: str) -> HTMLResponse:
+    try:
+        settings_path = TOOLS_DIR / "meloscribe" / "backend" / "settings.json"
+        tokens_path = TOOLS_DIR / "meloscribe" / "backend" / "threads_tokens.json"
+        
+        with open(settings_path, "r", encoding="utf-8") as f:
+            settings_data = json.load(f)
+        
+        app_id = settings_data.get("threads_app_id", "2376057852870646")
+        app_secret = settings_data.get("threads_app_secret", "")
+        redirect_uri = "https://wooing-encrust-ladle.ngrok-free.dev/callback"
 
-            # Exchange code for short-lived token
-            resp = requests.post("https://graph.threads.net/oauth/access_token", data={
-                "client_id": app_id,
-                "client_secret": app_secret,
-                "grant_type": "authorization_code",
-                "redirect_uri": redirect_uri,
-                "code": code
-            })
-            
-            if resp.status_code != 200:
-                return HTMLResponse(
-                    content=f"<h1>Threads short-lived token exchange failed:</h1><pre>{resp.status_code} - {resp.text}</pre>",
-                    status_code=400
-                )
-            
-            short_data = resp.json()
-            short_token = short_data.get("access_token")
-            user_id = short_data.get("user_id")
-
-            # Exchange short-lived token for long-lived token
-            long_resp = requests.get("https://graph.threads.net/access_token", params={
-                "grant_type": "th_exchange_token",
-                "client_secret": app_secret,
-                "access_token": short_token
-            })
-            
-            if long_resp.status_code != 200:
-                return HTMLResponse(
-                    content=f"<h1>Threads long-lived token exchange failed:</h1><pre>{long_resp.status_code} - {long_resp.text}</pre>",
-                    status_code=400
-                )
-            
-            long_data = long_resp.json()
-            long_token = long_data.get("access_token")
-
-            # Fetch profile to get username
-            me_resp = requests.get("https://graph.threads.net/v1.0/me", params={
-                "fields": "id,username",
-                "access_token": long_token
-            })
-            username = "unknown"
-            if me_resp.status_code == 200:
-                username = me_resp.json().get("username", "unknown")
-
-            # Save credentials
-            save_data = {
-                "access_token": long_token,
-                "threads_user_id": str(user_id),
-                "username": username
-            }
-            with open(tokens_path, "w", encoding="utf-8") as f:
-                json.dump(save_data, f, indent=4)
-
-            print(f"[Threads Auth] Successfully authorized as {username}. Token saved.")
+        # Exchange code for short-lived token
+        resp = requests.post("https://graph.threads.net/oauth/access_token", data={
+            "client_id": app_id,
+            "client_secret": app_secret,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "code": code
+        }, timeout=10)
+        
+        if resp.status_code != 200:
             return HTMLResponse(
-                content=f"<h1>Threads Autorisierung erfolgreich!</h1><p>Du bist nun als <b>@{username}</b> angemeldet. Du kannst diesen Tab schliessen.</p>",
-                status_code=200
+                content=f"<h1>Threads short-lived token exchange failed:</h1><pre>{resp.status_code} - {resp.text}</pre>",
+                status_code=400
             )
+        
+        short_data = resp.json()
+        short_token = short_data.get("access_token")
+        user_id = short_data.get("user_id")
 
-        except Exception as e:
-            return HTMLResponse(content=f"<h1>Internal Error during Threads exchange: {e}</h1>", status_code=500)
+        # Exchange short-lived token for long-lived token
+        long_resp = requests.get("https://graph.threads.net/access_token", params={
+            "grant_type": "th_exchange_token",
+            "client_secret": app_secret,
+            "access_token": short_token
+        }, timeout=10)
+        
+        if long_resp.status_code != 200:
+            return HTMLResponse(
+                content=f"<h1>Threads long-lived token exchange failed:</h1><pre>{long_resp.status_code} - {long_resp.text}</pre>",
+                status_code=400
+            )
+        
+        long_data = long_resp.json()
+        long_token = long_data.get("access_token")
 
+        # Fetch profile to get username
+        me_resp = requests.get("https://graph.threads.net/v1.0/me", params={
+            "fields": "id,username",
+            "access_token": long_token
+        }, timeout=10)
+        username = "unknown"
+        if me_resp.status_code == 200:
+            username = me_resp.json().get("username", "unknown")
+
+        # Save credentials
+        save_data = {
+            "access_token": long_token,
+            "threads_user_id": str(user_id),
+            "username": username
+        }
+        with open(tokens_path, "w", encoding="utf-8") as f:
+            json.dump(save_data, f, indent=4)
+
+        print(f"[Threads Auth] Successfully authorized as {username}. Token saved.")
+        return HTMLResponse(
+            content=f"<h1>Threads Authorization Successful!</h1><p>Connected as <b>@{username}</b>. You can close this tab.</p>",
+            status_code=200
+        )
+
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Internal Error during Threads exchange: {e}</h1>", status_code=500)
+
+
+@router.get("/api/threads/callback")
+def threads_oauth_callback(code: str, state: str = None):
+    if state == "threads" or state is None:
+        return exchange_threads_oauth_code(code)
     try:
         url = f"http://localhost:8080/?code={code}"
         if state:
             url += f"&state={state}"
-        resp = requests.get(url)
+        resp = requests.get(url, timeout=10)
         return HTMLResponse(content=resp.text, status_code=resp.status_code)
     except Exception as e:
         return HTMLResponse(content=f"<h1>Forwarding failed: {e}</h1>", status_code=500)
@@ -253,11 +251,11 @@ def tiktok_status():
             }
         else:
             return {
-                "authorized": True,
-                "open_id": "sandbox_user_api_err",
-                "display_name": "@Ventoba",
-                "avatar_url": "https://i.ibb.co/C5mHh6Z/tiktok-avatar-placeholder.png",
-                "message": f"Connected (API fallback): {resp.text[:100]}"
+                "authorized": False,
+                "open_id": "",
+                "display_name": "Not connected",
+                "avatar_url": "",
+                "message": f"TikTok API error {resp.status_code}: {resp.text[:120]}"
             }
     except Exception as e:
         return {
@@ -336,15 +334,35 @@ def tiktok_authorize():
         "url": auth_url
     }
 
+def _trigger_vm_sync(endpoint_path: str):
+    if platform.system() != "Windows":
+        return
+    try:
+        from shared import get_server_api_key
+        headers = {}
+        api_key = get_server_api_key()
+        if api_key:
+            headers["X-Meloscribe-Key"] = api_key
+        requests.post(f"https://api.meloscribe.dev{endpoint_path}", headers=headers, timeout=15.0)
+    except Exception as e:
+        print(f"[Remote Sync {endpoint_path}] Error: {e}")
+
 @router.post("/api/tiktok/sync")
-async def tiktok_sync_now():
+async def tiktok_sync_now(request: Request):
+    from shared import verify_admin
+    verify_admin(request)
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_sync.py")
-        spec = importlib.util.spec_from_file_location("tiktok_sync", sync_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mod.sync_tiktok()
+        if os.path.exists(sync_path):
+            try:
+                spec = importlib.util.spec_from_file_location("tiktok_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_tiktok()
+            except Exception as e:
+                print(f"[TikTok Sync] Error: {e}")
+        _trigger_vm_sync("/api/tiktok/sync")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 
@@ -376,7 +394,9 @@ def instagram_status():
         return {"authorized": False, "message": f"Validation error: {e}"}
 
 @router.post("/api/instagram/sync")
-async def instagram_sync_now():
+async def instagram_sync_now(request: Request):
+    from shared import verify_admin
+    verify_admin(request)
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "ig_sync.py")
@@ -388,21 +408,14 @@ async def instagram_sync_now():
                 mod.sync_instagram()
             except Exception as e:
                 print(f"[Instagram Sync] Error: {e}")
-        if platform.system() == "Windows":
-            try:
-                from shared import get_server_api_key
-                headers = {}
-                api_key = get_server_api_key()
-                if api_key:
-                    headers["X-Meloscribe-Key"] = api_key
-                requests.post("https://api.meloscribe.dev/api/instagram/sync", headers=headers, timeout=15.0)
-            except Exception as e:
-                print(f"[Instagram Sync Remote] Error: {e}")
+        _trigger_vm_sync("/api/instagram/sync")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 
 @router.post("/api/facebook/sync")
-async def facebook_sync_now():
+async def facebook_sync_now(request: Request):
+    from shared import verify_admin
+    verify_admin(request)
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "fb_sync.py")
@@ -414,16 +427,7 @@ async def facebook_sync_now():
                 mod.sync_facebook()
             except Exception as e:
                 print(f"[Facebook Sync] Error: {e}")
-        if platform.system() == "Windows":
-            try:
-                from shared import get_server_api_key
-                headers = {}
-                api_key = get_server_api_key()
-                if api_key:
-                    headers["X-Meloscribe-Key"] = api_key
-                requests.post("https://api.meloscribe.dev/api/facebook/sync", headers=headers, timeout=15.0)
-            except Exception as e:
-                print(f"[Facebook Sync Remote] Error: {e}")
+        _trigger_vm_sync("/api/facebook/sync")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 
@@ -493,14 +497,21 @@ def youtube_status():
         return {"authorized": False, "message": f"Validation error: {e}"}
 
 @router.post("/api/youtube/sync")
-async def youtube_sync_now():
+async def youtube_sync_now(request: Request):
+    from shared import verify_admin
+    verify_admin(request)
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "yt_sync.py")
-        spec = importlib.util.spec_from_file_location("yt_sync", sync_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mod.sync_youtube()
+        if os.path.exists(sync_path):
+            try:
+                spec = importlib.util.spec_from_file_location("yt_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_youtube()
+            except Exception as e:
+                print(f"[YouTube Sync] Error: {e}")
+        _trigger_vm_sync("/api/youtube/sync")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 
@@ -648,6 +659,10 @@ h1{{color:#ff4040}}p{{color:#94a3b8}}</style></head>
         else:
             print(f"[Pinterest Auth] Exchange returned status {resp.status_code}: {resp.text[:200]}")
             print("[Pinterest Auth] Preserving existing working tokens from backup.")
+            return HTMLResponse(
+                f"<h1>Authorization Failed</h1><p>Pinterest returned HTTP {resp.status_code}: {resp.text[:200]}</p>",
+                status_code=400,
+            )
 
         return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Pinterest Connected!</title>
 <style>body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#0c101d;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
@@ -658,13 +673,10 @@ h1{{color:#00c864;font-size:24px;margin-bottom:12px}}p{{color:#94a3b8;line-heigh
 <p style="color:#64748b;font-size:13px;margin-top:20px">You can close this tab and return to Meloscribe Studio.</p></div></body></html>""")
     except Exception as e:
         print(f"[Pinterest Auth] Error: {e}")
-        return HTMLResponse(f"""<!DOCTYPE html><html><head><title>Pinterest Connected!</title>
-<style>body{{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;background:#0c101d;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}}
-.box{{background:rgba(0,200,100,0.06);border:1px solid rgba(0,200,100,0.3);border-radius:16px;padding:40px;max-width:480px;text-align:center}}
-h1{{color:#00c864;font-size:24px;margin-bottom:12px}}p{{color:#94a3b8;line-height:1.6;font-size:15px}}</style></head>
-<body><div class="box"><h1>&#10003; Pinterest Connected!</h1>
-<p>Your Pinterest Account (<strong>meloscribe</strong>) is verified and connected.</p>
-<p style="color:#64748b;font-size:13px;margin-top:20px">You can close this tab and return to Meloscribe Studio.</p></div></body></html>""")
+        return HTMLResponse(
+            f"<h1>Pinterest Authorization Error</h1><p>{e}</p>",
+            status_code=500,
+        )
 
 @router.post("/api/pinterest/oauth-url")
 async def pinterest_oauth_url(request: Request):
@@ -906,14 +918,21 @@ def pinterest_restore():
     return {"status": "error", "message": "No backup found to restore"}
 
 @router.post("/api/pinterest/sync")
-async def pinterest_sync_now():
+async def pinterest_sync_now(request: Request):
+    from shared import verify_admin
+    verify_admin(request)
     def _run():
         import importlib.util
         sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "pinterest_sync.py")
-        spec = importlib.util.spec_from_file_location("pinterest_sync", sync_path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mod.sync_pinterest()
+        if os.path.exists(sync_path):
+            try:
+                spec = importlib.util.spec_from_file_location("pinterest_sync", sync_path)
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_pinterest()
+            except Exception as e:
+                print(f"[Pinterest Sync] Error: {e}")
+        _trigger_vm_sync("/api/pinterest/sync")
     threading.Thread(target=_run, daemon=True).start()
     return {"status": "sync started"}
 
@@ -1056,13 +1075,12 @@ def pinterest_create_pin(payload: PinterestPinPayload):
             pin_info = resp.json()
             return {"success": True, "pin_id": pin_info.get("id"), "message": "Pin created successfully!"}
         else:
-            import random
-            mock_id = "".join([str(random.randint(0, 9)) for _ in range(19)])
-            print(f"[Pinterest Audit] Real API rejected with status {resp.status_code}, returning mock success ID: {mock_id}")
-            return {"success": True, "pin_id": mock_id, "message": "Pin created successfully via Pinterest Content API v5!"}
+            raise HTTPException(
+                status_code=502,
+                detail=f"Pinterest API rejected pin creation ({resp.status_code}): {resp.text[:200]}",
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        import random
-        mock_id = "".join([str(random.randint(0, 9)) for _ in range(19)])
-        print(f"[Pinterest Audit] Exception: {e}, returning mock success ID: {mock_id}")
-        return {"success": True, "pin_id": mock_id, "message": "Pin created successfully! (Simulated)"}
+        raise HTTPException(status_code=500, detail=f"Failed to create Pinterest pin: {e}")
 

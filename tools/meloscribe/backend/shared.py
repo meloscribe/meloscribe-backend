@@ -89,6 +89,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 active_websockets = []
 log_buffer = []
+main_loop = None
 active_workflow_task = {
     "task": None,
     "stop_event": None,

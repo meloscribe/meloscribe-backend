@@ -25,7 +25,8 @@ from shared import (
     _error_log,
     CREATION_FLAGS,
     TOOLS_DIR,
-    db_path
+    db_path,
+    load_settings
 )
 
 from routes_public import router as public_router
@@ -47,7 +48,7 @@ app = FastAPI(
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://(.*\.)?meloscribe\.(com|dev)|https://(.*\.)?meloscribesheets\.com|http://localhost:\d+|http://127\.0\.0\.1:\d+|http://192\.168\.\d+\.\d+(:\d+)?",
+    allow_origin_regex=r"https://(.*\.)?meloscribe\.(com|dev)|https://(.*\.)?meloscribesheets\.com|https://.*\.vercel\.app|https://.*\.ngrok-free\.(app|dev)|https?://localhost(:\d+)?|https?://127\.0\.0\.1(:\d+)?|http://192\.168\.\d+\.\d+(:\d+)?|http://10\.\d+\.\d+\.\d+(:\d+)?|capacitor://localhost",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,11 +67,6 @@ PUBLIC_ROUTES = [
     "/api/notify/unsubscribe",
     "/api/kofi/webhook",
     "/api/webhooks/stripe",
-    "/api/facebook/sync",
-    "/api/instagram/sync",
-    "/api/tiktok/sync",
-    "/api/youtube/sync",
-    "/api/pinterest/sync",
     "/callback",
     "/pinterest-callback",
     "/api/events/outbound",
@@ -79,22 +75,32 @@ PUBLIC_ROUTES = [
 
 @app.middleware("http")
 async def security_middleware(request: Request, call_next):
-    # Bypass auth check for local development on Windows
-    if platform.system() == "Windows":
+    # Bypass auth check for direct local desktop requests on Windows (but enforce auth for ngrok/proxied hosts)
+    client_host = request.client.host if request.client else ""
+    req_host = (request.headers.get("host") or "").lower()
+    forwarded = request.headers.get("x-forwarded-for") or request.headers.get("x-forwarded-host")
+    if platform.system() == "Windows" and client_host in ("127.0.0.1", "::1", "testclient", "") and "ngrok" not in req_host and not forwarded:
         return await call_next(request)
         
+    if request.method == "OPTIONS":
+        return await call_next(request)
+
     path = request.url.path
     if any(path.startswith(p) for p in PUBLIC_ROUTES):
         return await call_next(request)
         
-    # Check X-Meloscribe-Key header on server
-    api_key_header = request.headers.get("X-Meloscribe-Key")
+    # Check X-Meloscribe-Key or x-admin-passcode header/query on server
+    api_key_header = request.headers.get("X-Meloscribe-Key") or request.query_params.get("api_key")
     stored_key = get_server_api_key()
+    passcode = request.headers.get("x-admin-passcode") or request.query_params.get("passcode") or request.query_params.get("admin_passcode")
+    expected_passcode = str(load_settings().get("admin_passcode", "579110"))
     
-    if not stored_key:
+    if not stored_key and not expected_passcode:
         return JSONResponse(content={"error": "API key system uninitialized on server."}, status_code=500)
         
-    if api_key_header != stored_key:
+    key_ok = bool(stored_key and api_key_header and api_key_header == stored_key)
+    pass_ok = bool(passcode and str(passcode) == expected_passcode)
+    if not (key_ok or pass_ok):
         # Return a beautiful HTML page for browser requests, JSON for API clients
         accept = request.headers.get("accept", "")
         if "text/html" in accept:
@@ -267,6 +273,19 @@ def periodic_background_sync():
         except Exception as e:
             log_error(f"[Background Sync] Instagram sync error: {e}")
 
+        # 2b. Facebook Sync
+        try:
+            sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "fb_sync.py")
+            if os.path.exists(sync_path):
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("fb_sync", sync_path)
+                mod  = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                mod.sync_facebook()
+                log_error("[Background Sync] Facebook metrics sync: SUCCESS")
+        except Exception as e:
+            log_error(f"[Background Sync] Facebook sync error: {e}")
+
         # 3. TikTok Sync
         try:
             sync_path = str(TOOLS_DIR / "meloscribe" / "backend" / "tiktok_sync.py")
@@ -368,7 +387,13 @@ def run_automatic_backup():
 _sync_errors = []
 
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
+    import asyncio
+    import shared
+    try:
+        shared.main_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
     initialize_server_api_key()
     
     # Run local automatic backup (Windows local environment only) in background
