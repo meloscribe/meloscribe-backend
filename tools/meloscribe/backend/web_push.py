@@ -1763,8 +1763,8 @@ def get_pulse_summary(request: Request):
     conn = get_db_connection()
     c = conn.cursor()
 
-    # 1. KPIs
-    sales_filter = "transaction_id NOT LIKE 'cs_test_%' AND email != '2beers.sm@gmail.com' AND status = 'active'"
+    # 1. KPIs (Paid orders only — exclude free downloads, gifts, and sandbox)
+    sales_filter = "transaction_id NOT LIKE 'cs_test_%' AND transaction_id NOT LIKE 'free_%' AND transaction_id NOT LIKE 'gift_%' AND email != '2beers.sm@gmail.com' AND status = 'active' AND CAST(amount AS REAL) > 0"
 
     c.execute(f"SELECT SUM(amount) as rev_all, COUNT(id) as count_all FROM purchases WHERE {sales_filter}")
     r_all = c.fetchone()
